@@ -1,10 +1,12 @@
 <?php
+
 /***************************************************************************
  *                              template.php
  *                            -------------------
  *   begin                : Saturday, Feb 13, 2001
- *   change               : Thirsday, Aug 03, 2006
- *   copyright            : (C) 2001 The phpBB Group + VMX
+ *   change               : Thirsday, Sep 27, 2006
+ *   copyright            : (C) 2001 The phpBB Group
+ *   copyright            : (C) 2006 VMX
  *   email                : vmx@yourcmc.ru
  *
  ***************************************************************************/
@@ -22,8 +24,6 @@
  * Template class. By Nathan Codding of the phpBB group.
  * The interface was originally inspired by PHPLib templates,
  * and the template file formats are quite similar.
- *
- * 2006 - Corrected and modified by Vitali Filippov [VMX]
  */
 
 /**
@@ -51,6 +51,8 @@
  * {и_так_далее.#} = номер текущей итерации блока "блок1.блок2.и_так_далее", если "и_так_далее" сейчас вложен в "блок1.блок2"
  * {блок1.блок2.и_так_далее.VAR|VAR2} = подстановка переменной VAR, а если она не задана - то VAR2 блока "блок1.блок2.и_так_далее"
  * <!--# Комментарий, не попадающий в выходной HTML файл #-->
+ * <!-- IF блок1.блок2.и_так_далее.VAR --> [[...]] <!-- END --> = показать [[...]] только если переменная VAR текущей итерации блока "блок1.блок2.и_так_далее" задана
+ * <!-- IF! блок1.блок2.и_так_далее.VAR --> [[...]] <!-- END --> = показать [[...]] только если переменная VAR текущей итерации блока "блок1.блок2.и_так_далее" НЕ задана
  */
 
 class Template
@@ -68,6 +70,7 @@ class Template
 	// if it's a root-level variable, it'll be like this:
 	// $this->_tpldata[.][0][varname] == value
 	var $_tpldata = array();
+	var $_tpldata_stack = array();
 
 	// Hash of filenames for each template handle.
 	var $files = array();
@@ -89,6 +92,41 @@ class Template
 	var $wrapper = false;
 
 	/**
+	 *
+	 * $conv defines available conversions. $conv[0] define conversions that take 0 parameters,
+	 * $conv[1] - 1.
+	 *
+	 * By default, the following conversions are available:
+	 *  T = strip_tags
+	 *  i = intval
+	 *  b = nl2br
+	 *  h = html_strip       [requires lib.php by VMX]
+	 *  H = html_strip_pbr   [requires lib.php by VMX]
+	 *  s = htmlspecialchars
+	 *  S = html_pbr         [requires lib.php by VMX]
+	 *  l = strtolower
+	 *  u = strtoupper
+	 *  c### = strlimit (###) where ### is number of any length
+	 *
+	 */
+	var $conv = array (
+		0 => array (
+				'T' => 'strip_tags',
+				'i' => 'intval', 
+				'b' => 'nl2br',
+				'h' => 'html_strip',
+				'H' => 'html_strip_pbr',
+				's' => 'htmlspecialchars',
+				'S' => 'html_pbr',
+				'l' => 'strtolower',
+				'u' => 'strtoupper'
+			),
+		1 => array (
+				'c' => 'strlimit'
+			)
+	);
+
+	/**
 	 * Constructor. Simply sets the root dir.
 	 */
 	function Template($root = ".")
@@ -103,6 +141,23 @@ class Template
 	function destroy()
 	{
 		$this->_tpldata = array();
+	}
+
+	/**
+	 * Saves current template data in template data stack and then destroys data.
+	 */
+	function datapush()
+	{
+		array_push ($this->_tpldata_stack, $this->_tpldata);
+	}
+
+	/**
+	 * Restores last saved template data from template data stack.
+	 */
+	function datapop()
+	{
+		if (count ($this->_tpldata_stack))
+			$this->_tpldata = array_pop ($this->_tpldata_stack);
 	}
 
 	/**
@@ -230,6 +285,11 @@ class Template
 	 */
 	function assign_block_vars($blockname, $vararray)
 	{
+		if ($blockname == '.' || !$blockname)
+			$this->assign_vars ($vararray);
+		if ($blockname{0} == '.')
+			$blockname = substr ($blockname, 1);
+		$vararray = $this->array_do_conversions ($vararray);
 		if (strstr($blockname, '.'))
 		{
 			// Nested block.
@@ -266,6 +326,11 @@ class Template
 	 */
 	function append_block_vars($blockname, $vararray)
 	{
+		if ($blockname == '.' || !$blockname)
+			$this->assign_vars ($vararray);
+		if ($blockname{0} == '.')
+			$blockname = substr ($blockname, 1);
+		$vararray = $this->array_do_conversions ($vararray);
 		if (strstr($blockname, '.'))
 		{
 			// Nested block.
@@ -293,10 +358,10 @@ class Template
 	 * Root-level variable assignment. Adds to current assignments, overriding
 	 * any existing variable assignment with the same name.
 	 */
-	function assign_vars($vararray)
+	function assign_vars ($vararray)
 	{
-		reset ($vararray);
-		while (list($key, $val) = each($vararray))
+		$vararray = $this->array_do_conversions ($vararray);
+		foreach ($vararray as $key => $val)
 			$this->_tpldata['.'][0][$key] = $val;
 		return true;
 	}
@@ -305,12 +370,16 @@ class Template
 	 * Root-level variable assignment. Adds to current assignments, overriding
 	 * any existing variable assignment with the same name.
 	 */
-	function assign_var($varname, $varval)
+	function assign_var ($varname, $varval)
 	{
+		if (($p = strpos ($varname, '/')) !== false)
+		{
+			eval ('$varval = ' . $this->generate_conversion_ref ('$varval', substr ($varname, $p+1)) . ';');
+			$varname = substr ($varname, 0, $p);
+		}
 		$this->_tpldata['.'][0][$varname] = $varval;
 		return true;
 	}
-
 
 	/**
 	 * Generates a full path+filename for the given filename, which can either
@@ -381,28 +450,20 @@ class Template
 		$default_addmode = $do_not_echo ? '$' . $retvar . ' .= ' : 'echo ';
 
 		// Сначала <!--# комментарии #-->
-		while (preg_match ('%\s*<!--#%', $code, $m, PREG_OFFSET_CAPTURE))
-		{
-			$p = $m[0][1];
-			$l = strlen($m[0][0]);
-			if (($p2 = strpos ($code, '#-->', $p+$l)) !== false)
-				$code = substr ($code, 0, $p) . substr ($code, $p2+4);
-			else
-				break;
-		}
+		$code = preg_replace ('/\s*<!--#.*?#-->/s', '', $code);
 
-		// Вытаскиваем <!-- BEGIN --> и <!-- END --> на отдельные "строки"
-		$code = str_replace ("\r", "", $code);
-		while (preg_match ("#(\n|^)[ \t]*(<!-- (?:BEGIN|END) (?:[^<>]*) -->)[ \t]*(\n|$)#", $code, $m, PREG_OFFSET_CAPTURE))
-		{
-			$rp = "\x1" . $m[2][0] . "\x1\n";
-			$code = substr ($code, 0, $m[0][1]) . $rp . substr ($code, $m[0][1]+strlen($m[0][0]));
-		}
-		// Собственно говоря, то что выше - чисто для красоты выходного HTML...
-		while (preg_match ("#([^\x1])(<!-- (?:BEGIN|END) (?:[^<>]*) -->)#", $code, $m, PREG_OFFSET_CAPTURE))
-			$code = preg_replace ("#([^\x1])(<!-- (?:BEGIN|END) (?:[^<>]*) -->)#", "\\1\x1\\2", $code);
-		while (preg_match ("#(<!-- (?:BEGIN|END) (?:[^<>]*) -->)([^\x1])#", $code, $m, PREG_OFFSET_CAPTURE))
-			$code = preg_replace ("#(<!-- (?:BEGIN|END) (?:[^<>]*) -->)([^\x1])#", "\\1\x1\\2", $code);
+		# форматирование кода для красоты
+		$code = preg_replace ('/^\s*(<!-- (?:BEGIN|END|IF!?) .*?-->)\s*$/m', "\x01\\1\x01\n", $code);
+		$ncode = $code;
+		do {
+			$code = $ncode;
+			$ncode = preg_replace ("/([^\x01])(<!-- (?:BEGIN|END|IF!?) .*?-->)/m", "\\1\x01\\2", $code);
+		} while ($ncode != $code);
+		$ncode = $code;
+		do {
+			$code = $ncode;
+			$ncode = preg_replace ("/<!-- (?:BEGIN|END|IF!?) .*?-->(?=[^\x01])/m", "\\0\x01", $code);
+		} while ($ncode != $code);
 
 		// replace \ with \\ and then ' with \'.
 		$code = str_replace('\\', '\\\\', $code);
@@ -413,9 +474,9 @@ class Template
 
 		// change template varrefs into PHP varrefs
 
-		// This one will handle varrefs WITH namespaces
+		// handle all varrefs (instead of only non-root)
 		$varrefs = array();
-		preg_match_all('#\{(([a-z0-9\-_]+?\.)+?)([a-z0-9\-_]+?)(\|([a-z0-9\-_]+?))?\}#is', $code, $varrefs);
+		preg_match_all ('#\{(([a-z0-9\-_]+?\.)+)?([a-z0-9\-_/]+?)(\|([a-z0-9\-_/]+?))?\}#is', $code, $varrefs);
 		$varcount = sizeof($varrefs[1]);
 		for ($i = 0; $i < $varcount; $i++)
 		{
@@ -425,12 +486,12 @@ class Template
 				$varoption = $varrefs[5][$i];
 			else
 				$varoption = false;
-			$new = $this->generate_block_varref($namespace, $varname, $varoption);
-			$code = str_replace($varrefs[0][$i], $new, $code);
+			$new = $this->generate_block_varref ($namespace, $varname, $varoption);
+			$code = str_replace ($varrefs[0][$i], $new, $code);
 		}
 
-		// This will handle the remaining root-level varrefs
-		$code = preg_replace('#\{([a-z0-9\-_]*?)\}#is', '\' . ( ( isset($this->_tpldata[\'.\'][0][\'\1\']) ) ? $this->_tpldata[\'.\'][0][\'\1\'] : \'\' ) . \'', $code);
+		// // This will handle the remaining root-level varrefs
+		// $code = preg_replace('#\{([a-z0-9\-_]*?)\}#is', '\' . ( ( isset($this->_tpldata[\'.\'][0][\'\1\']) ) ? $this->_tpldata[\'.\'][0][\'\1\'] : \'\' ) . \'', $code);
 
 		// replace \n with \n\x1
 		$code = str_replace ("\n", "\n\x1", $code);
@@ -438,7 +499,6 @@ class Template
 
 		// Break code up into lines
 		$code_lines = explode("\x1", $code);
-//		print_r ($code_lines);
 
 		$block_nesting_level = 0;
 		$block_names = array();
@@ -479,25 +539,6 @@ class Template
 					$cbplus = '+='.$nem[1];
 				}
 				
-				/*if (isset ($m[3]))
-				{
-					$addmodes[$block_nesting_level][2] = 1;
-					if ($m[3] == 'APPEND')
-					{
-						$addto = substr ($m[4], 0, strlen($m[4]) - 1);
-						$addto = $this->generate_block_data_ref($addto, true) . '[\'' . $m[6] . '\']';
-						$addmodes[$block_nesting_level][0] = 'if (isset (' . $addto . ')) ' . $addto . ' .= ';
-						$addmodes[$block_nesting_level][1] = ';';
-					}
-					else if ($m[3] == 'PREPEND')
-					{
-						$addto = substr ($m[4], 0, strlen($m[4]) - 1);
-						$addto = $this->generate_block_data_ref($addto, true) . ' [\'' . $m[6] . '\']';
-						$addmodes[$block_nesting_level][0] = 'if (isset (' . $addto . ')) ' . $addto . ' = ';
-						$addmodes[$block_nesting_level][1] = ' . ' . $addto . ';';
-					}
-				}*/
-				
 				if ($block_nesting_level < 2)
 				{
 					// Block is not nested.
@@ -522,17 +563,25 @@ class Template
 					// Create the for loop code to iterate over this block.
 					if (!$cbcount)
 						$code_lines[$i] = '$_' . $m[1] . '_count = ( isset(' . $varref . ') ) ? sizeof(' . $varref . ') : ' . $addmodes[$block_nesting_level][2] . ';';
-					else $code_lines[$i] = '$_' . $m[1] . '_count = ' . $cbcount . ';';
+					else $code_lines[$i] = '$_' . $m[1] . '_count = min (@sizeof(' . $varref . '), ' . $cbcount . ');';
 					$code_lines[$i] .= "\n" . 'for ($_' . $m[1] . '_i = ' . $cbstart . '; $_' . $m[1] . '_i < $_' . $m[1] . '_count; $_' . $m[1] . '_i' . $cbplus . ')';
 					$code_lines[$i] .= "\n" . '{';
 				}
 			}
-			else if (preg_match('#<!-- END (.*?) -->#', $code_lines[$i], $m))
+			else if (preg_match('#<!-- END (.*?)-->#', $code_lines[$i], $m))
 			{
-				// We have the end of a block.
-				unset($block_names[$block_nesting_level]);
-				$block_nesting_level--;
+				// Make strict check - only <!-- END block --> corresponds to <!-- BEGIN block -->
+				if ($block_nesting_level > 0 && trim ($m[1]) == $block_names[$block_nesting_level])
+				{
+					unset($block_names[$block_nesting_level]);
+					$block_nesting_level--;
+				}
 				$code_lines[$i] = '} // END ' . $m[1];
+			}
+			else if (preg_match('#<!-- IF(!?) ((?:[a-zA-Z0-9\-_]+\.)+)?([a-zA-Z0-9\-_/]+) -->#is', $code_lines[$i], $m))
+			{
+				$varref = $this->generate_block_data_ref (substr ($m[2], 0, strlen($m[2])-1), true) . '[\'' . $m[3] . '\']';
+				$code_lines[$i] = 'if('.(empty($m[1]) ? '!' : '').'empty('.$varref.')) {';
 			}
 			else if ($code_lines[$i] != '')
 			{
@@ -560,8 +609,14 @@ class Template
 	 */
 	function generate_block_varref($namespace, $varname, $varoption = false)
 	{
+		$varconv = false;
+		if (($p = strpos ($varname, '/')) !== false)
+		{
+			$varconv = substr ($varname, $p+1);
+			$varname = substr ($varname, 0, $p);
+		}
 		// Strip the trailing period.
-		$namespace = substr($namespace, 0, strlen($namespace) - 1);
+		$namespace = substr ($namespace, 0, strlen($namespace)-1);
 		// Get a reference to the data block for this namespace.
 		$varref = $this->generate_block_data_ref($namespace, true);
 		// Prepend the necessary code to stick this in an echo line.
@@ -571,7 +626,10 @@ class Template
 			$varoption = '((isset(' . $varref . '[\'' . $varoption . '\']' . ')) ? ' . $varref . '[\'' . $varoption . '\'] : \'\')';
 		// Append the variable reference.
 		$varref .= '[\'' . $varname . '\']';
-		$varref = '\' . ( ( isset(' . $varref . ') ) ? ' . $varref . ' : ' . $varoption . ' ) . \'';
+		$varref = '((isset(' . $varref . ')) ? ' . $varref . ' : ' . $varoption . ')';
+		if ($varconv)
+			$varref = $this->generate_conversion_ref ($varref, $varconv);
+		$varref = '\' . ' . $varref . ' . \'';
 		return $varref;
 	}
 
@@ -594,19 +652,58 @@ class Template
 		$varref = '$this->_tpldata';
 		// Build up the string with everything but the last child.
 		for ($i = 0; $i < $blockcount; $i++)
-		{
 			$varref .= '[\'' . $blocks[$i] . '.\'][$_' . $blocks[$i] . '_i]';
-		}
 		// Add the block reference for the last child.
 		$varref .= '[\'' . $blocks[$blockcount] . '.\']';
 		// Add the iterator for the last child if requried.
 		if ($include_last_iterator)
-		{
 			$varref .= '[$_' . $blocks[$blockcount] . '_i]';
-		}
 		return $varref;
 	}
 
+	/**
+	 * Конвертирует те переменные массива $array, имена которых заданы как NAME/conv
+	 */
+	function array_do_conversions ($array)
+	{
+		$ra = array ();
+		foreach ($array as $key => $val)
+		{
+			if (($p = strpos ($key, '/')) !== false)
+			{
+				eval ('$val = ' . $this->generate_conversion_ref ('$val', substr ($key, $p+1)) . ';');
+				$key = substr ($key, 0, $p);
+			}
+			$ra [$key] = $val;
+		}
+		return $ra;
+	}
+
+	/**
+	 * Generates function call series needed to perform conversion(s) according to $conv
+	 */
+	function generate_conversion_ref ($val, $conv)
+	{
+		$cv = array ();
+		$l = strlen ($conv);
+		for ($i = 0; $i < $l; $i++)
+		{
+			if (array_key_exists ($conv{$i}, $this->conv[0]))
+				$cv [$conv{$i}] = true;
+			else if (array_key_exists ($conv{$i}, $this->conv[1]))
+				$cv [$conv{$i}] = 0+substr ($conv,$i+1);
+		}
+		$cv = array_reverse ($cv);
+		$r = $val;
+		foreach ($cv as $k => $v)
+		{
+			if ($v === true)
+				$r = $this->conv[0][$k] . '(' . $r . ')';
+			else if (is_numeric ($v))
+				$r = $this->conv[1][$k] . '(' . $r . ',' . $v . ')';
+		}
+		return $r;
+	}
 }
 
 ?>
