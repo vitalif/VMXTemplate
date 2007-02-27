@@ -6,8 +6,8 @@
  *   begin                : Saturday, Feb 13, 2001
  *   change               : Thirsday, Sep 27, 2006
  *   copyright            : (C) 2001 The phpBB Group
- *   copyright            : (C) 2006 VMX
- *   email                : vmx@yourcmc.ru
+ *   copyright            : (C) 2006-2007 VitaliF [VMX]
+ *   email                : vitalif@yourcmc.ru
  *
  ***************************************************************************/
 
@@ -59,12 +59,10 @@ class Template
 {
 	var $classname = "Template";
 
-	// set this variable to cache directory and template compiler will use caching
+	// Set this variable to cache directory and template compiler will use caching
 	var $cachedir = false;
 
-	// variable that holds all the data we'll be substituting into
-	// the compiled templates.
-	// ...
+	// Variable that holds all the data we'll be substituting into the compiled templates.
 	// This will end up being a multi-dimensional array like this:
 	// $this->_tpldata[block.][iteration#][child.][iteration#][child2.][iteration#][variablename] == value
 	// if it's a root-level variable, it'll be like this:
@@ -286,7 +284,7 @@ class Template
 	function assign_block_vars($blockname, $vararray)
 	{
 		if ($blockname == '.' || !$blockname)
-			$this->assign_vars ($vararray);
+			return $this->assign_vars ($vararray);
 		if ($blockname{0} == '.')
 			$blockname = substr ($blockname, 1);
 		$vararray = $this->array_do_conversions ($vararray);
