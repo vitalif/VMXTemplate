@@ -8,8 +8,8 @@ package VMX::Common;
 use DBI;
 require Exporter;
 
-@EXPORT_OK = qw(min trim htmlspecialchars strip_tags file_get_contents fetchall_hashref);
-%EXPORT_TAGS = (all => [qw(min trim htmlspecialchars strip_tags file_get_contents)]);
+@EXPORT_OK = qw(min trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el);
+%EXPORT_TAGS = (all => [qw(min trim htmlspecialchars strip_tags file_get_contents ar1el)]);
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
@@ -39,6 +39,15 @@ sub min {
     my $r = shift;
     foreach (@_) { $r = $_ if $r > $_; }
     return $r;
+}
+
+##
+ # shift arrayref
+ ##
+sub ar1el {
+	my $a = shift;
+	return undef unless 'ARRAY' eq ref $a;
+	return shift @$a;
 }
 
 ##
