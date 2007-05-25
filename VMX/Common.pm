@@ -92,9 +92,9 @@ sub strip_tags {
 sub file_get_contents {
     my ($tmp, $res);
     open ($tmp, '<'.$_[0]);
-    if ($tmp)
-    {
-        $res = join '', <$tmp>;
+    if ($tmp) {
+		local $/ = undef;
+        $res = <$tmp>;
         close ($tmp);
     }
     return $res;
