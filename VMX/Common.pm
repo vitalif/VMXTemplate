@@ -6,10 +6,11 @@
 package VMX::Common;
 
 use DBI;
+use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el);
-%EXPORT_TAGS = (all => [qw(min trim htmlspecialchars strip_tags file_get_contents ar1el)]);
+@EXPORT_OK = qw(min trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5);
+%EXPORT_TAGS = (all => [qw(min trim htmlspecialchars strip_tags file_get_contents ar1el filemd5)]);
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
@@ -134,6 +135,19 @@ sub fetchall_hashref {
         @$ref{@$NAME} = @row;
     }
     return $rows;
+}
+
+sub filemd5 {
+    my ($file) = @_;
+    my $f;
+    my $r;
+    if (open $f, "<$file") {
+        my $ctx = Digest::MD5->new;
+        $ctx->addfile($f);
+        $r = $ctx->hexdigest;
+        close $f;
+    }
+    return $r;
 }
 
 1;
