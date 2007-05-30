@@ -9,8 +9,8 @@ use DBI;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5);
-%EXPORT_TAGS = (all => [qw(min trim htmlspecialchars strip_tags file_get_contents ar1el filemd5)]);
+@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5);
+%EXPORT_TAGS = (all => [qw(min max trim htmlspecialchars strip_tags file_get_contents ar1el filemd5)]);
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
@@ -39,6 +39,17 @@ sub min {
     return undef if (@_ < 1);
     my $r = shift;
     foreach (@_) { $r = $_ if $r > $_; }
+    return $r;
+}
+
+##
+ # Функция возвращает максимальное из значений
+ # $r = max (@list)
+ ##
+sub max {
+    return undef if (@_ < 1);
+    my $r = shift;
+    foreach (@_) { $r = $_ if $r < $_; }
     return $r;
 }
 
