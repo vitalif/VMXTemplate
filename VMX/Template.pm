@@ -119,7 +119,7 @@ sub assign_block_vars {
 
     if (!$block || $block =~ /^\.+$/so) { # если не блок, а корневой уровень
         $self->assign_vars (@_);
-    } elsif ($block !~ /\../) { # если блок, но не вложенный
+    } elsif ($block !~ /\.[^\.]/) { # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
 		$self->{_tpldata}{$block} = [] unless $self->{_tpldata}{$block};
         push @{$self->{_tpldata}{$block}}, $vararray;
@@ -130,7 +130,7 @@ sub assign_block_vars {
         my $lastblock = pop @blocks;
         foreach (@blocks) {
             $ev .= "{'$_.'}";
-            $ev .= "[-1+($ev)]";
+            $ev .= "[-1+\@\{$ev\}]";
         }
         $ev .= "{'$lastblock.'}";
         $ev = "$ev = [] unless $ev; push \@\{$ev\}, \$vararray;";
@@ -162,7 +162,7 @@ sub append_block_vars {
         my @blocks = split /\.+/, $block;
         foreach (@blocks) {
             $ev .= "{'$_.'}";
-            $ev .= "[-1+($ev)]";
+            $ev .= "[-1+\@\{$ev\}]";
         }
         $ev = "\$ev{\$k} = \$vararray{\$k} foreach \$k (keys \%vararray);";
         eval ($ev);
