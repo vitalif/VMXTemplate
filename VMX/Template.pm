@@ -273,7 +273,7 @@ sub compile {
             # либо min (N, $cbcount) если $cbcount задано
             # либо просто N если нет
             if ($nesting < 2) { # блок не вложенный
-                if ($cbcount) { $_ = "\$_${1}_count = min (0+(\$self->{_tpldata}{'$1.'}), " . $cbcount . ');'; }
+                if ($cbcount) { $_ = "\$_${1}_count = min (scalar(\@\{\$self->{_tpldata}{'$1.'}\}), " . $cbcount . ');'; }
                 else { $_ = "\$_${1}_count = scalar(\@{\$self->{_tpldata}{'$1.'}});"; }
                 # начало цикла for
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
