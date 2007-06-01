@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 
-=head1 Реализация пресловутого "template.php" на Перле
+=head1 Простой шаблонный движок.
+ Inspired by phpBB templates, которые в свою очередь inspired by
+ phplib templates.
 =cut
 
 package VMX::Template;
@@ -56,7 +58,7 @@ sub set_filenames {
  ##
 sub make_filename {
     my $self = shift;
-    my $fn = $_[0];
+    my ($fn) = @_;
     $fn = $self->{root}.'/'.$fn if ($fn !~ m%^/%o);
     die("Template->make_filename(): file $fn does not exist") unless (-e $fn);
     return $fn;
@@ -98,14 +100,14 @@ sub datapop {
  # $obj->parse ('handle')
  ##
 sub parse {
-    our $self = shift;
+    my $self = shift;
     my $handle = shift;
     die("Template->parse(): couldn't load template file for handle $handle") unless $self->loadfile($handle);
     $self->{compiled_code}{$handle} = $self->compile ($self->{uncompiled_code}{$handle});
-    my $_str = eval ($self->{compiled_code}{$handle});
+    my $str = eval ($self->{compiled_code}{$handle});
     die("Template->parse(): $@") if $@;
-    $_str = &$self->{wrapper} ($_str) if ($self->{wrapper});
-    return $_str;
+    $str = &$self->{wrapper} ($str) if $self->{wrapper};
+    return $str;
 }
 
 ##
@@ -154,7 +156,7 @@ sub append_block_vars {
         $self->assign_vars (@_);
     } elsif ($block !~ /\../) { # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
-        $lastit = $self->{_tpldata}{$block} - 1;
+        $lastit = @{$self->{_tpldata}{$block}} - 1;
         $self->{_tpldata}{$block}[$lastit]{$_} = $vararray{$_} foreach (keys %vararray);
     } else { # если вложенный блок
         my $ev = '$self->{_tpldata}';
@@ -187,9 +189,10 @@ sub assign_vars {
  # $obj->loadfile ($handle)
  ##
 sub loadfile {
-    my ($self, $handle) = @_;
-    return 1 if ($self->{uncompiled_code}{$handle});
-    die("Template->loadfile(): no file specified for handle $handle") unless ($self->{files}{$handle});
+	my $self = shift;
+    my ($handle) = @_;
+    return 1 if $self->{uncompiled_code}{$handle};
+    die("Template->loadfile(): no file specified for handle $handle") unless $self->{files}{$handle};
 
     # если оно false, но задано, значит, код задан, минуя файлы
     if ($self->{files}{$handle})
@@ -198,11 +201,11 @@ sub loadfile {
         my $filepath;
 
         $filepath = $` if $filename =~ m%(?<=/)[^/]*$%;
-        $_ = file_get_contents ($filename);
-        die("Template->loadfile(): file for handle $handle is empty") unless $_;
+        my $cnt = file_get_contents ($filename);
+        die("Template->loadfile(): file for handle $handle is empty") unless $cnt;
 
-        s/\Q$&\E/file_get_contents($1)/eg while (m/<!-- INCLUDE\s+(.*?)\s+-->/go);
-        $self->{uncompiled_code}{$handle} = $_;
+        $cnt =~ s/\Q$&\E/file_get_contents($1)/eg while (m/<!-- INCLUDE\s+(.*?)\s+-->/go);
+        $self->{uncompiled_code}{$handle} = $cnt;
     }
 
     return 1;
@@ -231,9 +234,9 @@ sub compile {
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/^\s*(<!-- (?:BEGIN|END|IF!?) .*?-->)\s*$/\x01$1\x01\n/gom;
-    1 while $code =~ s/(?<=[^\x01])<!-- (?:BEGIN|END|IF!?) .*?-->/\x01$&/gom;
-    1 while $code =~ s/<!-- (?:BEGIN|END|IF!?) .*?-->(?=[^\x01])/$&\x01/gom;
+    $code =~ s/^\s*(<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*$/\x01$1\x01\n/gom;
+    1 while $code =~ s/(?<=[^\x01])<!--\s+(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?=[^\x01])/$&\x01/gom;
 
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
@@ -251,7 +254,7 @@ sub compile {
     @code_lines = split /\x01/, $code;
     foreach (@code_lines) {
         next unless $_;
-        if (/^\s*<!-- BEGIN ([A-Za-z0-9\-_]+?) ([A-Za-z \t\-_0-9]*)-->\s*$/os) { # начало блока
+        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/os) { # начало блока
             $nesting++;
             $block_names[$nesting] = $1;
             $cbstart = 0; $cbcount = ''; $cbplus = '++';
@@ -282,13 +285,19 @@ sub compile {
                 else { $_ = "\$_${1}_count = (\@\{$varref\}) ? scalar(\@\{$varref\}) : 0;"; }
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
             }
-        } elsif (/^\s*<!-- END (.*?)-->\s*$/) {
+        } elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/) {
             # чётко проверяем: блок нельзя завершать чем попало
             delete $block_names[$nesting--] if ($nesting > 0 && trim ($1) eq $block_names[$nesting]);
             $_ = "} # END $1";
-        } elsif (/^\s*<!-- IF(!?) ((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+) -->\s*$/) {
+        } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/) {
             $_ = "if ($1(".$self->generate_block_data_ref(substr($2,0,-1),1)."{'$3'})) {";
-        } else {
+        } elsif (/^\s*<!--\s*REGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/) {
+			$_ = "\$self->{_tpldata}{'.regions'}{'$1'} = <<'____ENDREGION';\nno strict;\nmy \$t='';";
+		} elsif (/^\s*<!--\s*ENDREGION\s*-->\s*$/) {
+			$_ = "return \$t;\n____ENDREGION";
+		} elsif (/^\s*<!--\s*INCREGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/) {
+			$_ = "\$t .= eval(\$self->{_tpldata}{'.regions'}{'$1'});";
+		} else {
             $_ = "\$t .= '$_';";
         }
     }
