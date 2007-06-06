@@ -9,8 +9,8 @@ use DBI;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5);
-%EXPORT_TAGS = (all => [qw(min max trim htmlspecialchars strip_tags file_get_contents ar1el filemd5)]);
+@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5 mysql_quote);
+%EXPORT_TAGS = (all => [qw(min max trim htmlspecialchars strip_tags file_get_contents ar1el filemd5 mysql_quote)]);
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
@@ -159,6 +159,12 @@ sub filemd5 {
         close $f;
     }
     return $r;
+}
+
+sub mysql_quote {
+	my ($a) = @_;
+	$a =~ s/\'/\'\'/gso;
+	return "'$a'";
 }
 
 1;
