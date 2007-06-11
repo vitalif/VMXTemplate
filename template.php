@@ -59,10 +59,12 @@ class Template
 {
 	var $classname = "Template";
 
-	// Set this variable to cache directory and template compiler will use caching
+	// set this variable to cache directory and template compiler will use caching
 	var $cachedir = false;
 
-	// Variable that holds all the data we'll be substituting into the compiled templates.
+	// variable that holds all the data we'll be substituting into
+	// the compiled templates.
+	// ...
 	// This will end up being a multi-dimensional array like this:
 	// $this->_tpldata[block.][iteration#][child.][iteration#][child2.][iteration#][variablename] == value
 	// if it's a root-level variable, it'll be like this:
@@ -179,8 +181,14 @@ class Template
 			return false;
 
 		reset($filename_array);
+		$a = $this->wrapper;
+		$this->wrapper = false;
 		while(list($handle, $filename) = each($filename_array))
+		{
 			$this->files[$handle] = $this->make_filename($filename);
+			$this->rparse($handle);
+		}
+		$this->wrapper = $a;
 
 		return true;
 	}
@@ -450,17 +458,17 @@ class Template
 		// Сначала <!--# комментарии #-->
 		$code = preg_replace ('/\s*<!--#.*?#-->/s', '', $code);
 
-		# форматирование кода для красоты
-		$code = preg_replace ('/^\s*(<!-- (?:BEGIN|END|IF!?) .*?-->)\s*$/m', "\x01\\1\x01\n", $code);
+		// форматирование кода для красоты
+		$code = preg_replace ('/^\s*(<!-- (?:BEGIN|END|IF!?|INCREGION|REGION|ENDREGION) .*?-->)\s*$/m', "\x01\\1\x01\n", $code);
 		$ncode = $code;
 		do {
 			$code = $ncode;
-			$ncode = preg_replace ("/([^\x01])(<!-- (?:BEGIN|END|IF!?) .*?-->)/m", "\\1\x01\\2", $code);
+			$ncode = preg_replace ("/([^\x01])(<!-- (?:BEGIN|END|IF!?|INCREGION|REGION|ENDREGION) .*?-->)/m", "\\1\x01\\2", $code);
 		} while ($ncode != $code);
 		$ncode = $code;
 		do {
 			$code = $ncode;
-			$ncode = preg_replace ("/<!-- (?:BEGIN|END|IF!?) .*?-->(?=[^\x01])/m", "\\0\x01", $code);
+			$ncode = preg_replace ("/<!-- (?:BEGIN|END|IF!?|INCREGION|REGION|ENDREGION) .*?-->(?=[^\x01])/m", "\\0\x01", $code);
 		} while ($ncode != $code);
 
 		// replace \ with \\ and then ' with \'.
@@ -506,6 +514,7 @@ class Template
 		$addmodes[0][2] = 0;
 
 		$line_count = sizeof($code_lines);
+		$in_region = false;
 		for ($i = 0; $i < $line_count; $i++)
 		{
 			if (strlen ($code_lines[$i]) == 0)
@@ -581,11 +590,25 @@ class Template
 				$varref = $this->generate_block_data_ref (substr ($m[2], 0, strlen($m[2])-1), true) . '[\'' . $m[3] . '\']';
 				$code_lines[$i] = 'if('.(empty($m[1]) ? '!' : '').'empty('.$varref.')) {';
 			}
-			else if ($code_lines[$i] != '')
+			else if (!$in_region && preg_match('/^\s*<!--\s*REGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/', $code_lines[$i], $m))
+			{
+			    $code_lines[$i] = '$this->regions["'.$m[1].'"] = <<<ENDREGION';
+			    $in_region = true;
+			}
+			else if ($in_region && preg_match('/^\s*<!--\s*ENDREGION\s*-->\s*$/', $code_lines[$i], $m))
+			{
+			    $code_lines[$i] = 'ENDREGION;';
+			    $in_region = false;
+			}
+			else if (preg_match('/^\s*<!--\s*INCREGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/', $code_lines[$i], $m))
+			    $code_lines[$i] = 'eval($this->regions['.$m[1].']);';
+			else if (!preg_match('/^\s*$/', $code_lines[$i]))
 			{
 				// We have an ordinary line of code [changed: VMX]
 				$code_lines[$i] = $addmodes[$block_nesting_level][0] . '\'' . $code_lines[$i] . '\'' . $addmodes[$block_nesting_level][1];
 			}
+			if ($in_region && !preg_match('/<<<ENDREGION$/', $code_lines[$i]))
+			    $code_lines[$i] = str_replace('$', '\\$', $code_lines[$i]);
 		}
 		// Bring it back into a single string of lines of code.
 		$code = implode("\n", $code_lines);
