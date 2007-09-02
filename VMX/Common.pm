@@ -24,7 +24,7 @@ sub import {
     *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
     *DBI::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
     $DBI::DBI_methods{st}{fetchall_hashref} = { U =>[1,2,'[ $key_field ]'] };
-    $DBI::DBI_methods{db}{selectall_hashref} = { U =>[2,3,'$statement [, $keyfield [, \%attr [, @bind_params ] ] ]'], O=>0x2000 };
+    $DBI::DBI_methods{db}{selectall_hashref} = { U =>[2,0,'$statement [, $keyfield [, \%attr [, @bind_params ] ] ]'], O=>0x2000 };
 	$Exporter::ExportLevel = 1;
     my $r = Exporter::import(@_);
 	$Exporter::ExportLevel = 0;
