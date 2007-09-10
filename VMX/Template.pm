@@ -21,18 +21,20 @@ sub new {
     my %args = @_;
     $class = ref ($class) || $class;
     my %data = (
-        'root' => '.',
-        'conv' => [
+        root => '.',
+        conv => [
                 {
                     '<' => 'strip_tags',
                     'i' => 'int',
                     's' => 'htmlspecialchars',
                     'l' => 'lc',
-                    'u' => 'uc'
+                    'u' => 'uc',
                 }, {
                     #'c' => 'strlimit'
                 }
             ],
+		lang => {
+		},
         %args
     );
     bless \%data, $class;
@@ -50,6 +52,23 @@ sub set_filenames {
         $self->{files}{$k} = $self->make_filename($v);
     }
     return 1;
+}
+
+##
+ # Функция загружает файлы переводов (внутри хеши)
+ # $obj->load_lang ($filename, $filename, ...);
+ ##
+sub load_lang {
+	my $self = shift;
+	my $new;
+	my $i = 0;
+	foreach (@_) {
+		$new = do $_;
+		unless ($@) {
+			$self->{lang}->{$_} = $new->{$_}, $i++ foreach keys %$new;
+		}
+	}
+	return $i;
 }
 
 ##
@@ -234,18 +253,21 @@ sub compile {
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/^\s*(<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*$/\x01$1\x01\n/gom;
-    1 while $code =~ s/(?<=[^\x01])<!--\s+(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?=[^\x01])/$&\x01/gom;
-
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?!\x01)/$&\x01/gom;
+	
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
 
     # номера итераций
     $code =~ s/\{([a-z0-9\-_]+)\.#\}/\'.(1+(\$_${1}_i)?\$_${1}_i:0)).\'/gois;
 
-    # подстановки переменных
+    # подстановки переменных {block.block.[...].variable[|alternative]}
     $code =~ s%\{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_/]+)(?:\|([a-z0-9\-_/]+))?\}%$self->generate_block_varref($1,$2,$3)%goise;
+
+	# переводы <!-- L section.section.section VARIABLE|"string" -->
+	$code =~ s%<!--\s+L\s+((?:\w+\.)*\w+)\s+(\"(?:[^\\\"]+|\\\"|\\\\)*\"|(?:[a-z0-9\-_]+\.)*(?:[a-z0-9\-_/]+))\s+-->%$self->generate_l_ref($1,$2)%goise;
 
     # \n -> \n\x01
     $code =~ s/\n/\n\x01/gos;
@@ -315,16 +337,41 @@ sub compile {
 }
 
 ##
+ # Функция выдаёт код, переводящий строку в кавычках или переменную шаблона
+ # $translation = $obj->generate_l_ref ($section, $what);
+ ##
+sub generate_l_ref {
+	my $self = shift;
+	my ($section, $what) = @_;
+	$section =~ s/\\/\\\\/gso;
+	$section =~ s/\'/\\\'/gso;
+	$section =~ s/\./\'}->{\'/gso;
+	if ($what !~ /^\"/so || $what !~ /\"$/so) {
+		my $block = '';
+		$block = $1 if $what =~ s/^([^\.]+)\.//iso;
+		$what = $self->generate_block_varref ($block, $what);
+		$what =~ s/^\' \. //iso;
+		$what =~ s/ \. \'$//iso;
+	} else {
+		$what =~ s/^\"//so;
+		$what =~ s/\"$//so;
+		$what =~ s/\'/\\\'/gso;
+		$what = "'$what'";
+	}
+	return '\' . ($self->{lang}->{\''.$section.'\'}->{'.$what.'} || \'\') . \'';
+}
+
+##
  # Функция генерирует подстановку переменной шаблона
  # $varref = $obj->generate_block_varref ($namespace, $varname, $varoption)
  ##
 sub generate_block_varref {
     my $self = shift;
-    my ($varconv, $varref);
     my ($namespace, $varname, $varoption) = @_;
+    my ($varconv, $varref);
     ($varname, $varconv) = split '/', $varname, 2;
     # обрезаем точки в конце
-    $namespace =~ s/\.*^//o;
+    $namespace =~ s/\.*$//o;
 
     $varref = $self->generate_block_data_ref ($namespace, 1);
     # готовим альтернативу
@@ -333,9 +380,9 @@ sub generate_block_varref {
 
     # добавляем имя переменной
     $varref .= "{'$varname'}";
-    $varref = "(($varref) ? $varref : $varoption)";
+    $varref = "($varref || $varoption)";
 
-    # # генерируем преобразование [временно отключено]
+    # # генерируем преобразование [not implemented]
     # $varref = $self->generate_conversion_ref ($varref, $varconv) if ($varconv);
     $varref = "' . $varref . '";
     return $varref;
