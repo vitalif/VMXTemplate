@@ -60,10 +60,17 @@ sub set_filenames {
  ##
 sub load_lang {
 	my $self = shift;
-	my $new;
+	return $self->load_lang_hashes(map { do $_ } @_);
+}
+
+##
+ # Функция загружает хеши переводов
+ # $obj->load_lang_hashes ($hash, $hash, ...);
+ ##
+sub load_lang_hashes {
+	my $self = shift;
 	my $i = 0;
-	foreach (@_) {
-		$new = do $_;
+	foreach my $new (@_) {
 		unless ($@) {
 			$self->{lang}->{$_} = $new->{$_}, $i++ foreach keys %$new;
 		}
