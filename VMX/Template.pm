@@ -387,7 +387,7 @@ sub generate_block_varref {
 
     # добавляем имя переменной
     $varref .= "{'$varname'}";
-    $varref = "($varref || $varoption)";
+    $varref = "(defined $varref ? $varref : $varoption)";
 
     # # генерируем преобразование [not implemented]
     # $varref = $self->generate_conversion_ref ($varref, $varconv) if ($varconv);
