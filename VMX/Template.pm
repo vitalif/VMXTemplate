@@ -10,7 +10,6 @@ package VMX::Template;
 use strict;
 use VMX::Common qw(:all);
 use Digest::MD5 qw(md5_hex);
-use vars qw($cachedir $root $wrapper %_tpldata %files %compiled_code %uncompiled_code @_tpldata_stack @conv $self);
 
 ##
  # Конструктор
@@ -18,10 +17,8 @@ use vars qw($cachedir $root $wrapper %_tpldata %files %compiled_code %uncompiled
  ##
 sub new {
     my $class = shift;
-    my %args = @_;
     $class = ref ($class) || $class;
-    my %data = (
-        root => '.',
+    my $self = {
         conv => [
                 {
                     '<' => 'strip_tags',
@@ -33,12 +30,18 @@ sub new {
                     #'c' => 'strlimit'
                 }
             ],
-		lang => {
-		},
-        %args
-    );
-    bless \%data, $class;
-    return \%data;
+        root            => '.',   # каталог с шаблонами
+        cachedir        => undef, # расположение кэша на диске
+        wrapper         => undef, # фильтр, вызываемый перед выдачей результата rparse
+        _tpldata        => {},    # сюда будут сохранены: данные
+		lang            => {},    # ~ : языковые данные
+        files           => {},    # ~ : имена файлов
+        uncompiled_code => {},    # ~ : шаблоны
+        compiled_code   => {},    # ~ : компилированный код шаблонов
+        _tpldata_stack  => [],    # стек tpldata-ы для datapush и datapop
+        @_
+    };
+    bless $self, $class;
 }
 
 ##
