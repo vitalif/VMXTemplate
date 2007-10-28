@@ -11,6 +11,10 @@ use strict;
 use VMX::Common qw(:all);
 use Digest::MD5 qw(md5_hex);
 
+# ускорение быстродействия постоянными stat-ами
+my $mtimes = {};
+my $uncompiled_code = {};
+
 ##
  # Конструктор
  # $obj = new VMX::Template, %init
@@ -32,12 +36,12 @@ sub new {
             ],
         root            => '.',   # каталог с шаблонами
         cachedir        => undef, # расположение кэша на диске
-        wrapper         => undef, # фильтр, вызываемый перед выдачей результата rparse
+        wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
         _tpldata        => {},    # сюда будут сохранены: данные
+        regions         => {},    # ~ : коды областей (<!-- REGION -->)
 		lang            => {},    # ~ : языковые данные
         files           => {},    # ~ : имена файлов
-        uncompiled_code => {},    # ~ : шаблоны
-        compiled_code   => {},    # ~ : компилированный код шаблонов
+        package_names   => {},    # ~ : последние названия пакетов шаблонов
         _tpldata_stack  => [],    # стек tpldata-ы для datapush и datapop
         @_
     };
@@ -131,10 +135,11 @@ sub datapop {
 sub parse {
     my $self = shift;
     my $handle = shift;
-    die("Template->parse(): couldn't load template file for handle $handle") unless $self->loadfile($handle);
-    $self->{compiled_code}{$handle} = $self->compile ($self->{uncompiled_code}{$handle});
-    my $str = eval ($self->{compiled_code}{$handle});
-    die("Template->parse(): $@") if $@;
+    die("[Template] couldn't load template file for handle $handle")
+        unless $self->loadfile($handle);
+    $self->compile($handle);
+    my $str = eval($self->{package_names}->{$handle} . '::parse($self)');
+    die("[Template] error parsing $handle: $@") if $@;
     $str = &$self->{wrapper} ($str) if $self->{wrapper};
     return $str;
 }
@@ -220,21 +225,25 @@ sub assign_vars {
 sub loadfile {
 	my $self = shift;
     my ($handle) = @_;
-    return 1 if $self->{uncompiled_code}{$handle};
-    die("Template->loadfile(): no file specified for handle $handle") unless $self->{files}{$handle};
+    die("[Template] no file specified for handle $handle")
+        unless defined $self->{files}->{$handle};
 
     # если оно false, но задано, значит, код задан, минуя файлы
-    if ($self->{files}{$handle})
+    my $fn;
+    if ($fn = $self->{files}{$handle})
     {
-        my $filename = $self->{files}{$handle};
+        my $mtime = [stat($fn)] -> [9];
+        return 1 if
+            $uncompiled_code->{$fn} &&
+            $mtimes->{$fn} >= $mtime;
         my $filepath;
 
-        $filepath = $` if $filename =~ m%(?<=/)[^/]*$%;
-        my $cnt = file_get_contents ($filename);
-        die("Template->loadfile(): file for handle $handle is empty") unless $cnt;
+        $filepath = $` if $fn =~ m%(?<=/)[^/]*$%;
+        my $cnt = file_get_contents ($fn);
+        die("[Template] file for handle $handle is empty") unless $cnt;
 
-        $cnt =~ s/\Q$&\E/file_get_contents($1)/eg while (m/<!-- INCLUDE\s+(.*?)\s+-->/go);
-        $self->{uncompiled_code}{$handle} = $cnt;
+        $uncompiled_code->{$fn} = $cnt;
+        $mtimes->{$fn} = $mtime;
     }
 
     return 1;
@@ -242,30 +251,50 @@ sub loadfile {
 
 ##
  # Функция компилирует код
- # $compiled_code = $obj->compile ($uncompiled_code)
+ # # ref($self) == 'VMX::Template'
+ # $pkg_name = $self->compile ($handle)
+ # print eval($pkg_name.'::parse($self)');
  ##
 sub compile {
-    my ($self, $code) = @_;
+    my $self = shift;
+    my ($handle) = @_;
+    my $code = $uncompiled_code->{$self->{files}->{$handle}};
 
-    my ($sfile, $nesting) = ('', 0);
+    my $nesting = 0;
+    my $included = {};
     my @code_lines = ();
     my @block_names = ('.');
     my ($cbstart, $cbcount, $cbplus, $mm);
 
-    # а может быть, уже кэшировано?
+    my ($PN, $sfile);
+    $sfile = $PN = 'Tpl' . uc(md5_hex($code));
+    $PN = __PACKAGE__.'::'.$PN;
+    # а может быть, кэшировано в памяти? (т.е модуль уже загружен)
+    if (eval('return $'.$PN.'::{parse}')) {
+        goto _end;
+    }
+    
+    # а может быть, кэшировано на диске?
     if ($self->{cachedir}) {
         $self->{cachedir} .= '/' if (substr($self->{cachedir},-1,1) ne '/');
-        $sfile = $self->{cachedir} . md5_hex ($code) . '.pl';
-        return file_get_contents($sfile) if -e $sfile;
+        $sfile = $self->{cachedir} . $sfile . '.pm';
+        if (-e $sfile) {
+            do $sfile;
+            if ($@) {
+                warn $@;
+            } else {
+                goto _end;
+            }
+        }
     }
 
     # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
-    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?!\x01)/$&\x01/gom;
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?!\x01)/$&\x01/gom;
 	
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
@@ -286,7 +315,7 @@ sub compile {
     @code_lines = split /\x01/, $code;
     foreach (@code_lines) {
         next unless $_;
-        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/os) { # начало блока
+        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/so) { # начало блока
             $nesting++;
             $block_names[$nesting] = $1;
             $cbstart = 0; $cbcount = ''; $cbplus = '++';
@@ -317,33 +346,53 @@ sub compile {
                 else { $_ = "\$_${1}_count = (\@\{$varref\}) ? scalar(\@\{$varref\}) : 0;"; }
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
             }
-        } elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/) {
+        } elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/so) {
             # чётко проверяем: блок нельзя завершать чем попало
             delete $block_names[$nesting--] if ($nesting > 0 && trim ($1) eq $block_names[$nesting]);
             $_ = "} # END $1";
-        } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/) {
+        } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
             $_ = "if ($1(".$self->generate_block_data_ref(substr($2,0,-1),1)."{'$3'})) {";
-        } elsif (/^\s*<!--\s*REGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/) {
-			$_ = "\$self->{_tpldata}{'.regions'}{'$1'} = <<'____ENDREGION';\nno strict;\nmy \$t='';";
-		} elsif (/^\s*<!--\s*ENDREGION\s*-->\s*$/) {
-			$_ = "return \$t;\n____ENDREGION";
-		} elsif (/^\s*<!--\s*INCREGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/) {
-			$_ = "\$t .= eval(\$self->{_tpldata}{'.regions'}{'$1'});";
+        } elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so) {
+            $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
+            $included->{$1} = 1;
+        } elsif (/^\s*<!--\s*REGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/so) {
+			$_ = "\$self->{regions}->{'$1'} = sub {\n    my \$self = shift;\n    my \$t='';\n    my \$tmp='';";
+		} elsif (/^\s*<!--\s*ENDREGION\s*-->\s*$/so) {
+			$_ = "return \$t;\n};";
+		} elsif (/^\s*<!--\s*INCREGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/so) {
+			$_ = "\$tmp = \$self->{regions}->{'$1'};\n    \$t .= &\$tmp(\$self) if ref(\$tmp) eq 'CODE';";
 		} else {
             $_ = "\$t .= '$_';";
         }
     }
 
     # собираем код в строку
-    $code = "no strict;\nmy \$t='';\n" . join ("\n", @code_lines) . "\nreturn \$t;";
+    $code = "package $PN;
+use VMX::Common qw(:all);
+no strict;
+
+sub parse {
+    my \$self = shift;
+    my \$t = '';
+    my \$tmp = '';
+    " . join("\n    ", @code_lines) . "
+    return \$t;
+}
+
+1;
+";
 
     # кэшируем код
     if ($self->{cachedir} && open (my $fd, '>'.$sfile)) {
         print $fd $code;
         close $fd;
     }
+    
+    eval $code;
+    warn $@ if $@;
 
-    return $code;
+_end:
+    return $self->{package_names}->{$handle} = $PN;
 }
 
 ##
