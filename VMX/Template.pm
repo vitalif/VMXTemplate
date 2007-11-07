@@ -14,6 +14,7 @@ use Digest::MD5 qw(md5_hex);
 # ускорение быстродействия постоянными stat-ами
 my $mtimes = {};
 my $uncompiled_code = {};
+my $langhashes = {};
 
 ##
  # Конструктор
@@ -67,7 +68,15 @@ sub set_filenames {
  ##
 sub load_lang {
 	my $self = shift;
-	return $self->load_lang_hashes(map { do $_ } @_);
+	return $self->load_lang_hashes(map {
+        my $mtime = [stat($_)]->[9];
+        if (!defined($mtimes->{$_}) || $mtime > $mtimes->{$_}) {
+            $mtimes->{$_} = $mtime;
+            return $langhashes->{$_} = do($_);
+        } else {
+            return $langhashes->{$_};
+        }
+    } @_);
 }
 
 ##
@@ -292,9 +301,9 @@ sub compile {
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
-    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF|INCLUDE|REGION|ENDREGION|INCREGION!?)\s+.*?-->(?!\x01)/$&\x01/gom;
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->(?!\x01)/$&\x01/gom;
 	
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
