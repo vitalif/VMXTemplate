@@ -9,16 +9,20 @@ use DBI;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents fetchall_hashref ar1el filemd5 mysql_quote);
-%EXPORT_TAGS = (all => [qw(min max trim htmlspecialchars strip_tags file_get_contents ar1el filemd5 mysql_quote)]);
+@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref);
+%EXPORT_TAGS = (all => [ @EXPORT_OK ]);
+
+our $t;
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
  ##
 sub import {
     foreach (@_) {
-        if ($_ eq '!fetchall_hashref') {
+        if ($_ eq '!dbi_hacks') {
             return Exporter::import(@_);
+        } elsif ($_ eq 'dbi_hacks') {
+            $_ = '!dbi_hacks';
         }
     }
     *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
@@ -148,6 +152,56 @@ sub fetchall_hashref {
     return $rows;
 }
 
+##
+ # Обновить строку или несколько строк по значениям ключа
+ ##
+sub updaterow_hashref {
+    my ($dbh, $table, $row, $key) = @_;
+    return 0 unless
+        $dbh &&
+        $table && $t->{$table} &&
+        $row && ref($row) eq 'HASH' && %$row &&
+        $key && ref($key) eq 'HASH' && %$key;
+    my @f = keys %$row;
+    my @k = keys %$key;
+    my $sql =
+        'UPDATE `'.$t->{$table}.'` SET '.
+        join(', ', map { "`$_`=?" } @f).
+        'WHERE '.join(' AND ', map { "`$_`=?" } @k);
+    my @bind = (@$row{@f}, @$key{@k});
+    return $dbh->do($sql, {}, @bind);
+}
+
+##
+ # Вставить набор записей в таблицу
+ ##
+sub insertall_hashref {
+    my ($dbh, $table, $rows, $reselect) = @_;
+    return 0 unless
+        $dbh &&
+        $table && $t->{$table} &&
+        $rows && ref($rows) eq 'ARRAY' && @$rows;
+    if ($reselect) {
+        my $i = 0;
+        @$_{'ji','jin'} = ($dbh->{mysql_connection_id}, ++$i) foreach @$rows;
+    }
+    my @f = keys %{$rows->[0]};
+    my $sql =
+        'INSERT INTO `'.$t->{$table}.'` (`'.join('`,`',@f).'`) VALUES '.
+        join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
+    my @bind = map { @$_{@f} } @$rows;
+    my $st = $dbh->do($sql, {}, @bind);
+    return $st if !$st || !$reselect;
+    if (ref($reselect) eq 'ARRAY') {
+        $reselect = '`'.join('`,`',@$reselect).'`';
+    } elsif ($reselect ne '*') {
+        $reselect = "`$reselect`";
+    }
+    $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=?';
+    @bind = ($dbh->{mysql_connection_id});
+    my $keys = $dbh->selectall_arrayref();
+}
+
 sub filemd5 {
     my ($file) = @_;
     my $f;
@@ -164,6 +218,7 @@ sub filemd5 {
 sub mysql_quote {
 	my ($a) = @_;
 	$a =~ s/\'/\'\'/gso;
+    $a =~ s/\\/\\\\/gso;
 	return "'$a'";
 }
 
