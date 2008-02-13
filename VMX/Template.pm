@@ -282,7 +282,7 @@ sub compile {
     if (eval('return $'.$PN.'::{parse}')) {
         goto _end;
     }
-    
+
     # а может быть, кэшировано на диске?
     if ($self->{cachedir}) {
         $self->{cachedir} .= '/' if (substr($self->{cachedir},-1,1) ne '/');
@@ -301,21 +301,22 @@ sub compile {
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
-    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|INCLUDE|REGION|ENDREGION|INCREGION)\s+.*?-->(?!\x01)/$&\x01/gom;
-	
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
+
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
 
-    # номера итераций
-    $code =~ s/\{([a-z0-9\-_]+)\.#\}/\'.(1+(\$_${1}_i)?\$_${1}_i:0)).\'/gois;
-
-    # подстановки переменных {block.block.[...].variable[|alternative]}
-    $code =~ s%\{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_/]+)(?:\|([a-z0-9\-_/]+))?\}%$self->generate_block_varref($1,$2,$3)%goise;
-
-	# переводы <!-- L section.section.section VARIABLE|"string" -->
-	$code =~ s%<!--\s+L\s+((?:\w+\.)*\w+)\s+(\"(?:[^\\\"]+|\\\"|\\\\)*\"|(?:[a-z0-9\-_]+\.)*(?:[a-z0-9\-_/]+))\s+-->%$self->generate_l_ref($1,$2)%goise;
+    # "первая замена"
+    $code =~ 
+        s%
+            (?>\%+) |
+            (?>\%+)\s*\S+.*?(?>\%+) |
+            \{[a-z0-9\-_]+\.#\} |
+            \{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_/]+)(?:\|([a-z0-9\-_/]+))?\}
+        % $self->generate_xx_ref($&,$1,$2,$3)
+        %goisex;
 
     # \n -> \n\x01
     $code =~ s/\n/\n\x01/gos;
@@ -342,13 +343,15 @@ sub compile {
 
             # либо min (N, $cbcount) если $cbcount задано
             # либо просто N если нет
-            if ($nesting < 2) { # блок не вложенный
+            if ($nesting < 2)
+            { # блок не вложенный
                 if ($cbcount) { $_ = "\$_${1}_count = min (scalar(\@\{\$self->{_tpldata}{'$1.'}\}), " . $cbcount . ');'; }
                 else { $_ = "\$_${1}_count = scalar(\@{\$self->{_tpldata}{'$1.'}});"; }
                 # начало цикла for
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
             }
-            else { # блок вложенный
+            else
+            { # блок вложенный
                 my $namespace = substr (join ('.', @block_names), 2);
                 my $varref = $self->generate_block_data_ref ($namespace);
                 if ($cbcount) { $_ = "\$_${1}_count = min (scalar(\@\{$varref\}), $cbcount);"; }
@@ -360,16 +363,15 @@ sub compile {
             delete $block_names[$nesting--] if ($nesting > 0 && trim ($1) eq $block_names[$nesting]);
             $_ = "} # END $1";
         } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
-            $_ = "if ($1(".$self->generate_block_data_ref(substr($2,0,-1),1)."{'$3'})) {";
+            $_ = "if ($1(".$self->generate_block_data_ref($2, 1)."{'$3'})) {";
         } elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so) {
             $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
             $included->{$1} = 1;
-        } elsif (/^\s*<!--\s*REGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/so) {
-			$_ = "\$self->{regions}->{'$1'} = sub {\n    my \$self = shift;\n    my \$t='';\n    my \$tmp='';";
-		} elsif (/^\s*<!--\s*ENDREGION\s*-->\s*$/so) {
+        } elsif (/^\s*<!--\s*SET\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
+            my $varref = $self->generate_block_data_ref($1, 1)."{'$2'}";
+            $_ = "$varref = eval {\nmy \$t = '';";
+		} elsif (/^\s*<!--\s*ENDSET\s*-->\s*$/so) {
 			$_ = "return \$t;\n};";
-		} elsif (/^\s*<!--\s*INCREGION\s+([a-zA-Z0-9\-_]+)\s*-->\s*$/so) {
-			$_ = "\$tmp = \$self->{regions}->{'$1'};\n    \$t .= &\$tmp(\$self) if ref(\$tmp) eq 'CODE';";
 		} else {
             $_ = "\$t .= '$_';";
         }
@@ -383,7 +385,6 @@ no strict;
 sub parse {
     my \$self = shift;
     my \$t = '';
-    my \$tmp = '';
     " . join("\n    ", @code_lines) . "
     return \$t;
 }
@@ -405,28 +406,36 @@ _end:
 }
 
 ##
- # Функция выдаёт код, переводящий строку в кавычках или переменную шаблона
- # $translation = $obj->generate_l_ref ($section, $what);
+ # Функция для первой замены
+ ##
+sub generate_xx_ref {
+    my $self = shift;
+    if ($_[0] =~ /^%%|%%$/so) {
+        my $r = $_[0];
+        $r =~ s/^%%/%/so;
+        $r =~ s/%%$/%/so;
+        return $r;
+    } elsif ($_[0] =~ /^%(.+)%$/so) {
+        return $self->generate_l_ref($1);
+    } elsif ($_[0] =~ /^%%+$/so) {
+        return substr($_[0], 1);
+    } elsif ($_[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/so) {
+        return '\'.(1+($_'.$1.'_i)?$_'.$1.'_i:0)).\'';
+    } elsif ($_[0] =~ /^\{.*\}$/so) {
+        return $self->generate_block_varref($_[1], $_[2], $_[3]);
+    }
+    return '';
+}
+
+##
+ # Функция осуществляет автоматический контекстый перевод строки
+ # $translation = $obj->generate_l_ref ($string);
  ##
 sub generate_l_ref {
 	my $self = shift;
-	my ($section, $what) = @_;
-	$section =~ s/\\/\\\\/gso;
-	$section =~ s/\'/\\\'/gso;
-	$section =~ s/\./\'}->{\'/gso;
-	if ($what !~ /^\"/so || $what !~ /\"$/so) {
-		my $block = '';
-		$block = $1 if $what =~ s/^([^\.]+)\.//iso;
-		$what = $self->generate_block_varref ($block, $what);
-		$what =~ s/^\' \. //iso;
-		$what =~ s/ \. \'$//iso;
-	} else {
-		$what =~ s/^\"//so;
-		$what =~ s/\"$//so;
-		$what =~ s/\'/\\\'/gso;
-		$what = "'$what'";
-	}
-	return '\' . ($self->{lang}->{\''.$section.'\'}->{'.$what.'} || \'\') . \'';
+	my ($string) = @_;
+    # TODO реализовать
+    return $string;
 }
 
 ##
