@@ -197,9 +197,16 @@ sub insertall_hashref {
     } elsif ($reselect ne '*') {
         $reselect = "`$reselect`";
     }
-    $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=?';
+    # осуществляем reselect данных
+    $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=? ORDER BY `jin` ASC';
     @bind = ($dbh->{mysql_connection_id});
-    my $keys = $dbh->selectall_arrayref();
+    my $resel = $dbh->selectall_hashref($sql, [], {}, @bind);
+    for (my $i = 0; $i < @$resel; $i++) {
+        $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
+    }
+    $sql = "UPDATE `".$t->{$table}."` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
+    $dbh->do($sql, {}, @bind);
+    return $st;
 }
 
 sub filemd5 {
