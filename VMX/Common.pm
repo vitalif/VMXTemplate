@@ -6,6 +6,7 @@
 package VMX::Common;
 
 use DBI;
+use Encode;
 use Digest::MD5;
 require Exporter;
 
