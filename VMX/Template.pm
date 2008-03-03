@@ -39,7 +39,6 @@ sub new {
         cachedir        => undef, # расположение кэша на диске
         wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
         _tpldata        => {},    # сюда будут сохранены: данные
-        regions         => {},    # ~ : коды областей (<!-- REGION -->)
 		lang            => {},    # ~ : языковые данные
         files           => {},    # ~ : имена файлов
         package_names   => {},    # ~ : последние названия пакетов шаблонов
@@ -313,7 +312,7 @@ sub compile {
         s%
             (?>\%+) |
             (?>\%+)\s*\S+.*?(?>\%+) |
-            \{[a-z0-9\-_]+\.#\} |
+            \{[a-z0-9\-_]+\.\#\} |
             \{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_/]+)(?:\|([a-z0-9\-_/]+))?\}
         % $self->generate_xx_ref($&,$1,$2,$3)
         %goisex;
@@ -410,21 +409,22 @@ _end:
  ##
 sub generate_xx_ref {
     my $self = shift;
-    if ($_[0] =~ /^%%|%%$/so) {
-        my $r = $_[0];
+    my @a = @_;
+    if ($a[0] =~ /^%%|%%$/so) {
+        my $r = $a[0];
         $r =~ s/^%%/%/so;
         $r =~ s/%%$/%/so;
         return $r;
-    } elsif ($_[0] =~ /^%(.+)%$/so) {
+    } elsif ($a[0] =~ /^%(.+)%$/so) {
         return $self->generate_l_ref($1);
-    } elsif ($_[0] =~ /^%%+$/so) {
-        return substr($_[0], 1);
-    } elsif ($_[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/so) {
+    } elsif ($a[0] =~ /^%%+$/so) {
+        return substr($a[0], 1);
+    } elsif ($a[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso) {
         return '\'.(1+($_'.$1.'_i)?$_'.$1.'_i:0)).\'';
-    } elsif ($_[0] =~ /^\{.*\}$/so) {
-        return $self->generate_block_varref($_[1], $_[2], $_[3]);
+    } elsif ($a[0] =~ /^\{.*\}$/so) {
+        return $self->generate_block_varref($a[1], $a[2], $a[3]);
     }
-    return '';
+    return $a[0];
 }
 
 ##
@@ -445,6 +445,7 @@ sub generate_l_ref {
 sub generate_block_varref {
     my $self = shift;
     my ($namespace, $varname, $varoption) = @_;
+    
     my ($varconv, $varref);
     ($varname, $varconv) = split '/', $varname, 2;
     # обрезаем точки в конце
