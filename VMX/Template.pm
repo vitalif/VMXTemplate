@@ -160,8 +160,11 @@ sub assign_block_vars {
     my $self = shift;
     my $block = shift;
     my $vararray = { @_ };
+    
+    $block =~ s/^\.+//so;
+    $block =~ s/\.+$//so;
 
-    if (!$block || $block =~ /^\.+$/so) { # если не блок, а корневой уровень
+    if (!$block) { # если не блок, а корневой уровень
         $self->assign_vars (@_);
     } elsif ($block !~ /\.[^\.]/) { # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
@@ -300,9 +303,9 @@ sub compile {
     $code =~ s/\s*<!--#.*?#-->//gos;
 
     # форматирование кода для красоты
-    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
-    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
 
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
@@ -363,6 +366,8 @@ sub compile {
             $_ = "} # END $1";
         } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
             $_ = "if ($1(".$self->generate_block_data_ref($2, 1)."{'$3'})) {";
+        } elsif (/^\s*<!--\s*ELSE\s*-->\s*$/so) {
+            $_ = "} else {";
         } elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so) {
             $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
             $included->{$1} = 1;
