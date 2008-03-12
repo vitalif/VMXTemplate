@@ -168,7 +168,7 @@ sub updaterow_hashref {
     my $sql =
         'UPDATE `'.$t->{$table}.'` SET '.
         join(', ', map { "`$_`=?" } @f).
-        'WHERE '.join(' AND ', map { "`$_`=?" } @k);
+        ' WHERE '.join(' AND ', map { "`$_`=?" } @k);
     my @bind = (@$row{@f}, @$key{@k});
     return $dbh->do($sql, {}, @bind);
 }
