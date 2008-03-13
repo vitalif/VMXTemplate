@@ -10,7 +10,7 @@ use Encode;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref);
+@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
 %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
 our $t;
@@ -228,6 +228,12 @@ sub mysql_quote {
 	$a =~ s/\'/\'\'/gso;
     $a =~ s/\\/\\\\/gso;
 	return "'$a'";
+}
+
+sub dumper_no_lf {
+    my $r = Data::Dumper::Dumper (@_);
+    $r =~ s/\s+/ /giso;
+    return $r;
 }
 
 1;
