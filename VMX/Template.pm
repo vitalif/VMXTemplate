@@ -1,8 +1,8 @@
 #!/usr/bin/perl
 
 =head1 Простой шаблонный движок.
- Inspired by phpBB templates, которые в свою очередь inspired by
- phplib templates.
+ Когда-то inspired by phpBB templates, которые в свою очередь inspired by
+ phplib templates. Однако уже далеко ушедши от них обоих.
 =cut
 
 package VMX::Template;
@@ -10,6 +10,7 @@ package VMX::Template;
 use strict;
 use VMX::Common qw(:all);
 use Digest::MD5 qw(md5_hex);
+use Hash::Merge;
 
 # ускорение быстродействия постоянными stat-ами
 my $mtimes = {};
@@ -20,21 +21,23 @@ my $langhashes = {};
  # Конструктор
  # $obj = new VMX::Template, %init
  ##
-sub new {
+sub new
+{
     my $class = shift;
     $class = ref ($class) || $class;
-    my $self = {
-        conv => [
-                {
-                    '<' => 'strip_tags',
-                    'i' => 'int',
-                    's' => 'htmlspecialchars',
-                    'l' => 'lc',
-                    'u' => 'uc',
-                }, {
-                    #'c' => 'strlimit'
-                }
-            ],
+    my $self =
+    {
+        conv =>
+        {
+            # char => func_name | \&sub_ref
+            '<' => 'strip_tags',
+            'i' => 'int',
+            's' => 'htmlspecialchars',
+            'l' => 'lc',
+            'u' => 'uc',
+            'q' => 'quotequote',
+            'L' => \&language_ref,
+        },
         root            => '.',   # каталог с шаблонами
         cachedir        => undef, # расположение кэша на диске
         wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
@@ -52,11 +55,14 @@ sub new {
  # Функция задаёт имена файлов для хэндлов
  # $obj->set_filenames (handle1 => 'template1.tpl', handle2 => 'template2.tpl', ...)
  ##
-sub set_filenames {
+sub set_filenames
+{
     my $self = shift;
     my %fns = @_;
-    while (my ($k,$v) = each(%fns)) {
-        $self->{files}{$k} = $self->make_filename($v);
+    while (my ($k,$v) = each(%fns))
+    {
+        $self->{fnames}->{$k} = $v;
+        $self->{files}->{$k} = $self->make_filename($v);
     }
     return 1;
 }
@@ -65,16 +71,17 @@ sub set_filenames {
  # Функция загружает файлы переводов (внутри хеши)
  # $obj->load_lang ($filename, $filename, ...);
  ##
-sub load_lang {
+sub load_lang
+{
 	my $self = shift;
 	return $self->load_lang_hashes(map {
         my $mtime = [stat($_)]->[9];
-        if (!defined($mtimes->{$_}) || $mtime > $mtimes->{$_}) {
+        if (!defined($mtimes->{$_}) || $mtime > $mtimes->{$_})
+        {
             $mtimes->{$_} = $mtime;
-            return $langhashes->{$_} = do($_);
-        } else {
-            return $langhashes->{$_};
+            $langhashes->{$_} = do($_);
         }
+        $langhashes->{$_};
     } @_);
 }
 
@@ -82,14 +89,12 @@ sub load_lang {
  # Функция загружает хеши переводов
  # $obj->load_lang_hashes ($hash, $hash, ...);
  ##
-sub load_lang_hashes {
+sub load_lang_hashes
+{
 	my $self = shift;
 	my $i = 0;
-	foreach my $new (@_) {
-		unless ($@) {
-			$self->{lang}->{$_} = $new->{$_}, $i++ foreach keys %$new;
-		}
-	}
+    Hash::Merge::set_behavior('RIGHT_PRECEDENT');
+    $self->{lang} = Hash::Merge::merge ($self->{lang}, $_) foreach @_;
 	return $i;
 }
 
@@ -97,11 +102,12 @@ sub load_lang_hashes {
  # Функция преобразовывает относительные имена файлов в абсолютные
  # $obj->make_filename ($filename)
  ##
-sub make_filename {
+sub make_filename
+{
     my $self = shift;
     my ($fn) = @_;
-    $fn = $self->{root}.'/'.$fn if ($fn !~ m%^/%o);
-    die("Template->make_filename(): file $fn does not exist") unless (-e $fn);
+    $fn = $self->{root}.'/'.$fn if $fn !~ /^\//iso;
+    die("Template->make_filename(): file $fn does not exist") unless -f $fn;
     return $fn;
 }
 
@@ -109,7 +115,8 @@ sub make_filename {
  # Функция уничтожает данные шаблона
  # $obj->destroy ()
  ##
-sub destroy {
+sub destroy
+{
     shift->{_tpldata} = {};
     return 1;
 }
@@ -118,7 +125,8 @@ sub destroy {
  # Функция сохраняет текущие данные шаблона в стек и уничтожает их
  # $obj->datapush ()
  ##
-sub datapush {
+sub datapush
+{
     my $self = shift;
     push (@{$self->{_tpldata_stack}}, \$self->{_tpldata});
     destroy $self;
@@ -129,7 +137,8 @@ sub datapush {
  # Функция восстанавливает данные шаблона из стека
  # $obj->datapop ()
  ##
-sub datapop {
+sub datapop
+{
     my $self = shift;
     return 0 if (@{$self->{_tpldata_stack}} <= 0);
     $self->{_tpldata} = pop @{$self->{_tpldata_stack}};
@@ -140,7 +149,8 @@ sub datapop {
  # Функция загружает, компилирует и возвращает результат для хэндла
  # $obj->parse ('handle')
  ##
-sub parse {
+sub parse
+{
     my $self = shift;
     my $handle = shift;
     die("[Template] couldn't load template file for handle $handle")
@@ -156,7 +166,8 @@ sub parse {
  # Функция присваивает переменные блока в новую итерацию
  # $obj->assign_block_vars ($block, varname1 => value1, varname2 => value2, ...)
  ##
-sub assign_block_vars {
+sub assign_block_vars
+{
     my $self = shift;
     my $block = shift;
     my $vararray = { @_ };
@@ -164,18 +175,27 @@ sub assign_block_vars {
     $block =~ s/^\.+//so;
     $block =~ s/\.+$//so;
 
-    if (!$block) { # если не блок, а корневой уровень
+    if (!$block)
+    {
+        # если не блок, а корневой уровень
         $self->assign_vars (@_);
-    } elsif ($block !~ /\.[^\.]/) { # если блок, но не вложенный
+    }
+    elsif ($block !~ /\.[^\.]/)
+    {
+        # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
 		$self->{_tpldata}{$block} = [] unless $self->{_tpldata}{$block};
         push @{$self->{_tpldata}{$block}}, $vararray;
-    } else { # если вложенный блок
+    }
+    else
+    {
+        # если вложенный блок
         my $ev = '$self->{_tpldata}';
         $block =~ s/\.+$//; # обрезаем точки в конце (хоть их 10 там)
         my @blocks = split /\./, $block;
         my $lastblock = pop @blocks;
-        foreach (@blocks) {
+        foreach (@blocks)
+        {
             $ev .= "{'$_.'}";
             $ev .= "[-1+\@\{$ev\}]";
         }
@@ -191,23 +211,34 @@ sub assign_block_vars {
  # Функция добавляет переменные к текущей итерации блока
  # $obj->append_block_vars ($block, varname1 => value1, varname2 => value2, ...)
  ##
-sub append_block_vars {
+sub append_block_vars
+{
     my $self = shift;
     my $block = shift;
     my %vararray = @_;
     my $lastit;
 
-    if (!$block || $block eq '.') { # если не блок, а корневой уровень
+    if (!$block || $block eq '.')
+    {
+        # если не блок, а корневой уровень
         $self->assign_vars (@_);
-    } elsif ($block !~ /\../) { # если блок, но не вложенный
+    }
+    elsif ($block !~ /\../)
+    {
+        # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
         $lastit = @{$self->{_tpldata}{$block}} - 1;
-        $self->{_tpldata}{$block}[$lastit]{$_} = $vararray{$_} foreach (keys %vararray);
-    } else { # если вложенный блок
+        $self->{_tpldata}{$block}[$lastit]{$_} = $vararray{$_}
+            foreach keys %vararray;
+    }
+    else
+    {
+        # если вложенный блок
         my $ev = '$self->{_tpldata}';
         $block =~ s/\.+$//; # обрезаем точки в конце (хоть их 10 там)
         my @blocks = split /\.+/, $block;
-        foreach (@blocks) {
+        foreach (@blocks)
+        {
             $ev .= "{'$_.'}";
             $ev .= "[-1+\@\{$ev\}]";
         }
@@ -222,7 +253,8 @@ sub append_block_vars {
  # Функция присваивает переменные корневого уровня
  # $obj->assign_vars (varname1 => value1, varname2 => value2, ...)
  ##
-sub assign_vars {
+sub assign_vars
+{
     my $self = shift;
 	$self->{_tpldata}{'.'}[0] = {} unless $self->{_tpldata}{'.'}[0];
     %{$self->{_tpldata}{'.'}[0]} = (%{$self->{_tpldata}{'.'}[0]}, @_);
@@ -233,7 +265,8 @@ sub assign_vars {
  # Функция загружает файл для хэндла HANDLE
  # $obj->loadfile ($handle)
  ##
-sub loadfile {
+sub loadfile
+{
 	my $self = shift;
     my ($handle) = @_;
     die("[Template] no file specified for handle $handle")
@@ -266,10 +299,23 @@ sub loadfile {
  # $pkg_name = $self->compile ($handle)
  # print eval($pkg_name.'::parse($self)');
  ##
-sub compile {
+sub compile
+{
     my $self = shift;
     my ($handle) = @_;
     my $code = $uncompiled_code->{$self->{files}->{$handle}};
+
+    $self->{cur_template_path} = $self->{cur_template} = '';
+    if ($self->{fnames}->{$handle})
+    {
+        $self->{cur_template} = $self->{fnames}->{$handle};
+        $self->{cur_template} =~ s/\.[^\.]+$//iso;
+        $self->{cur_template} =~ s/:+//gso;
+        $self->{cur_template} =~ s!/+!:!gso;
+        $self->{cur_template} =~ s/[^\w_:]+//gso;
+        $self->{cur_template_path} = "->{\"" . join("\"}->{\"",
+            map { lc } split /:/, $self->{cur_template}) . "\"}";
+    }
 
     my $nesting = 0;
     my $included = {};
@@ -281,19 +327,25 @@ sub compile {
     $sfile = $PN = 'Tpl' . uc(md5_hex($code));
     $PN = __PACKAGE__.'::'.$PN;
     # а может быть, кэшировано в памяти? (т.е модуль уже загружен)
-    if (eval('return $'.$PN.'::{parse}')) {
+    if (eval('return $'.$PN.'::{parse}'))
+    {
         goto _end;
     }
 
     # а может быть, кэшировано на диске?
-    if ($self->{cachedir}) {
+    if ($self->{cachedir})
+    {
         $self->{cachedir} .= '/' if (substr($self->{cachedir},-1,1) ne '/');
         $sfile = $self->{cachedir} . $sfile . '.pm';
-        if (-e $sfile) {
+        if (-e $sfile)
+        {
             do $sfile;
-            if ($@) {
+            if ($@)
+            {
                 warn $@;
-            } else {
+            }
+            else
+            {
                 goto _end;
             }
         }
@@ -325,19 +377,26 @@ sub compile {
 
     # разбиваем код на строки
     @code_lines = split /\x01/, $code;
-    foreach (@code_lines) {
+    foreach (@code_lines)
+    {
         next unless $_;
-        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/so) { # начало блока
+        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/so)
+        {
+            # начало блока
             $nesting++;
             $block_names[$nesting] = $1;
+            $self->{current_namespace} = join '.', @block_names;
             $cbstart = 0; $cbcount = ''; $cbplus = '++';
 
             {
                 my $o2 = $2;
-                if ($o2 =~ /^[ \t]*AT ([0-9]+)[ \t]*(?:([0-9]+)[ \t]*)?$/) {
+                if ($o2 =~ /^[ \t]*AT ([0-9]+)[ \t]*(?:([0-9]+)[ \t]*)?$/)
+                {
                     $cbstart = $1;
                     $cbcount = $2 ? $1+$2 : 0;
-                } elsif ($o2 =~ /^[ \t]*MOD ([1-9][0-9]*) ([0-9]+)[ \t]*$/) {
+                }
+                elsif ($o2 =~ /^[ \t]*MOD ([1-9][0-9]*) ([0-9]+)[ \t]*$/)
+                {
                     $cbstart = $2;
                     $cbplus = '+='.$1;
                 }
@@ -346,41 +405,58 @@ sub compile {
             # либо min (N, $cbcount) если $cbcount задано
             # либо просто N если нет
             if ($nesting < 2)
-            { # блок не вложенный
+            {
+                # блок не вложенный
                 if ($cbcount) { $_ = "\$_${1}_count = min (scalar(\@\{\$self->{_tpldata}{'$1.'}\}), " . $cbcount . ');'; }
                 else { $_ = "\$_${1}_count = scalar(\@{\$self->{_tpldata}{'$1.'}});"; }
                 # начало цикла for
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
             }
             else
-            { # блок вложенный
+            {
+                # блок вложенный
                 my $namespace = substr (join ('.', @block_names), 2);
                 my $varref = $self->generate_block_data_ref ($namespace);
                 if ($cbcount) { $_ = "\$_${1}_count = min (scalar(\@\{$varref\}), $cbcount);"; }
                 else { $_ = "\$_${1}_count = (\@\{$varref\}) ? scalar(\@\{$varref\}) : 0;"; }
                 $_ .= "\nfor (\$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
             }
-        } elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/so) {
+        }
+        elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/so)
+        {
             # чётко проверяем: блок нельзя завершать чем попало
             delete $block_names[$nesting--] if ($nesting > 0 && trim ($1) eq $block_names[$nesting]);
+            $self->{current_namespace} = join '.', @block_names;
             $_ = "} # END $1";
-        } elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
+        }
+        elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so)
+        {
             $_ = "if ($1(".$self->generate_block_data_ref($2, 1)."{'$3'})) {";
-        } elsif (/^\s*<!--\s*ELSE\s*-->\s*$/so) {
+        }
+        elsif (/^\s*<!--\s*ELSE\s*-->\s*$/so)
+        {
             $_ = "} else {";
-        } elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so) {
+        }
+        elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so)
+        {
             $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
             $included->{$1} = 1;
-        } elsif (/^\s*<!--\s*SET\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so) {
+        }
+        elsif (/^\s*<!--\s*SET\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so)
+        {
             my $varref = $self->generate_block_data_ref($1, 1)."{'$2'}";
             $_ = "$varref = eval {\nmy \$t = '';";
-		} elsif (/^\s*<!--\s*ENDSET\s*-->\s*$/so) {
+		}
+        elsif (/^\s*<!--\s*ENDSET\s*-->\s*$/so)
+        {
 			$_ = "return \$t;\n};";
-		} else {
+		}
+        else
+        {
             $_ = "\$t .= '$_';";
         }
     }
-
+    
     # собираем код в строку
     $code = "package $PN;
 use VMX::Common qw(:all);
@@ -389,6 +465,7 @@ no strict;
 sub parse {
     my \$self = shift;
     my \$t = '';
+    my \$_current_template = [ split /:/, '$self->{cur_template}' ];
     " . join("\n    ", @code_lines) . "
     return \$t;
 }
@@ -397,7 +474,8 @@ sub parse {
 ";
 
     # кэшируем код
-    if ($self->{cachedir} && open (my $fd, '>'.$sfile)) {
+    if ($self->{cachedir} && open (my $fd, '>'.$sfile))
+    {
         print $fd $code;
         close $fd;
     }
@@ -412,47 +490,48 @@ _end:
 ##
  # Функция для первой замены
  ##
-sub generate_xx_ref {
+sub generate_xx_ref
+{
     my $self = shift;
     my @a = @_;
-    if ($a[0] =~ /^%%|%%$/so) {
+    if ($a[0] =~ /^%%|%%$/so)
+    {
         my $r = $a[0];
         $r =~ s/^%%/%/so;
         $r =~ s/%%$/%/so;
         return $r;
-    } elsif ($a[0] =~ /^%(.+)%$/so) {
-        return $self->generate_l_ref($1);
-    } elsif ($a[0] =~ /^%%+$/so) {
+    }
+    elsif ($a[0] =~ /^%(.+)%$/so)
+    {
+        return $self->language_xform($self->{current_namespace}, $1);
+    }
+    elsif ($a[0] =~ /^%%+$/so)
+    {
         return substr($a[0], 1);
-    } elsif ($a[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso) {
+    }
+    elsif ($a[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso)
+    {
         return '\'.(1+($_'.$1.'_i)?$_'.$1.'_i:0)).\'';
-    } elsif ($a[0] =~ /^\{.*\}$/so) {
+    }
+    elsif ($a[0] =~ /^\{.*\}$/so)
+    {
         return $self->generate_block_varref($a[1], $a[2], $a[3]);
     }
     return $a[0];
 }
 
 ##
- # Функция осуществляет автоматический контекстый перевод строки
- # $translation = $obj->generate_l_ref ($string);
- ##
-sub generate_l_ref {
-	my $self = shift;
-	my ($string) = @_;
-    # TODO реализовать
-    return $string;
-}
-
-##
  # Функция генерирует подстановку переменной шаблона
  # $varref = $obj->generate_block_varref ($namespace, $varname, $varoption)
  ##
-sub generate_block_varref {
+sub generate_block_varref
+{
     my $self = shift;
     my ($namespace, $varname, $varoption) = @_;
     
     my ($varconv, $varref);
     ($varname, $varconv) = split '/', $varname, 2;
+    $varconv = undef unless $self->{conv}->{$varconv};
     # обрезаем точки в конце
     $namespace =~ s/\.*$//o;
 
@@ -465,8 +544,28 @@ sub generate_block_varref {
     $varref .= "{'$varname'}";
     $varref = "(defined $varref ? $varref : $varoption)";
 
-    # # генерируем преобразование [not implemented]
-    # $varref = $self->generate_conversion_ref ($varref, $varconv) if ($varconv);
+    # генерируем преобразование
+    if ($varconv)
+    {
+        unless (ref $self->{conv}->{$varconv})
+        {
+            $varref = "(" . $self->{conv}->{$varconv} . "($varref))";
+        }
+        else
+        {
+            my $f = $self->{conv}->{$varconv};
+            unless ($namespace)
+            {
+                $f = &$f($self, $varname, $varref);
+            }
+            else
+            {
+                $f = &$f($self, "$namespace.$varname", $varref);
+            }
+            $varref = "($f)";
+        }
+    }
+
     $varref = "' . $varref . '";
     return $varref;
 }
@@ -475,16 +574,18 @@ sub generate_block_varref {
  # Функция генерирует обращение к массиву переменных блока
  # $blockref = $obj->generate_block_data_ref ($block, $include_last_iterator)
  ##
-sub generate_block_data_ref {
+sub generate_block_data_ref
+{
     my $self = shift;
     my $blockref = '$self->{_tpldata}';
     my ($block, $withlastit) = @_;
 
     # для корневого блока
-    return '$self->{_tpldata}{\'.\'}' . ($withlastit ? '[0]' : '') if ($block =~ /^\.*$/o);
+    return '$self->{_tpldata}{\'.\'}' . ($withlastit ? '[0]' : '')
+        if $block =~ /^\.*$/so;
 
     # строим цепочку блоков
-    $block =~ s/\.+$//o;
+    $block =~ s/\.+$//so;
     my @blocks = split (/\.+/, $block);
     my $lastblock = pop (@blocks);
     $blockref .= "{'$_.'}[\$_${_}_i]" foreach @blocks;
@@ -495,4 +596,48 @@ sub generate_block_data_ref {
     return $blockref;
 }
 
+##
+ # Функция компилирует ссылку на данные ленгпака
+ ##
+sub language_ref
+{
+    my $self = shift;
+    my ($var, $varref, $value) = @_;
+    my $code = '';
+    $code .= '->{' . lc($_) . '}' foreach split /\.+/, $var;
+    $code .= '->{' . $varref . '}';
+    $code =
+        ($self->{cur_template_path} ?
+        '(($self->{lang}' . $self->{cur_template_path} . $code . ') || ' : '') .
+        '($self->{lang}' . $code . ') || (' .
+        $varref . '))';
+    return $code;
+}
+
+##
+ # Compile-time вычисление language_ref
+ ##
+sub language_xform
+{
+    my $self = shift;
+    my ($ns, $value) = @_;
+    my ($ca, $cb) = ($self->{lang}, $self->{lang});
+    foreach (split /:/, $self->{cur_template})
+    {
+        $cb = $cb->{lc $_} if $cb;
+    }
+    if ($ns)
+    {
+        foreach (split /\./, $ns)
+        {
+            $ca = $ca->{lc $_} if $ca;
+            $cb = $cb->{lc $_} if $cb;
+        }
+    }
+    $ca = $ca->{$value} if $ca;
+    $cb = $cb->{$value} if $cb;
+    return $ca || $cb;
+}
+
 1;
+__END__

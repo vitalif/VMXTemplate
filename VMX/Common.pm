@@ -10,7 +10,7 @@ use Encode;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
+@EXPORT_OK = qw(quotequote min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
 %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
 our $t;
@@ -176,13 +176,15 @@ sub updaterow_hashref {
 ##
  # Вставить набор записей в таблицу
  ##
-sub insertall_hashref {
+sub insertall_hashref
+{
     my ($dbh, $table, $rows, $reselect) = @_;
     return 0 unless
         $dbh &&
         $table && $t->{$table} &&
         $rows && ref($rows) eq 'ARRAY' && @$rows;
-    if ($reselect) {
+    if ($reselect)
+    {
         my $i = 0;
         @$_{'ji','jin'} = ($dbh->{mysql_connection_id}, ++$i) foreach @$rows;
     }
@@ -193,16 +195,20 @@ sub insertall_hashref {
     my @bind = map { @$_{@f} } @$rows;
     my $st = $dbh->do($sql, {}, @bind);
     return $st if !$st || !$reselect;
-    if (ref($reselect) eq 'ARRAY') {
+    if (ref($reselect) eq 'ARRAY')
+    {
         $reselect = '`'.join('`,`',@$reselect).'`';
-    } elsif ($reselect ne '*') {
+    }
+    elsif ($reselect ne '*')
+    {
         $reselect = "`$reselect`";
     }
     # осуществляем reselect данных
     $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=? ORDER BY `jin` ASC';
     @bind = ($dbh->{mysql_connection_id});
     my $resel = $dbh->selectall_hashref($sql, [], {}, @bind);
-    for (my $i = 0; $i < @$resel; $i++) {
+    for (my $i = 0; $i < @$resel; $i++)
+    {
         $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
     }
     $sql = "UPDATE `".$t->{$table}."` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
@@ -210,11 +216,13 @@ sub insertall_hashref {
     return $st;
 }
 
-sub filemd5 {
+sub filemd5
+{
     my ($file) = @_;
     my $f;
     my $r;
-    if (open $f, "<$file") {
+    if (open $f, "<$file")
+    {
         my $ctx = Digest::MD5->new;
         $ctx->addfile($f);
         $r = $ctx->hexdigest;
@@ -223,14 +231,23 @@ sub filemd5 {
     return $r;
 }
 
-sub mysql_quote {
+sub mysql_quote
+{
 	my ($a) = @_;
 	$a =~ s/\'/\'\'/gso;
     $a =~ s/\\/\\\\/gso;
 	return "'$a'";
 }
 
-sub dumper_no_lf {
+sub quotequote
+{
+    my ($a) = @_;
+    $a =~ s/\'|\"/\\$&/gso;
+    return $a;
+}
+
+sub dumper_no_lf
+{
     my $r = Data::Dumper::Dumper (@_);
     $r =~ s/\s+/ /giso;
     return $r;
