@@ -354,8 +354,8 @@ sub compile
     # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
 
-    # форматирование кода для красоты
     $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    # форматирование кода для красоты
     1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
     1 while $code =~ s/<!--\s*(?:BEGIN|END|IF!?|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
 
@@ -368,8 +368,8 @@ sub compile
             (?>\%+) |
             (?>\%+)\s*\S+.*?(?>\%+) |
             \{[a-z0-9\-_]+\.\#\} |
-            \{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_/]+)(?:\|([a-z0-9\-_/]+))?\}
-        % $self->generate_xx_ref($&,$1,$2,$3)
+            \{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+)((?:->[a-z0-9\-_]+)*)(?:\/([a-z0-9\-_]+))?\}
+        % $self->generate_xx_ref($&,$1,$2,$3,$4)
         %goisex;
 
     # \n -> \n\x01
@@ -380,7 +380,7 @@ sub compile
     foreach (@code_lines)
     {
         next unless $_;
-        if (/^\s*<!--\s*BEGIN\s+([A-Za-z0-9\-_]+?)\s+([A-Za-z \t\-_0-9]*)-->\s*$/so)
+        if (/^\s*<!--\s*BEGIN\s+([a-z0-9\-_]+?)\s+([a-z \t\-_0-9]*)-->\s*$/iso)
         {
             # начало блока
             $nesting++;
@@ -429,9 +429,9 @@ sub compile
             $self->{current_namespace} = join '.', @block_names;
             $_ = "} # END $1";
         }
-        elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so)
+        elsif (/^\s*<!--\s*IF(!?)\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+)((?:->[a-z0-9\-_]+)*)\s*-->\s*$/iso)
         {
-            $_ = "if ($1(".$self->generate_block_data_ref($2, 1)."{'$3'})) {";
+            $_ = "if ($1(".$self->generate_block_varref($2, $3, $4, undef, 1).")) {";
         }
         elsif (/^\s*<!--\s*ELSE\s*-->\s*$/so)
         {
@@ -442,7 +442,7 @@ sub compile
             $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
             $included->{$1} = 1;
         }
-        elsif (/^\s*<!--\s*SET\s+((?:[a-zA-Z0-9\-_]+\.)*)([a-zA-Z0-9\-_\/]+)\s*-->\s*$/so)
+        elsif (/^\s*<!--\s*SET\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_\/]+)\s*-->\s*$/iso)
         {
             my $varref = $self->generate_block_data_ref($1, 1)."{'$2'}";
             $_ = "$varref = eval {\nmy \$t = '';";
@@ -494,55 +494,66 @@ sub generate_xx_ref
 {
     my $self = shift;
     my @a = @_;
-    if ($a[0] =~ /^%%|%%$/so)
+    my $a = shift @a;
+    if ($a =~ /^%%|%%$/so)
     {
-        my $r = $a[0];
+        my $r = $a;
         $r =~ s/^%%/%/so;
         $r =~ s/%%$/%/so;
         return $r;
     }
-    elsif ($a[0] =~ /^%(.+)%$/so)
+    elsif ($a =~ /^%(.+)%$/so)
     {
         return $self->language_xform($self->{current_namespace}, $1);
     }
-    elsif ($a[0] =~ /^%%+$/so)
+    elsif ($a =~ /^%%+$/so)
     {
-        return substr($a[0], 1);
+        return substr($a, 1);
     }
-    elsif ($a[0] =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso)
+    elsif ($a =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso)
     {
         return '\'.(1+($_'.$1.'_i)?$_'.$1.'_i:0)).\'';
     }
-    elsif ($a[0] =~ /^\{.*\}$/so)
+    elsif ($a =~ /^\{.*\}$/so)
     {
-        return $self->generate_block_varref($a[1], $a[2], $a[3]);
+        return "' . " . $self->generate_block_varref(@a) . " . '";
     }
-    return $a[0];
+    return $a;
 }
 
 ##
  # Функция генерирует подстановку переменной шаблона
- # $varref = $obj->generate_block_varref ($namespace, $varname, $varoption)
+ # $varref = $obj->generate_block_varref ($namespace, $varname, $varhash)
  ##
 sub generate_block_varref
 {
     my $self = shift;
-    my ($namespace, $varname, $varoption) = @_;
-    
-    my ($varconv, $varref);
-    ($varname, $varconv) = split '/', $varname, 2;
+    my ($namespace, $varname, $varhash, $varconv) = @_;
+    my $varref;
+
     $varconv = undef unless $self->{conv}->{$varconv};
     # обрезаем точки в конце
     $namespace =~ s/\.*$//o;
 
     $varref = $self->generate_block_data_ref ($namespace, 1);
-    # готовим альтернативу
-    unless ($varoption) { $varoption = "''"; }
-    else { $varoption = "((${varref}{'$varoption'}) ? ${varref}{'$varoption'} : '')"; }
-
     # добавляем имя переменной
     $varref .= "{'$varname'}";
-    $varref = "(defined $varref ? $varref : $varoption)";
+    # добавляем путь по вложенным хешам/массивам
+    if ($varhash)
+    {
+        $varhash = [ split /->/, $varhash ];
+        foreach (@$varhash)
+        {
+            if (/^\d+$/so)
+            {
+                $varref .= "[$_]";
+            }
+            elsif ($_)
+            {
+                $varref .= "{'$_'}";
+            }
+        }
+    }
 
     # генерируем преобразование
     if ($varconv)
@@ -566,7 +577,6 @@ sub generate_block_varref
         }
     }
 
-    $varref = "' . $varref . '";
     return $varref;
 }
 
