@@ -183,10 +183,12 @@ sub insertall_hashref
         $dbh &&
         $table && $t->{$table} &&
         $rows && ref($rows) eq 'ARRAY' && @$rows;
+    my $conn_id = undef;
     if ($reselect)
     {
         my $i = 0;
-        @$_{'ji','jin'} = ($dbh->{mysql_connection_id}, ++$i) foreach @$rows;
+        $conn_id = $dbh->{mysql_connection_id};
+        @$_{'ji','jin'} = ($conn_id, ++$i) foreach @$rows;
     }
     my @f = keys %{$rows->[0]};
     my $sql =
@@ -205,7 +207,7 @@ sub insertall_hashref
     }
     # осуществляем reselect данных
     $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=? ORDER BY `jin` ASC';
-    @bind = ($dbh->{mysql_connection_id});
+    @bind = ($conn_id);
     my $resel = $dbh->selectall_hashref($sql, [], {}, @bind);
     for (my $i = 0; $i < @$resel; $i++)
     {
