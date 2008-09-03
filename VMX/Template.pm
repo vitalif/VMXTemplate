@@ -439,8 +439,13 @@ sub compile
         }
         elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so)
         {
-            $_ = ($included->{$1} ? "\$self->set_filenames('_INCLUDE$1' => $1);\n    " : '')."\$t .= \$self->parse('_INCLUDE$1');";
-            $included->{$1} = 1;
+            my $n = $1;
+            $_ = "\$t .= \$self->parse('_INCLUDE$n');";
+            unless ($included->{$n})
+            {
+                $_ = "\$self->set_filenames('_INCLUDE$n' => '$n');\n    $_";
+                $included->{$n} = 1;
+            }
         }
         elsif (/^\s*<!--\s*SET\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_\/]+)\s*-->\s*$/iso)
         {
