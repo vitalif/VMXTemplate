@@ -36,6 +36,7 @@ sub new
             'l' => 'lc',
             'u' => 'uc',
             'q' => 'quotequote',
+            'H' => 'strip_unsafe_tags',
             'L' => \&language_ref,
         },
         root            => '.',   # каталог с шаблонами

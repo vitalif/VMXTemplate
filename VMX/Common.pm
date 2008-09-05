@@ -1,7 +1,5 @@
 #!/usr/bin/perl
-
-=head1 Некоторые простые полезные функции
-=cut
+# Некоторые простые полезные функции
 
 package VMX::Common;
 
@@ -10,19 +8,25 @@ use Encode;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(quotequote min max trim htmlspecialchars strip_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
+@EXPORT_OK = qw(quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
 %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
 our $t;
+my $safe_tags = [qw/div span h1 h2 a b i u p strike strong small big blink center ol pre sub sup font br table tr td th tbody tfoot thead tt ul li em img marquee/];
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
  ##
-sub import {
-    foreach (@_) {
-        if ($_ eq '!dbi_hacks') {
+sub import
+{
+    foreach (@_)
+    {
+        if ($_ eq '!dbi_hacks')
+        {
             return Exporter::import(@_);
-        } elsif ($_ eq 'dbi_hacks') {
+        }
+        elsif ($_ eq 'dbi_hacks')
+        {
             $_ = '!dbi_hacks';
         }
     }
@@ -40,7 +44,8 @@ sub import {
  # Функция возвращает минимальное из значений
  # $r = min (@list)
  ##
-sub min {
+sub min
+{
     return undef if (@_ < 1);
     my $r = shift;
     foreach (@_) { $r = $_ if $r > $_; }
@@ -51,7 +56,8 @@ sub min {
  # Функция возвращает максимальное из значений
  # $r = max (@list)
  ##
-sub max {
+sub max
+{
     return undef if (@_ < 1);
     my $r = shift;
     foreach (@_) { $r = $_ if $r < $_; }
@@ -61,33 +67,35 @@ sub max {
 ##
  # shift arrayref
  ##
-sub ar1el {
-	my $a = shift;
-	return undef unless 'ARRAY' eq ref $a;
-	return shift @$a;
+sub ar1el
+{
+	return undef unless 'ARRAY' eq ref $_[0];
+	return shift @{$_[0]};
 }
 
 ##
  # Функция обрезает пробельные символы в начале и конце строки
- # $r = trim ($r)
+ # trim ($r) in-place
  ##
-sub trim {
-    my $a = shift;
-    $a =~ s/^\s+|\s+$//os;
-    return $a;
+sub trim
+{
+    $_[0] =~ s/^\s+//so;
+    $_[0] =~ s/\s+$//so;
+    $_[0];
 }
 
 ##
  # аналог htmlspecialchars из PHP
  # $str = htmlspecialchars ($str)
  ##
-sub htmlspecialchars {
+sub htmlspecialchars
+{
     $_ = shift;
-    s/&/&apos;/g;
-    s/</&lt;/g;
-    s/>/&gt;/g;
-    s/\"/&quot;/g;
-    s/\'/&apos;/g;
+    s/&/&apos;/gso;
+    s/</&lt;/gso;
+    s/>/&gt;/gso;
+    s/\"/&quot;/gso;
+    s/\'/&apos;/gso;
     return $_;
 }
 
@@ -95,21 +103,32 @@ sub htmlspecialchars {
  # аналог strip_tags из PHP
  # $str = strip_tags ($str)
  ##
-sub strip_tags {
+sub strip_tags
+{
     $_ = shift;
-    my $ex = join '|', (shift =~ /[a-z0-9_\-]+/giso);
+    my $ex = join '|', @{shift};
     s/<\/?(?!\/?($ex))([a-z0-9_\-]+)[^<>]*>//gis;
     return $_;
+}
+
+##
+ # удаление небезопасных HTML тегов
+ ##
+sub strip_unsafe_tags
+{
+    strip_tags($_, $safe_tags);
 }
 
 ##
  # аналог file_get_contents из PHP
  # $contents = file_get_contents ($filename)
  ##
-sub file_get_contents {
+sub file_get_contents
+{
     my ($tmp, $res);
     open ($tmp, '<'.$_[0]);
-    if ($tmp) {
+    if ($tmp)
+    {
 		local $/ = undef;
         $res = <$tmp>;
         close ($tmp);
@@ -119,32 +138,39 @@ sub file_get_contents {
 
 ##
  # изменённый вариант функции DBI::_::st::fetchall_hashref
+ # <ни фига не нужный велосипед>
  ##
-sub fetchall_hashref {
+sub fetchall_hashref
+{
     my ($sth, $key_field) = @_;
     my $hash_key_name = $sth->{FetchHashKeyName} || 'NAME';
     my $names_hash = $sth->FETCH("${hash_key_name}_hash");
     my @key_fields = (ref $key_field) ? @$key_field : $key_field ? ($key_field) : ();
     my @key_indexes;
     my $num_of_fields = $sth->FETCH('NUM_OF_FIELDS');
-    foreach (@key_fields) {
-       my $index = $names_hash->{$_};  # perl index not column
-       $index = $_ - 1 if !defined $index && DBI::looks_like_number($_) && $_>=1 && $_ <= $num_of_fields;
-       return $sth->set_err(1, "Field '$_' does not exist (not one of @{[keys %$names_hash]})")
+    foreach (@key_fields)
+    {
+        my $index = $names_hash->{$_};  # perl index not column
+        $index = $_ - 1 if !defined $index && DBI::looks_like_number($_) && $_>=1 && $_ <= $num_of_fields;
+        return $sth->set_err(1, "Field '$_' does not exist (not one of @{[keys %$names_hash]})")
             unless defined $index;
-       push @key_indexes, $index;
+        push @key_indexes, $index;
     }
     my $rows = {};
     $rows = [] unless @key_indexes;
     my $NAME = $sth->FETCH($hash_key_name);
     my @row = (undef) x $num_of_fields;
     $sth->bind_columns(\(@row)) if @row;
-    while ($sth->fetch) {
+    while ($sth->fetch)
+    {
         my $ref;
-        if (@key_indexes) {
+        if (@key_indexes)
+        {
 			$ref = $rows;
             $ref = $ref->{$row[$_]} ||= {} for @key_indexes;
-        } else {
+        }
+        else
+        {
             push @$rows, {};
             $ref = $rows->[@$rows-1];
         }
@@ -156,7 +182,8 @@ sub fetchall_hashref {
 ##
  # Обновить строку или несколько строк по значениям ключа
  ##
-sub updaterow_hashref {
+sub updaterow_hashref
+{
     my ($dbh, $table, $row, $key) = @_;
     return 0 unless
         $dbh &&
@@ -256,3 +283,4 @@ sub dumper_no_lf
 }
 
 1;
+__END__
