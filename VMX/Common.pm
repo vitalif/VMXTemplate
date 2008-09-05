@@ -178,7 +178,7 @@ sub updaterow_hashref {
  ##
 sub insertall_hashref
 {
-    my ($dbh, $table, $rows, $reselect) = @_;
+    my ($dbh, $table, $rows, $reselect, $replace) = @_;
     return 0 unless
         $dbh &&
         $table && $t->{$table} &&
@@ -191,8 +191,8 @@ sub insertall_hashref
         @$_{'ji','jin'} = ($conn_id, ++$i) foreach @$rows;
     }
     my @f = keys %{$rows->[0]};
-    my $sql =
-        'INSERT INTO `'.$t->{$table}.'` (`'.join('`,`',@f).'`) VALUES '.
+    my $sql = ($replace ? 'INSERT' : 'REPLACE').
+        ' INTO `'.$t->{$table}.'` (`'.join('`,`',@f).'`) VALUES '.
         join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
     my @bind = map { @$_{@f} } @$rows;
     my $st = $dbh->do($sql, {}, @bind);
