@@ -116,7 +116,7 @@ sub strip_tags
  ##
 sub strip_unsafe_tags
 {
-    strip_tags($_, $safe_tags);
+    strip_tags($_[0], $safe_tags);
 }
 
 ##
