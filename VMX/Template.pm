@@ -12,7 +12,7 @@ use VMX::Common qw(:all);
 use Digest::MD5 qw(md5_hex);
 use Hash::Merge;
 
-# ускорение быстродействия постоянными stat-ами
+# ускорение быстродействия постоянными stat-ами вместо вычисления md5
 my $mtimes = {};
 my $uncompiled_code = {};
 my $langhashes = {};

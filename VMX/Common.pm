@@ -3,16 +3,23 @@
 
 package VMX::Common;
 
+use strict;
 use DBI;
 use Encode;
 use Digest::MD5;
 require Exporter;
 
-@EXPORT_OK = qw(quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref insertall_hashref dumper_no_lf);
-%EXPORT_TAGS = (all => [ @EXPORT_OK ]);
+our @EXPORT_OK = qw(
+    quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
+    file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
+    insertall_hashref dumper_no_lf
+);
+our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
-our $t;
-my $safe_tags = [qw/div span h1 h2 a b i u p strike strong small big blink center ol pre sub sup font br table tr td th tbody tfoot thead tt ul li em img marquee/];
+our $allowed_html = [qw/
+    div span a b i u p h\d+ strike strong small big blink center ol pre sub
+    sup font br table tr td th tbody tfoot thead tt ul li em img marquee
+/];
 
 ##
  # Exporter-ский импорт + возможность подмены функции в DBI
@@ -107,7 +114,7 @@ sub htmlspecialchars
 sub strip_tags
 {
     $_ = shift;
-    my $ex = join '|', @{shift};
+    my $ex = join '|', @{(shift)};
     s/<\/?(?!\/?($ex))([a-z0-9_\-]+)[^<>]*>//gis;
     return $_;
 }
@@ -117,7 +124,7 @@ sub strip_tags
  ##
 sub strip_unsafe_tags
 {
-    strip_tags($_[0], $safe_tags);
+    strip_tags($_[0], $allowed_html);
 }
 
 ##
@@ -187,14 +194,13 @@ sub updaterow_hashref
 {
     my ($dbh, $table, $row, $key) = @_;
     return 0 unless
-        $dbh &&
-        $table && $t->{$table} &&
+        $dbh && $table &&
         $row && ref($row) eq 'HASH' && %$row &&
         $key && ref($key) eq 'HASH' && %$key;
     my @f = keys %$row;
     my @k = keys %$key;
     my $sql =
-        'UPDATE `'.$t->{$table}.'` SET '.
+        'UPDATE `'.$table.'` SET '.
         join(', ', map { "`$_`=?" } @f).
         ' WHERE '.join(' AND ', map { "`$_`=?" } @k);
     my @bind = (@$row{@f}, @$key{@k});
@@ -208,8 +214,7 @@ sub insertall_hashref
 {
     my ($dbh, $table, $rows, $reselect, $replace) = @_;
     return 0 unless
-        $dbh &&
-        $table && $t->{$table} &&
+        $dbh && $table && 
         $rows && ref($rows) eq 'ARRAY' && @$rows;
     my $conn_id = undef;
     if ($reselect)
@@ -220,7 +225,7 @@ sub insertall_hashref
     }
     my @f = keys %{$rows->[0]};
     my $sql = ($replace ? 'INSERT' : 'REPLACE').
-        ' INTO `'.$t->{$table}.'` (`'.join('`,`',@f).'`) VALUES '.
+        ' INTO `'.$table.'` (`'.join('`,`',@f).'`) VALUES '.
         join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
     my @bind = map { @$_{@f} } @$rows;
     my $st = $dbh->do($sql, {}, @bind);
@@ -234,14 +239,14 @@ sub insertall_hashref
         $reselect = "`$reselect`";
     }
     # осуществляем reselect данных
-    $sql = "SELECT $reselect FROM `".$t->{$table}.'` WHERE `ji`=? ORDER BY `jin` ASC';
+    $sql = "SELECT $reselect FROM `$table` WHERE `ji`=? ORDER BY `jin` ASC";
     @bind = ($conn_id);
     my $resel = $dbh->selectall_hashref($sql, [], {}, @bind);
     for (my $i = 0; $i < @$resel; $i++)
     {
         $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
     }
-    $sql = "UPDATE `".$t->{$table}."` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
+    $sql = "UPDATE `$table` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
     $dbh->do($sql, {}, @bind);
     return $st;
 }
