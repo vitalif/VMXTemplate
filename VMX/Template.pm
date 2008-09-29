@@ -263,6 +263,57 @@ sub assign_vars
 }
 
 ##
+ # Аналог assign_vars, но преобразует имена переменных
+ ##
+sub tr_assign_vars
+{
+    my $self = shift;
+    $self->assign_vars($self->tr_vars(@_));
+}
+
+##
+ # Аналог assign_block_vars, но преобазует имена переменных
+ ##
+sub tr_assign_block_vars
+{
+    my $self = shift;
+    my $block = shift;
+    $self->assign_block_vars($block, $self->tr_vars($@));
+}
+
+##
+ # Аналог append_block_vars, но преобазует имена переменных
+ ##
+sub tr_assign_block_vars
+{
+    my $self = shift;
+    my $block = shift;
+    $self->append_block_vars($block, $self->tr_vars($@));
+}
+
+##
+ # Собственно функция, которая преобразует имена переменных
+ ##
+sub tr_vars
+{
+    my $self = shift;
+    my $tr = shift;
+    my $prefix = shift;
+    my %h = ();
+    my ($k, $v);
+    $tr = eval '\&'.$tr if $tr && ref($tr) ne 'CODE';
+    while(@_)
+    {
+        $k = shift;
+        $v = shift;
+        $k = &$tr($k) if $tr;
+        $k = $prefix.$k if $prefix;
+        $h{$k} = $v;
+    }
+    return %h;
+}
+
+##
  # Функция загружает файл для хэндла HANDLE
  # $obj->loadfile ($handle)
  ##
