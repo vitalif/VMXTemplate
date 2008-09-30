@@ -30,7 +30,7 @@ sub new
         conv =>
         {
             # char => func_name | \&sub_ref
-            '<' => 'strip_tags',
+            'T' => 'strip_tags',
             'i' => 'int',
             's' => 'htmlspecialchars',
             'l' => 'lc',
