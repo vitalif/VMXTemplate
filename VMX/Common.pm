@@ -4,15 +4,18 @@
 package VMX::Common;
 
 use strict;
-use DBI;
+use utf8;
 use Encode;
+
+use DBI;
 use Digest::MD5;
+
 require Exporter;
 
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref dumper_no_lf
+    insertall_hashref dumper_no_lf multiselectall_hashref
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -21,9 +24,7 @@ our $allowed_html = [qw/
     sup font br table tr td th tbody tfoot thead tt ul li em img marquee
 /];
 
-##
- # Exporter-ский импорт + возможность подмены функции в DBI
- ##
+# Exporter-ский импорт + подмена функции в DBI
 sub import
 {
     foreach (@_)
@@ -47,10 +48,8 @@ sub import
 	return $r;
 }
 
-##
- # Функция возвращает минимальное из значений
- # $r = min (@list)
- ##
+# Функция возвращает минимальное из значений
+# $r = min (@list)
 sub min
 {
     return undef if (@_ < 1);
@@ -59,10 +58,8 @@ sub min
     return $r;
 }
 
-##
- # Функция возвращает максимальное из значений
- # $r = max (@list)
- ##
+# Функция возвращает максимальное из значений
+# $r = max (@list)
 sub max
 {
     return undef if (@_ < 1);
@@ -71,19 +68,15 @@ sub max
     return $r;
 }
 
-##
- # shift arrayref
- ##
+# ar1el($a) - аналог ($a || [])->[0], только ещё проверяет, что $a есть arrayref
 sub ar1el
 {
 	return undef unless 'ARRAY' eq ref $_[0];
 	return shift @{$_[0]};
 }
 
-##
- # Функция обрезает пробельные символы в начале и конце строки
- # trim ($r) in-place
- ##
+# Функция обрезает пробельные символы в начале и конце строки
+# trim ($r) in-place
 sub trim
 {
     $_ = $_[0];
@@ -92,10 +85,8 @@ sub trim
     $_;
 }
 
-##
- # аналог htmlspecialchars из PHP
- # $str = htmlspecialchars ($str)
- ##
+# аналог HTML::Entities::encode_entities
+# $str = htmlspecialchars ($str)
 sub htmlspecialchars
 {
     $_ = shift;
@@ -107,10 +98,8 @@ sub htmlspecialchars
     return $_;
 }
 
-##
- # аналог strip_tags из PHP
- # $str = strip_tags ($str)
- ##
+# удаление тегов из строки, кроме заданных
+# $str = strip_tags ($str)
 sub strip_tags
 {
     $_ = shift;
@@ -119,18 +108,14 @@ sub strip_tags
     return $_;
 }
 
-##
- # удаление небезопасных HTML тегов
- ##
+# удаление небезопасных HTML тегов (всех кроме our $allowed_html)
 sub strip_unsafe_tags
 {
     strip_tags($_[0], $allowed_html);
 }
 
-##
- # аналог file_get_contents из PHP
- # $contents = file_get_contents ($filename)
- ##
+# аналог File::Slurp
+# $contents = file_get_contents ($filename)
 sub file_get_contents
 {
     my ($tmp, $res);
@@ -144,10 +129,9 @@ sub file_get_contents
     return $res;
 }
 
-##
- # изменённый вариант функции DBI::_::st::fetchall_hashref
- # <ни фига не нужный велосипед>
- ##
+# изменённый вариант функции DBI::_::st::fetchall_hashref
+# <ни фига не нужный велосипед>
+# делает то же что и $dbh->selectall_arrayref(..., {Slice=>{}}, ...);
 sub fetchall_hashref
 {
     my ($sth, $key_field) = @_;
@@ -187,9 +171,9 @@ sub fetchall_hashref
     return $rows;
 }
 
-##
- # Обновить строку или несколько строк по значениям ключа
- ##
+# Обновить все строки, у которых значения полей с названиями ключей %$key
+# равны значениям %$key, установив в них поля с названиями ключей %$row
+# значениям %$row
 sub updaterow_hashref
 {
     my ($dbh, $table, $row, $key) = @_;
@@ -207,9 +191,10 @@ sub updaterow_hashref
     return $dbh->do($sql, {}, @bind);
 }
 
-##
- # Вставить набор записей в таблицу
- ##
+# Вставить набор записей $rows = [{},{},{},...] в таблицу $table
+# Возможно после этого дополнить каждую запись $reselect полями (напр. '*'),
+# сделав дополнительный запрос выборки. Для этого требуются ещё поля
+# `ji` INT DEFAULT NULL и `jin` INT DEFAULT NULL, и индекс по ним.
 sub insertall_hashref
 {
     my ($dbh, $table, $rows, $reselect, $replace) = @_;
@@ -251,6 +236,72 @@ sub insertall_hashref
     return $st;
 }
 
+# вещь, о которой все мы, пользователи MySQL, давно мечтали - возможность
+# сделать SELECT t1.*, t2.*, t3.* и при этом успешно разделить поля таблиц,
+# распределив их по хешам. Только надо делать SELECT t1.*, 0 AS '_', t2.* и т.п,
+# т.е. поля разных таблиц разделять неким разделителем, и указывать его
+# качестве $split. $names - имена отдельных хешей.
+sub multiselectall_hashref
+{
+    my ($dbh, $query, $bind, $split, $names) = @_;
+    return undef unless ref($dbh) && $query && $split && $names && @$names;
+    $bind ||= [];
+    unless (ref $query)
+    {
+        # запрос преображаем в stmt
+        $query = $dbh->prepare_cached($query);
+        return undef unless $query;
+    }
+    # делаем запрос к базе
+    my $rows = $query->selectall_arrayref(@$bind);
+    return [] unless $rows && @$rows;
+    my ($nh, $ni);
+    unless ($query->{__hack_split_multiselect})
+    {
+        # массивы индексов и имён ещё не построены, построим
+        $nh = [[]];
+        $ni = [[]];
+        my $n = [ @{$query->{NAME_lc}} ];
+        my $i = 0;
+        for my $k (0..$#$n)
+        {
+            if ($n->[$k] eq $split)
+            {
+                $i++;
+                $nh->{$i} = [];
+                $ni->{$i} = [];
+            }
+            else
+            {
+                push @{$nh->{$i}}, $n->[$k];
+                push @{$ni->{$i}}, $k;
+            }
+        }
+        $query->{__hack_split_multiselect} = [$nh, $ni];
+    }
+    else
+    {
+        # или возьмём их из объекта запроса
+        ($nh, $ni) = @{$query->{__hack_split_multiselect}};
+    }
+    # преобразуем строки
+    my ($row, $nr, $i);
+    foreach $row (@$rows)
+    {
+        $nr = {};
+        for $i (0..$#$names)
+        {
+            last unless $names->[$i] && $nh->[$i] && $ni->[$i];
+            $nr->{$names->[$i]} = {};
+            @{$nr->{$names->[$i]}}{@{$nh->[$i]}} = @$row[$ni->[$i]];
+        }
+        $row = $nr;
+    }
+    # возвращаем результат
+    return $rows;
+}
+
+# вычисление MD5 хеша от файла
 sub filemd5
 {
     my ($file) = @_;
@@ -266,6 +317,8 @@ sub filemd5
     return $r;
 }
 
+# тоже <ни фига не нужный велосипед>, экранирование символов для MySQL,
+# да ещё и несколько кривое
 sub mysql_quote
 {
 	my ($a) = @_;
@@ -274,6 +327,7 @@ sub mysql_quote
 	return "'$a'";
 }
 
+# экранирование кавычек
 sub quotequote
 {
     my ($a) = @_;
@@ -281,6 +335,7 @@ sub quotequote
     return $a;
 }
 
+# Dumper без переводов строки
 sub dumper_no_lf
 {
     my $r = Data::Dumper::Dumper (@_);
