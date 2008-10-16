@@ -9,13 +9,14 @@ use Encode;
 
 use DBI;
 use Digest::MD5;
+use Date::Parse;
 
 require Exporter;
 
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref dumper_no_lf multiselectall_hashref
+    insertall_hashref dumper_no_lf multiselectall_hashref str2time
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -131,7 +132,7 @@ sub file_get_contents
 
 # изменённый вариант функции DBI::_::st::fetchall_hashref
 # <ни фига не нужный велосипед>
-# делает то же что и $dbh->selectall_arrayref(..., {Slice=>{}}, ...);
+# делает то же что и $dbh->selectall_arrayref(..., {}, ...);
 sub fetchall_hashref
 {
     my ($sth, $key_field) = @_;
@@ -340,6 +341,14 @@ sub dumper_no_lf
     my $r = Data::Dumper::Dumper (@_);
     $r =~ s/\s+/ /giso;
     return $r;
+}
+
+# str2time, принимающий формат даты вида DD.MM.YYYY
+sub str2time
+{
+    my ($str) = @_;
+    $str =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
+    return Date::Parse::str2time($str);
 }
 
 1;
