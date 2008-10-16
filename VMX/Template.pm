@@ -114,9 +114,9 @@ sub make_filename
 
 ##
  # Функция уничтожает данные шаблона
- # $obj->destroy ()
+ # $obj->clear ()
  ##
-sub destroy
+sub clear
 {
     shift->{_tpldata} = {};
     return 1;

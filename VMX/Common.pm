@@ -253,36 +253,35 @@ sub multiselectall_hashref
         return undef unless $query;
     }
     # делаем запрос к базе
-    my $rows = $query->selectall_arrayref(@$bind);
+    $query->execute(@$bind);
+    my $rows = $query->fetchall_arrayref({});
     return [] unless $rows && @$rows;
-    my ($nh, $ni);
-    unless ($query->{__hack_split_multiselect})
+    my $nh;
+    # DIRTY HACK :-)
+    unless ((tied %$query)->{__hack_split_multiselect})
     {
-        # массивы индексов и имён ещё не построены, построим
+        # массив имён ещё не построен, построим
         $nh = [[]];
-        $ni = [[]];
-        my $n = [ @{$query->{NAME_lc}} ];
+        my $n = [ @{$query->{$query->{FetchHashKeyName}}} ];
         my $i = 0;
-        for my $k (0..$#$n)
+        foreach (@{$query->{$query->{FetchHashKeyName}}})
         {
-            if ($n->[$k] eq $split)
+            if ($_ eq $split)
             {
                 $i++;
-                $nh->{$i} = [];
-                $ni->{$i} = [];
+                $nh->[$i] = [];
             }
             else
             {
-                push @{$nh->{$i}}, $n->[$k];
-                push @{$ni->{$i}}, $k;
+                push @{$nh->[$i]}, $_;
             }
         }
-        $query->{__hack_split_multiselect} = [$nh, $ni];
+        (tied %$query)->{__hack_split_multiselect} = $nh;
     }
     else
     {
-        # или возьмём их из объекта запроса
-        ($nh, $ni) = @{$query->{__hack_split_multiselect}};
+        # или возьмём из объекта запроса
+        $nh = (tied %$query)->{__hack_split_multiselect};
     }
     # преобразуем строки
     my ($row, $nr, $i);
@@ -291,9 +290,9 @@ sub multiselectall_hashref
         $nr = {};
         for $i (0..$#$names)
         {
-            last unless $names->[$i] && $nh->[$i] && $ni->[$i];
+            last unless $names->[$i] && $nh->[$i];
             $nr->{$names->[$i]} = {};
-            @{$nr->{$names->[$i]}}{@{$nh->[$i]}} = @$row[$ni->[$i]];
+            @{$nr->{$names->[$i]}}{@{$nh->[$i]}} = @$row{@{$nh->[$i]}};
         }
         $row = $nr;
     }
