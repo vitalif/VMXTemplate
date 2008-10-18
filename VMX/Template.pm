@@ -228,6 +228,7 @@ sub append_block_vars
     {
         # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
+        $self->{_tpldata}{$block} ||= [];
         $lastit = @{$self->{_tpldata}{$block}} - 1;
         $self->{_tpldata}{$block}[$lastit]{$_} = $vararray{$_}
             foreach keys %vararray;

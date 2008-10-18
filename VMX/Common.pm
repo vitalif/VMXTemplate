@@ -132,7 +132,7 @@ sub file_get_contents
 
 # изменённый вариант функции DBI::_::st::fetchall_hashref
 # <ни фига не нужный велосипед>
-# делает то же что и $dbh->selectall_arrayref(..., {}, ...);
+# делает то же что и $dbh->selectall_arrayref(..., {Slice=>{}}, ...);
 sub fetchall_hashref
 {
     my ($sth, $key_field) = @_;
