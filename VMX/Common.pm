@@ -131,43 +131,121 @@ sub file_get_contents
 }
 
 # изменённый вариант функции DBI::_::st::fetchall_hashref
-# <ни фига не нужный велосипед>
-# делает то же что и $dbh->selectall_arrayref(..., {Slice=>{}}, ...);
+# первая вещь - аналог fetchall_arrayref({Slice=>{}}), т.е. просто возвращает
+# массив хешей при передаче в качестве $key_field ссылки на пустой массив или undef.
+# вторая вещь - о которой все мы, пользователи MySQL, давно мечтали - возможность
+# сделать SELECT t1.*, t2.*, t3.* и при этом успешно разделить поля таблиц,
+# распределив их по отдельным хешам.
+# весь смысл в том, что при передаче в качестве $key_field хеша делает из каждой
+# строчки вложенный hashref, а колонки из результата запроса разделяет по
+# $key_field->{Separator} или '_' по умолчанию.
+# то есть например $dbh->selectall_hashref(
+#    "SELECT t1.*, 0 AS `_`, t2.* FROM t1 JOIN t2 USING (join_field)",
+#    { Separator => '_', Names => [ 't1', 't2' ] }, {}
+# ) вернёт ссылку на массив хешрефов вида { t1 => { ... }, t2 => { ... } },
+# т.е. поля t1 и t2 будут разделены по подхешам даже в случае, если в t1 и t2
+# существуют поля с одинаковыми именами
+# кроме того, кэширует все свои вспомогательные массивы в объекте запроса
+# для дополнительной оптимальности
 sub fetchall_hashref
 {
     my ($sth, $key_field) = @_;
+    return multifetchall_hashref($sth, $key_field) if ref($key_field) eq 'HASH';
     my $hash_key_name = $sth->{FetchHashKeyName} || 'NAME';
     my $names_hash = $sth->FETCH("${hash_key_name}_hash");
     my @key_fields = (ref $key_field) ? @$key_field : $key_field ? ($key_field) : ();
-    my @key_indexes;
+    my $cachename = "__cache_key_fields_".join "_", @key_fields;
+    my $key_indexes = $sth->{$cachename};
     my $num_of_fields = $sth->FETCH('NUM_OF_FIELDS');
-    foreach (@key_fields)
+    unless ($key_indexes)
     {
-        my $index = $names_hash->{$_};  # perl index not column
-        $index = $_ - 1 if !defined $index && DBI::looks_like_number($_) && $_>=1 && $_ <= $num_of_fields;
-        return $sth->set_err(1, "Field '$_' does not exist (not one of @{[keys %$names_hash]})")
-            unless defined $index;
-        push @key_indexes, $index;
+        $key_indexes = [];
+        foreach (@key_fields)
+        {
+            my $index = $names_hash->{$_}; # perl index not column
+            $index = $_ - 1 if !defined $index && DBI::looks_like_number($_) && $_ >= 1 && $_ <= $num_of_fields;
+            return $sth->set_err(1, "Field '$_' does not exist (not one of @{[keys %$names_hash]})")
+                unless defined $index;
+            push @$key_indexes, $index;
+        }
+        $sth->{$cachename} = $key_indexes;
     }
     my $rows = {};
-    $rows = [] unless @key_indexes;
+    $rows = [] unless scalar @key_fields;
     my $NAME = $sth->FETCH($hash_key_name);
     my @row = (undef) x $num_of_fields;
     $sth->bind_columns(\(@row)) if @row;
+    my $ref;
+    if (scalar @key_fields)
+    {
+        while ($sth->fetch)
+        {
+            $ref = $rows;
+            $ref = $ref->{$row[$_]} ||= {} for @$key_indexes;
+            @$ref{@$NAME} = @row;
+        }
+    }
+    else
+    {
+        while ($sth->fetch)
+        {
+            push @$rows, $ref = {};
+            @$ref{@$NAME} = @row;
+        }
+    }
+    return $rows;
+}
+
+# вот здесь-то и реализовано вертикальное разбиение результата
+sub multifetchall_hashref
+{
+    my ($sth, $key_field) = @_;
+    $key_field = [] unless ref($key_field->{Multi}) eq 'ARRAY';
+    return fetchall_hashref($sth, $key_field) if ref($key_field) ne 'HASH';
+    my $NAME = $sth->FETCH($sth->{FetchHashKeyName} || 'NAME');
+    my $num_of_fields = $sth->FETCH('NUM_OF_FIELDS');
+    my $cachename = "__cache_multi_key_fields";
+    my ($nh, $ni, $i, $hs);
+    unless ($sth->{$cachename})
+    {
+        # массивы индексов и имён ещё не построены, построим
+        my $split = $key_field->{Separator} || '_';
+        $nh = [[]];
+        $ni = [[]];
+        $i = 0;
+        for my $k (0..$#$NAME)
+        {
+            if ($NAME->[$k] eq $split)
+            {
+                $i++;
+                $nh->[$i] = [];
+                $ni->[$i] = [];
+            }
+            else
+            {
+                push @{$nh->[$i]}, $NAME->[$k];
+                push @{$ni->[$i]}, $k;
+            }
+        }
+        $sth->{$cachename} = [ $nh, $ni ];
+    }
+    else
+    {
+        ($nh, $ni) = @{$sth->{$cachename}};
+    }
+    my $rows = [];
+    my @row = (undef) x $num_of_fields;
+    $sth->bind_columns(\(@row)) if @row;
+    $hs = $key_field->{Multi};
+    my $ref;
     while ($sth->fetch)
     {
-        my $ref;
-        if (@key_indexes)
+        push @$rows, $ref = {};
+        for $i (0..$#$hs)
         {
-			$ref = $rows;
-            $ref = $ref->{$row[$_]} ||= {} for @key_indexes;
+            $ref->{$hs->[$i]} = {};
+            @{$ref->{$hs->[$i]}}{@{$nh->[$i]}} = @row[@{$ni->[$i]}];
         }
-        else
-        {
-            push @$rows, {};
-            $ref = $rows->[@$rows-1];
-        }
-        @$ref{@$NAME} = @row;
     }
     return $rows;
 }
