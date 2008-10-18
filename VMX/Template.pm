@@ -153,7 +153,7 @@ sub datapop
 sub parse
 {
     my $self = shift;
-    my $handle = shift;
+    my ($handle) = @_;
     die("[Template] couldn't load template file for handle $handle")
         unless $self->loadfile($handle);
     $self->compile($handle);

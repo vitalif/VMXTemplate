@@ -90,7 +90,7 @@ sub trim
 # $str = htmlspecialchars ($str)
 sub htmlspecialchars
 {
-    $_ = shift;
+    local $_ = shift;
     s/&/&apos;/gso;
     s/</&lt;/gso;
     s/>/&gt;/gso;
