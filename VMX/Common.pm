@@ -16,7 +16,7 @@ require Exporter;
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref dumper_no_lf multiselectall_hashref str2time
+    insertall_hashref dumper_no_lf str2time
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -313,70 +313,6 @@ sub insertall_hashref
     $sql = "UPDATE `$table` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
     $dbh->do($sql, {}, @bind);
     return $st;
-}
-
-# вещь, о которой все мы, пользователи MySQL, давно мечтали - возможность
-# сделать SELECT t1.*, t2.*, t3.* и при этом успешно разделить поля таблиц,
-# распределив их по хешам. Только надо делать SELECT t1.*, 0 AS '_', t2.* и т.п,
-# т.е. поля разных таблиц разделять неким разделителем, и указывать его
-# качестве $split. $names - имена отдельных хешей.
-sub multiselectall_hashref
-{
-    my ($dbh, $query, $bind, $split, $names) = @_;
-    return undef unless ref($dbh) && $query && $split && $names && @$names;
-    $bind ||= [];
-    unless (ref $query)
-    {
-        # запрос преображаем в stmt
-        $query = $dbh->prepare_cached($query);
-        return undef unless $query;
-    }
-    # делаем запрос к базе
-    $query->execute(@$bind);
-    my $rows = $query->fetchall_arrayref({});
-    return [] unless $rows && @$rows;
-    my $nh;
-    # DIRTY HACK :-)
-    unless ((tied %$query)->{__hack_split_multiselect})
-    {
-        # массив имён ещё не построен, построим
-        $nh = [[]];
-        my $n = [ @{$query->{$query->{FetchHashKeyName}}} ];
-        my $i = 0;
-        foreach (@{$query->{$query->{FetchHashKeyName}}})
-        {
-            if ($_ eq $split)
-            {
-                $i++;
-                $nh->[$i] = [];
-            }
-            else
-            {
-                push @{$nh->[$i]}, $_;
-            }
-        }
-        (tied %$query)->{__hack_split_multiselect} = $nh;
-    }
-    else
-    {
-        # или возьмём из объекта запроса
-        $nh = (tied %$query)->{__hack_split_multiselect};
-    }
-    # преобразуем строки
-    my ($row, $nr, $i);
-    foreach $row (@$rows)
-    {
-        $nr = {};
-        for $i (0..$#$names)
-        {
-            last unless $names->[$i] && $nh->[$i];
-            $nr->{$names->[$i]} = {};
-            @{$nr->{$names->[$i]}}{@{$nh->[$i]}} = @$row{@{$nh->[$i]}};
-        }
-        $row = $nr;
-    }
-    # возвращаем результат
-    return $rows;
 }
 
 # вычисление MD5 хеша от файла
