@@ -185,8 +185,8 @@ sub assign_block_vars
     {
         # если блок, но не вложенный
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
-		$self->{_tpldata}{$block} = [] unless $self->{_tpldata}{$block};
-        push @{$self->{_tpldata}{$block}}, $vararray;
+		$self->{_tpldata}->{$block} ||= [];
+        push @{$self->{_tpldata}->{$block}}, $vararray;
     }
     else
     {

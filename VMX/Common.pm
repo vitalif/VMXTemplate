@@ -80,7 +80,7 @@ sub ar1el
 # trim ($r) in-place
 sub trim
 {
-    $_ = $_[0];
+    local $_ = $_[0];
     s/^\s+//so;
     s/\s+$//so;
     $_;
@@ -90,7 +90,7 @@ sub trim
 # $str = htmlspecialchars ($str)
 sub htmlspecialchars
 {
-    local $_ = shift;
+    local $_ = $_[0];
     s/&/&apos;/gso;
     s/</&lt;/gso;
     s/>/&gt;/gso;
@@ -103,7 +103,7 @@ sub htmlspecialchars
 # $str = strip_tags ($str)
 sub strip_tags
 {
-    $_ = shift;
+    local $_ = shift;
     my $ex = join '|', @{(shift)};
     s/<\/?(?!\/?($ex))([a-z0-9_\-]+)[^<>]*>//gis;
     return $_;
