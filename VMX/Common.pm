@@ -288,7 +288,7 @@ sub insertall_hashref
         @$_{'ji','jin'} = ($conn_id, ++$i) foreach @$rows;
     }
     my @f = keys %{$rows->[0]};
-    my $sql = ($replace ? 'INSERT' : 'REPLACE').
+    my $sql = ($replace ? 'REPLACE' : 'INSERT').
         ' INTO `'.$table.'` (`'.join('`,`',@f).'`) VALUES '.
         join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
     my @bind = map { @$_{@f} } @$rows;
