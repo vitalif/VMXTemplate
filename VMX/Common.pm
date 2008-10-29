@@ -16,7 +16,7 @@ require Exporter;
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref dumper_no_lf str2time
+    insertall_hashref deleteall_hashref dumper_no_lf str2time
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -267,6 +267,19 @@ sub updaterow_hashref
         join(', ', map { "`$_`=?" } @f).
         ' WHERE '.join(' AND ', map { "`$_`=?" } @k);
     my @bind = (@$row{@f}, @$key{@k});
+    return $dbh->do($sql, {}, @bind);
+}
+
+# Удалить все строки, у которых значения полей с названиями ключей %$key
+# равны значениям %$key
+sub deleteall_hashref
+{
+    my ($dbh, $table, $key) = @_;
+    return 0 unless $dbh && $table &&
+        $key && ref($key) eq 'HASH' && %$key;
+    my @k = keys %$key;
+    my $sql = "DELETE FROM `$table` WHERE ".join(" AND ", map { "`$_`=?" } @k);
+    my @bind = (@$key{@k});
     return $dbh->do($sql, {}, @bind);
 }
 
