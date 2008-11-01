@@ -16,7 +16,7 @@ require Exporter;
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref deleteall_hashref dumper_no_lf str2time
+    insertall_hashref deleteall_hashref dumper_no_lf str2time callif
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -376,6 +376,21 @@ sub str2time
     my ($str) = @_;
     $str =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
     return Date::Parse::str2time($str);
+}
+
+# если значение - вернуть значение, если coderef - вызвать и вернуть значение
+sub callif
+{
+    my $sub = shift;
+    if (ref($sub) eq 'CODE')
+    {
+        return &$sub(@_);
+    }
+    elsif ($sub)
+    {
+        return $sub;
+    }
+    return wantarray ? () : undef;
 }
 
 1;
