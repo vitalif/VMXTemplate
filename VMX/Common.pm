@@ -16,7 +16,8 @@ require Exporter;
 our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref deleteall_hashref dumper_no_lf str2time callif
+    insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
+    normalize_url
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -391,6 +392,44 @@ sub callif
         return $sub;
     }
     return wantarray ? () : undef;
+}
+
+# чтение N байт из urandom или rand() в случае его отсутствия
+sub urandom
+{
+    my ($bs) = @_;
+    return undef unless $bs && $bs > 0;
+    my ($fd, $data);
+    if (open $fd, "</dev/urandom")
+    {
+        read $fd, $data, $bs;
+        close $fd;
+    }
+    else
+    {
+        $data .= pack("C",int(rand(256))) for 1..$bs;
+    }
+    return $data;
+}
+
+# Нормализация одной url относительно другой
+sub normalize_url ($$)
+{
+    my ($base, $url) = @_;
+    return $url if $url =~ m%^[a-z]+://%iso;
+    if ($url =~ m%^/%so)
+    {
+        $base = $1 if $base =~ m%^([a-z]+://[^/]*)%so;
+    }
+    elsif ($url =~ /^\?/so)
+    {
+        $base = $& if $base =~ m/^[^\?]*/so;
+    }
+    else
+    {
+        $base = $` if $base =~ m%[^\/]*$%so;
+    }
+    return $base.$url;
 }
 
 1;
