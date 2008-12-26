@@ -218,7 +218,6 @@ sub append_block_vars
     my $block = shift;
     my %vararray = @_;
     my $lastit;
-
     if (!$block || $block eq '.')
     {
         # если не блок, а корневой уровень
@@ -230,6 +229,7 @@ sub append_block_vars
         $block =~ s/\.*$/./; # добавляем . в конец, если надо
         $self->{_tpldata}{$block} ||= [];
         $lastit = @{$self->{_tpldata}{$block}} - 1;
+        $lastit = 0 if $lastit < 0;
         $self->{_tpldata}{$block}[$lastit]{$_} = $vararray{$_}
             foreach keys %vararray;
     }
@@ -279,17 +279,17 @@ sub tr_assign_block_vars
 {
     my $self = shift;
     my $block = shift;
-    $self->assign_block_vars($block, $self->tr_vars($@));
+    $self->assign_block_vars($block, $self->tr_vars(@_));
 }
 
 ##
  # Аналог append_block_vars, но преобазует имена переменных
  ##
-sub tr_assign_block_vars
+sub tr_append_block_vars
 {
     my $self = shift;
     my $block = shift;
-    $self->append_block_vars($block, $self->tr_vars($@));
+    $self->append_block_vars($block, $self->tr_vars(@_));
 }
 
 ##
@@ -302,7 +302,15 @@ sub tr_vars
     my $prefix = shift;
     my %h = ();
     my ($k, $v);
-    $tr = eval '\&'.$tr if $tr && ref($tr) ne 'CODE';
+    if ($tr && !ref($tr))
+    {
+        unless ($self->{_tr_subroutine_cache}->{$tr})
+        {
+            # делаем так, чтобы всякие uc, lc и т.п работали
+            $self->{_tr_subroutine_cache}->{$tr} = eval 'sub { '.$tr.'($_[0]) }';
+        }
+        $tr = $self->{_tr_subroutine_cache}->{$tr};
+    }
     while(@_)
     {
         $k = shift;
