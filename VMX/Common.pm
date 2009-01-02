@@ -29,7 +29,8 @@ our $allowed_html = [qw/
 # Exporter-ский импорт + подмена функции в DBI
 sub import
 {
-    foreach (@_)
+    my @args = @_;
+    foreach (@args)
     {
         if ($_ eq '!dbi_hacks')
         {
@@ -45,7 +46,7 @@ sub import
     $DBI::DBI_methods{st}{fetchall_hashref} = { U =>[1,2,'[ $key_field ]'] };
     $DBI::DBI_methods{db}{selectall_hashref} = { U =>[2,0,'$statement [, $keyfield [, \%attr [, @bind_params ] ] ]'], O=>0x2000 };
 	$Exporter::ExportLevel = 1;
-    my $r = Exporter::import(@_);
+    my $r = Exporter::import(@args);
 	$Exporter::ExportLevel = 0;
 	return $r;
 }
@@ -138,12 +139,14 @@ sub file_get_contents
 # сделать SELECT t1.*, t2.*, t3.* и при этом успешно разделить поля таблиц,
 # распределив их по отдельным хешам.
 # весь смысл в том, что при передаче в качестве $key_field хеша делает из каждой
-# строчки вложенный hashref, а колонки из результата запроса разделяет по
-# $key_field->{Separator} или '_' по умолчанию.
+# строчки вложенный hashref или arrayref, а колонки из результата запроса разделяет
+# по $key_field->{Separator} или '_' по умолчанию.
 # то есть например $dbh->selectall_hashref(
 #    "SELECT t1.*, 0 AS `_`, t2.* FROM t1 JOIN t2 USING (join_field)",
-#    { Separator => '_', Names => [ 't1', 't2' ] }, {}
+#    { Separator => '_', Multi => [ 't1', 't2' ] }, {}
 # ) вернёт ссылку на массив хешрефов вида { t1 => { ... }, t2 => { ... } },
+# а если в качестве Multi передать просто скаляр, являющийся истиной (напр. 1),
+# то вернёт ссылку на массив массивов вида [ { ... }, { ... } ].
 # т.е. поля t1 и t2 будут разделены по подхешам даже в случае, если в t1 и t2
 # существуют поля с одинаковыми именами
 # кроме того, кэширует все свои вспомогательные массивы в объекте запроса
@@ -201,7 +204,9 @@ sub fetchall_hashref
 sub multifetchall_hashref
 {
     my ($sth, $key_field) = @_;
-    $key_field = [] unless ref($key_field->{Multi}) eq 'ARRAY';
+    $key_field = [] unless
+        ref($key_field->{Multi}) eq 'ARRAY' ||
+        $key_field->{Multi} && !ref $key_field->{Multi};
     return fetchall_hashref($sth, $key_field) if ref($key_field) ne 'HASH';
     my $NAME = $sth->FETCH($sth->{FetchHashKeyName} || 'NAME');
     my $num_of_fields = $sth->FETCH('NUM_OF_FIELDS');
@@ -239,13 +244,28 @@ sub multifetchall_hashref
     $sth->bind_columns(\(@row)) if @row;
     $hs = $key_field->{Multi};
     my $ref;
-    while ($sth->fetch)
+    if (ref $hs) # если передана ссылка на массив - это имена в хеше
     {
-        push @$rows, $ref = {};
-        for $i (0..$#$hs)
+        while ($sth->fetch)
         {
-            $ref->{$hs->[$i]} = {};
-            @{$ref->{$hs->[$i]}}{@{$nh->[$i]}} = @row[@{$ni->[$i]}];
+            push @$rows, $ref = {};
+            for $i (0..$#$hs)
+            {
+                $ref->{$hs->[$i]} = {};
+                @{$ref->{$hs->[$i]}}{@{$nh->[$i]}} = @row[@{$ni->[$i]}];
+            }
+        }
+    }
+    else # иначе это будут вложенные массивы
+    {
+        while ($sth->fetch)
+        {
+            push @$rows, $ref = [];
+            for $i (0..$#$ni)
+            {
+                $ref->[$i] = {};
+                @{$ref->[$i]}{@{$nh->[$i]}} = @row[@{$ni->[$i]}];
+            }
         }
     }
     return $rows;
