@@ -10,6 +10,8 @@ use Encode;
 use DBI;
 use Digest::MD5;
 use Date::Parse;
+use Date::Manip;
+use I18N::Langinfo qw(langinfo CODESET);
 
 require Exporter;
 
@@ -25,6 +27,8 @@ our $allowed_html = [qw/
     div span a b i u p h\d+ strike strong small big blink center ol pre sub
     sup font br table tr td th tbody tfoot thead tt ul li em img marquee
 /];
+
+our @DATE_INIT = ("Language=Russian", "DateFormat=non-US");
 
 # Exporter-ский импорт + подмена функции в DBI
 sub import
@@ -392,11 +396,21 @@ sub dumper_no_lf
 }
 
 # str2time, принимающий формат даты вида DD.MM.YYYY
+my $init;
 sub str2time
 {
     my ($str) = @_;
-    $str =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
-    return Date::Parse::str2time($str);
+    my $time;
+    Date_Init(@DATE_INIT), $init = 1 unless $init;
+    $time = $str;
+    Encode::_utf8_off($time);
+    Encode::from_to($time, langinfo(CODESET()), "koi8-r");
+    $time = UnixDate(ParseDate($time),"%s");
+    return $time if defined $time;
+    $time = $str;
+    $time =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
+    $time = Date::Parse::str2time($time);
+    return $time;
 }
 
 # если значение - вернуть значение, если coderef - вызвать и вернуть значение
