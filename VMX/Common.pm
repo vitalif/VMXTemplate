@@ -4,6 +4,7 @@
 package VMX::Common;
 
 use strict;
+use locale;
 use utf8;
 use Encode;
 
@@ -401,10 +402,13 @@ sub str2time
 {
     my ($str) = @_;
     my $time;
+    my $codeset = langinfo(CODESET());
     Date_Init(@DATE_INIT), $init = 1 unless $init;
+    Encode::_utf8_on($str) if $codeset =~ /utf-?8/iso;
+    $str = lc $str;
     $time = $str;
     Encode::_utf8_off($time);
-    Encode::from_to($time, langinfo(CODESET()), "koi8-r");
+    Encode::from_to($time, $codeset, "koi8-r");
     $time = UnixDate(ParseDate($time),"%s");
     return $time if defined $time;
     $time = $str;

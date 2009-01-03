@@ -47,6 +47,7 @@ sub new
         files           => {},    # ~ : имена файлов
         package_names   => {},    # ~ : последние названия пакетов шаблонов
         _tpldata_stack  => [],    # стек tpldata-ы для datapush и datapop
+        use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
         @_
     };
     bless $self, $class;
@@ -527,6 +528,7 @@ sub compile
     $code = "package $PN;
 use VMX::Common qw(:all);
 no strict;
+".($self->{use_utf8} ? "use utf8;" : "")."
 
 sub parse {
     my \$self = shift;
