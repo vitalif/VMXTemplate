@@ -111,8 +111,9 @@ sub htmlspecialchars
 sub strip_tags
 {
     local $_ = shift;
-    my $ex = join '|', @{(shift)};
-    s/<\/?(?!\/?($ex))([a-z0-9_\-]+)[^<>]*>//gis;
+    my $ex = join '|', @{(shift || [])};
+    $ex = "(?!/?($ex))" if $ex;
+    s/<\/?$ex([a-z0-9_\-]+)[^<>]*>//gis;
     return $_;
 }
 
