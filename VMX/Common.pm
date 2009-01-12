@@ -7,6 +7,8 @@ use strict;
 use locale;
 use utf8;
 use Encode;
+use URI::Escape qw(!uri_escape);
+use Carp;
 
 use DBI;
 use Digest::MD5;
@@ -20,7 +22,7 @@ our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url
+    normalize_url utf8on
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -31,29 +33,43 @@ our $allowed_html = [qw/
 
 our @DATE_INIT = ("Language=Russian", "DateFormat=non-US");
 
+my $uri_escape_original;
+
 # Exporter-ский импорт + подмена функции в DBI
 sub import
 {
     my @args = @_;
+    my $dbi_hacks = 0;
+    my $uri_escape_hacks = 0;
     foreach (@args)
     {
-        if ($_ eq '!dbi_hacks')
-        {
-            return Exporter::import(@_);
-        }
-        elsif ($_ eq 'dbi_hacks')
+        if ($_ eq 'dbi_hacks')
         {
             $_ = '!dbi_hacks';
+            $dbi_hacks = 1;
+        }
+        elsif ($_ eq 'uri_escape_hacks')
+        {
+            $_ = '!uri_escape_hacks';
+            $uri_escape_hacks = 1;
         }
     }
-    *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
-    *DBI::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
-    $DBI::DBI_methods{st}{fetchall_hashref} = { U =>[1,2,'[ $key_field ]'] };
-    $DBI::DBI_methods{db}{selectall_hashref} = { U =>[2,0,'$statement [, $keyfield [, \%attr [, @bind_params ] ] ]'], O=>0x2000 };
-	$Exporter::ExportLevel = 1;
+    if ($dbi_hacks)
+    {
+        *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
+        *DBI::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
+        $DBI::DBI_methods{st}{fetchall_hashref} = { U =>[1,2,'[ $key_field ]'] };
+        $DBI::DBI_methods{db}{selectall_hashref} = { U =>[2,0,'$statement [, $keyfield [, \%attr [, @bind_params ] ] ]'], O=>0x2000 };
+    }
+    if ($uri_escape_hacks)
+    {
+        $uri_escape_original = \&URI::Escape::uri_escape;
+        *URI::Escape::uri_escape = *VMX::Common::uri_escape;
+    }
+    $Exporter::ExportLevel = 1;
     my $r = Exporter::import(@args);
-	$Exporter::ExportLevel = 0;
-	return $r;
+    $Exporter::ExportLevel = 0;
+    return $r;
 }
 
 # Функция возвращает минимальное из значений
@@ -79,8 +95,8 @@ sub max
 # ar1el($a) - аналог ($a || [])->[0], только ещё проверяет, что $a есть arrayref
 sub ar1el
 {
-	return undef unless 'ARRAY' eq ref $_[0];
-	return shift @{$_[0]};
+    return undef unless 'ARRAY' eq ref $_[0];
+    return shift @{$_[0]};
 }
 
 # Функция обрезает пробельные символы в начале и конце строки
@@ -131,7 +147,7 @@ sub file_get_contents
     open ($tmp, '<'.$_[0]);
     if ($tmp)
     {
-		local $/ = undef;
+        local $/ = undef;
         $res = <$tmp>;
         close ($tmp);
     }
@@ -375,10 +391,10 @@ sub filemd5
 # да ещё и несколько кривое
 sub mysql_quote
 {
-	my ($a) = @_;
-	$a =~ s/\'/\'\'/gso;
+    my ($a) = @_;
+    $a =~ s/\'/\'\'/gso;
     $a =~ s/\\/\\\\/gso;
-	return "'$a'";
+    return "'$a'";
 }
 
 # экранирование кавычек
@@ -470,6 +486,21 @@ sub normalize_url ($$)
     }
     return $base.$url;
 }
+
+# uri_escape, автоматически дёргающий uri_escape_utf8 если текст is_utf8
+sub uri_escape
+{
+    if (Encode::is_utf8($_[0]))
+    {
+        my $text = shift;
+        Encode::_utf8_off($text);
+        return &$uri_escape_original($text, @_);
+    }
+    return &$uri_escape_original(@_);
+}
+
+# utf8_on для скаляра
+sub utf8on { Encode::_utf8_on($_[0]); return $_[0] }
 
 1;
 __END__
