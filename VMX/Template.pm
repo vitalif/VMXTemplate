@@ -40,6 +40,7 @@ sub new
             odd  => [ 'test_odd', 0 ],
             even => [ 'test_even', 0 ],
             '%'  => [ 'test_mod', 1 ],
+            eq   => [ 'test_eq', 1 ],
         },
         root            => '.',   # каталог с шаблонами
         reload          => 1,     # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
@@ -373,6 +374,7 @@ sub compile
     my ($cbstart, $cbcount, $cbplus, $mm);
 
     my $code = $$coderef;
+
     # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
     # форматирование кода для красоты
@@ -680,6 +682,7 @@ sub language_xform
 
 sub test_even { !($_[0] & 1) }
 sub test_odd  { ($_[0] & 1 ? 1 : 0) }
+sub test_eq   { $_[0] eq $_[1] }
 
 sub test_mod
 {
