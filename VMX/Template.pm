@@ -33,6 +33,7 @@ sub new
             q => 'quotequote',
             H => 'strip_unsafe_tags',
             L => \&language_ref,
+            Lz => \&language_refnull,
         },
         tests =>
         {
@@ -452,11 +453,11 @@ sub compile
             $self->{current_namespace} = join '.', @block_names;
             $_ = "} # END $1";
         }
-        elsif (/^\s*<!--\s*(ELS(?:E\s*)?)?IF(\S*)\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+|#)((?:->[a-z0-9\-_]+)*)\s*-->\s*$/iso)
+        elsif (/^\s*<!--\s*(ELS(?:E\s*)?)?IF(\S*)\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+|#)((?:->[a-z0-9\-_]+)*)(?:\/([a-z0-9\-_]+))?\s*-->\s*$/iso)
         {
             my ($elsif, $varref, $t, $ta) = (
                 ($1 ? "} elsif" : "if"),
-                $self->generate_block_varref($3, $4, $5, undef, 1),
+                $self->generate_block_varref($3, $4, $5, $6, 1),
                 split /:/, $2, 2
             );
             if ($ta && $t && $self->{tests}->{lc $t}->[1])
@@ -643,17 +644,20 @@ sub generate_block_data_ref
 sub language_ref
 {
     my $self = shift;
-    my ($var, $varref, $value) = @_;
+    my ($var, $varref, $value, $ifnull) = @_;
     my $code = '';
     $code .= '->{' . lc($_) . '}' foreach split /\.+/, $var;
     $code .= '->{' . $varref . '}';
-    $code =
-        ($self->{cur_template_path} ?
+    $code = ($self->{cur_template_path} ?
         '(($self->{lang}' . $self->{cur_template_path} . $code . ') || ' : '') .
-        '($self->{lang}' . $code . ') || (' .
-        $varref . '))';
+        '($self->{lang}' . $code . ')';
+    $code .= ' || (' . $varref . ')' unless $ifnull;
+    $code .= ')';
     return $code;
 }
+
+# Функция компилирует ссылку на данные ленгпака
+sub language_refnull { language_ref($_[0], $_[1], $_[2], $_[3], 1) }
 
 # Compile-time вычисление language_ref
 sub language_xform
