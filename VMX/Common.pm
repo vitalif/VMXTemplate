@@ -129,7 +129,7 @@ sub strip_tags
     local $_ = shift;
     my $ex = join '|', @{(shift || [])};
     $ex = "(?!/?($ex))" if $ex;
-    s/<\/?$ex([a-z0-9_\-]+)[^<>]*>//gis;
+    s/<\/?$ex(!?[a-z0-9_\-]+)[^<>]*>//gis;
     return $_;
 }
 
