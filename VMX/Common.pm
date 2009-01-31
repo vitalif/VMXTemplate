@@ -100,12 +100,20 @@ sub ar1el
 }
 
 # Функция обрезает пробельные символы в начале и конце строки
-# trim ($r) in-place
+# trim ($r)
 sub trim
 {
     local $_ = $_[0];
-    s/^\s+//so;
-    s/\s+$//so;
+    if ($_[1])
+    {
+        s/^$_[1]//s;
+        s/$_[1]$//s;
+    }
+    else
+    {
+        s/^\s+//so;
+        s/\s+$//so;
+    }
     $_;
 }
 
@@ -320,9 +328,28 @@ sub deleteall_hashref
     my ($dbh, $table, $key) = @_;
     return 0 unless $dbh && $table &&
         $key && ref($key) eq 'HASH' && %$key;
-    my @k = keys %$key;
-    my $sql = "DELETE FROM `$table` WHERE ".join(" AND ", map { "`$_`=?" } @k);
-    my @bind = (@$key{@k});
+    my $sql = [];
+    my @bind;
+    foreach (keys %$key)
+    {
+        if (!defined $key->{$_})
+        {
+            push @$sql, "`$_` IS NULL";
+        }
+        elsif (!ref $key->{$_})
+        {
+            push @$sql, "`$_`=?";
+            push @bind, $key->{$_};
+        }
+        else
+        {
+            return unless @{$key->{$_}};
+            # IN (?, ?, ?, ..., ?)
+            push @$sql, "`$_` IN (" . join(",", ("?") x @{$key->{$_}}) . ")";
+            push @bind, @{$key->{$_}};
+        }
+    }
+    $sql = "DELETE FROM `$table` WHERE " . join " AND ", @$sql;
     return $dbh->do($sql, {}, @bind);
 }
 
