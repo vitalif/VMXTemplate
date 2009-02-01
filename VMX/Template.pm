@@ -250,7 +250,7 @@ sub assign_block_vars
                 $ev .= "[\$\#\{$ev\}]";
             }
             $ev .= "{'$lastblock.'}";
-            $ev = "sub { $ev = [] unless $ev; push \@\{$ev\}, \$_[1]; }";
+            $ev = "return sub { $ev ||= []; push \@\{$ev\}, \$_[1]; }";
             $ev = $assigncache{"=$block"} = eval $ev;
         }
         &$ev($self->{tpldata}, $vararray);
@@ -295,7 +295,7 @@ sub append_block_vars
                 $ev .= "{'$_.'}";
                 $ev .= "[\$#\{$ev\}]";
             }
-            $ev = "sub { my \$k; \$ev{\$k} = \$_[1]->{\$k} for \$k (keys \%{$_[1]}); }";
+            $ev = 'return sub { for my $k (keys %{$_[1]}) { '.$ev.'{$k} = $_[1]->{$k}; } }';
             $ev = $assigncache{"+$block"} = eval $ev;
         }
         &$ev($self->{tpldata}, \%vararray);
@@ -309,7 +309,7 @@ sub assign_vars
 {
     my $self = shift;
     my %h;
-    if (@_ > 1)
+    if (@_ > 1 || !ref($_[0]))
     {
         %h = @_;
     }
