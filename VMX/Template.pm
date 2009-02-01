@@ -13,6 +13,7 @@ my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
 my $langhashes = {};        # хеши ленгпаков
+my %assigncache = {};       # кэш eval'ов присвоений
 
 # Конструктор
 # $obj = new VMX::Template, %params
@@ -47,7 +48,7 @@ sub new
         reload          => 1,     # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
         wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
         tpldata         => {},    # сюда будут сохранены: данные
-		lang            => {},    # ~ : языковые данные
+        lang            => {},    # ~ : языковые данные
         tpldata_stack   => [],    # стек tpldata-ы для datapush и datapop
         use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
         @_,
@@ -77,8 +78,8 @@ sub set_filenames
 # $obj->load_lang ($filename, $filename, ...);
 sub load_lang
 {
-	my $self = shift;
-	return $self->load_lang_hashes(map
+    my $self = shift;
+    return $self->load_lang_hashes(map
     {
         my $load = 0;
         my $mtime;
@@ -100,11 +101,11 @@ sub load_lang
 # $obj->load_lang_hashes ($hash, $hash, ...);
 sub load_lang_hashes
 {
-	my $self = shift;
-	my $i = 0;
+    my $self = shift;
+    my $i = 0;
     Hash::Merge::set_behavior('RIGHT_PRECEDENT');
     $self->{lang} = Hash::Merge::merge ($self->{lang}, $_) foreach @_;
-	return $i;
+    return $i;
 }
 
 # Функция уничтожает данные шаблона
@@ -168,7 +169,7 @@ sub parse
 # $textref = $obj->loadfile($file)
 sub loadfile
 {
-	my $self = shift;
+    my $self = shift;
     my ($fn) = @_;
     my $load = 0;
     my $mtime;
@@ -202,44 +203,58 @@ sub loadfile
 
 # Функция присваивает переменные блока в новую итерацию
 # $obj->assign_block_vars ($block, varname1 => value1, varname2 => value2, ...)
+# Так тоже можно (при этом избежим лишнего копирования хеша!):
+# $obj->assign_block_vars ($block, { varname1 => value1, varname2 => value2, ... })
 sub assign_block_vars
 {
     my $self = shift;
     my $block = shift;
-    my $vararray = { @_ };
-    
+    my $vararray;
+    if (@_ > 1)
+    {
+        # копирование хеша, да...
+        $vararray = { @_ };
+    }
+    else
+    {
+        # а так можно и не копировать
+        ($vararray) = @_;
+    }
     $block =~ s/^\.+//so;
     $block =~ s/\.+$//so;
-
     if (!$block)
     {
         # если не блок, а корневой уровень
-        $self->assign_vars (@_);
+        $self->assign_vars($vararray);
     }
-    elsif ($block !~ /\.[^\.]/)
+    elsif ($block !~ /\.[^\.]/so)
     {
         # если блок, но не вложенный
-        $block =~ s/\.*$/./; # добавляем . в конец, если надо
-		$self->{tpldata}->{$block} ||= [];
+        $block =~ s/\.*$/./so; # добавляем . в конец, если надо
+        $self->{tpldata}->{$block} ||= [];
         push @{$self->{tpldata}->{$block}}, $vararray;
     }
     else
     {
         # если вложенный блок
-        my $ev = '$self->{tpldata}';
-        $block =~ s/\.+$//; # обрезаем точки в конце (хоть их 10 там)
-        my @blocks = split /\./, $block;
-        my $lastblock = pop @blocks;
-        foreach (@blocks)
+        my $ev;
+        $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
+        unless ($ev = $assigncache{"=$block"})
         {
-            $ev .= "{'$_.'}";
-            $ev .= "[-1+\@\{$ev\}]";
+            $ev = '$_[0]';
+            my @blocks = split /\./, $block;
+            my $lastblock = pop @blocks;
+            foreach (@blocks)
+            {
+                $ev .= "{'$_.'}";
+                $ev .= "[\$\#\{$ev\}]";
+            }
+            $ev .= "{'$lastblock.'}";
+            $ev = "sub { $ev = [] unless $ev; push \@\{$ev\}, \$_[1]; }";
+            $ev = $assigncache{"=$block"} = eval $ev;
         }
-        $ev .= "{'$lastblock.'}";
-        $ev = "$ev = [] unless $ev; push \@\{$ev\}, \$vararray;";
-        eval ($ev);
+        &$ev($self->{tpldata}, $vararray);
     }
-
     return 1;
 }
 
@@ -254,33 +269,37 @@ sub append_block_vars
     if (!$block || $block eq '.')
     {
         # если не блок, а корневой уровень
-        $self->assign_vars (@_);
+        $self->assign_vars(@_);
     }
-    elsif ($block !~ /\../)
+    elsif ($block !~ /\../so)
     {
         # если блок, но не вложенный
-        $block =~ s/\.*$/./; # добавляем . в конец, если надо
+        $block =~ s/\.*$/./so; # добавляем . в конец, если надо
         $self->{tpldata}{$block} ||= [];
-        $lastit = @{$self->{tpldata}{$block}} - 1;
+        $lastit = $#{$self->{tpldata}{$block}};
         $lastit = 0 if $lastit < 0;
         $self->{tpldata}{$block}[$lastit]{$_} = $vararray{$_}
-            foreach keys %vararray;
+            for keys %vararray;
     }
     else
     {
         # если вложенный блок
-        my $ev = '$self->{tpldata}';
-        $block =~ s/\.+$//; # обрезаем точки в конце (хоть их 10 там)
-        my @blocks = split /\.+/, $block;
-        foreach (@blocks)
+        my $ev;
+        $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
+        unless ($ev = $assigncache{"+$block"})
         {
-            $ev .= "{'$_.'}";
-            $ev .= "[-1+\@\{$ev\}]";
+            $ev = '$_[0]';
+            my @blocks = split /\.+/, $block;
+            foreach (@blocks)
+            {
+                $ev .= "{'$_.'}";
+                $ev .= "[\$#\{$ev\}]";
+            }
+            $ev = "sub { my \$k; \$ev{\$k} = \$_[1]->{\$k} for \$k (keys \%{$_[1]}); }";
+            $ev = $assigncache{"+$block"} = eval $ev;
         }
-        $ev = "\$ev{\$k} = \$vararray{\$k} foreach \$k (keys \%vararray);";
-        eval ($ev);
+        &$ev($self->{tpldata}, \%vararray);
     }
-
     return 1;
 }
 
@@ -289,8 +308,17 @@ sub append_block_vars
 sub assign_vars
 {
     my $self = shift;
-	$self->{tpldata}{'.'}[0] = {} unless $self->{tpldata}{'.'}[0];
-    %{$self->{tpldata}{'.'}[0]} = (%{$self->{tpldata}{'.'}[0]}, @_);
+    my %h;
+    if (@_ > 1)
+    {
+        %h = @_;
+    }
+    else
+    {
+        %h = %{$_[0]};
+    }
+    $self->{tpldata}{'.'}[0] ||= {};
+    $self->{tpldata}{'.'}[0]{$_} = $h{$_} for keys %h;
     return 1;
 }
 
@@ -301,7 +329,7 @@ sub tr_assign_vars
     $self->assign_vars($self->tr_vars(@_));
 }
 
-# Аналог assign_block_vars, но преобазует имена переменных
+# Аналог assign_block_vars, но преобразует имена переменных
 sub tr_assign_block_vars
 {
     my $self = shift;
@@ -309,7 +337,7 @@ sub tr_assign_block_vars
     $self->assign_block_vars($block, $self->tr_vars(@_));
 }
 
-# Аналог append_block_vars, но преобазует имена переменных
+# Аналог append_block_vars, но преобразует имена переменных
 sub tr_append_block_vars
 {
     my $self = shift;
@@ -387,7 +415,7 @@ sub compile
     $code =~ s/\'|\\/\\$&/gos;
 
     # "первая замена"
-    $code =~ 
+    $code =~
         s%
             (?>\%+) |
             (?>\%+)\s*\S+.*?(?>\%+) |
@@ -490,17 +518,17 @@ sub compile
         {
             my $varref = $self->generate_block_data_ref($1, 1)."{'$2'}";
             $_ = "$varref = eval {\nmy \$t = '';";
-		}
+        }
         elsif (/^\s*<!--\s*ENDSET\s*-->\s*$/so)
         {
-			$_ = "return \$t;\n};";
-		}
+            $_ = "return \$t;\n};";
+        }
         else
         {
             $_ = "\$t .= '$_';";
         }
     }
-    
+
     # собираем код в строку
     $code = ($self->{use_utf8} ? "\nuse utf8;\n" : "").
 'sub {
