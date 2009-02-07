@@ -161,7 +161,7 @@ sub parse
     my $sub = $self->compile($textref, $handle, $fn);
     my $str = eval { &$sub($self) };
     die "[Template] error running '$handle': $@" if $@;
-    $str = &$self->{wrapper} ($str) if $self->{wrapper};
+    &{$self->{wrapper}} ($str) if $self->{wrapper};
     return $str;
 }
 
@@ -407,9 +407,9 @@ sub compile
     # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
     # форматирование кода для красоты
-    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF\S*|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
-    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF\S*|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
-    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF\S*|ELSE|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
 
     # ' и \ -> \' и \\
     $code =~ s/\'|\\/\\$&/gos;
