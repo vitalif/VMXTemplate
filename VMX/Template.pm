@@ -41,7 +41,7 @@ sub new
             '!'  => [ '!', 0 ],
             odd  => [ 'test_odd', 0 ],
             even => [ 'test_even', 0 ],
-            '%'  => [ 'test_mod', 1 ],
+            mod  => [ 'test_mod', 1 ],
             eq   => [ 'test_eq', 1 ],
         },
         root            => '.',   # каталог с шаблонами
