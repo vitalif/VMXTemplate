@@ -526,8 +526,23 @@ sub uri_escape
     return &$uri_escape_original(@_);
 }
 
-# utf8_on для скаляра
-sub utf8on { Encode::_utf8_on($_[0]); return $_[0] }
+# utf8_on для скаляра или рекурсивный для хешей/массивов
+sub utf8on
+{
+    if (ref($_[0]) && $_[0] =~ /HASH/so)
+    {
+        utf8on($_[0]->{$_}) for keys %{$_[0]};
+    }
+    elsif (ref($_[0]) && $_[0] =~ /ARRAY/so)
+    {
+        utf8on($_) for @{$_[0]};
+    }
+    else
+    {
+        Encode::_utf8_on($_[0]);
+    }
+    return $_[0];
+}
 
 1;
 __END__
