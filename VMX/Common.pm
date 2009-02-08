@@ -122,7 +122,7 @@ sub trim
 sub htmlspecialchars
 {
     local $_ = $_[0];
-    s/&/&apos;/gso;
+    s/&/&amp;/gso;
     s/</&lt;/gso;
     s/>/&gt;/gso;
     s/\"/&quot;/gso;
