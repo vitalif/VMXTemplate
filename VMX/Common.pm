@@ -14,6 +14,7 @@ use DBI;
 use Digest::MD5;
 use Date::Parse;
 use Date::Manip;
+use POSIX qw(mktime);
 use I18N::Langinfo qw(langinfo CODESET);
 
 require Exporter;
@@ -22,7 +23,7 @@ our @EXPORT_OK = qw(
     quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on
+    normalize_url utf8on mysql2time mysqllocaltime
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -542,6 +543,21 @@ sub utf8on
         Encode::_utf8_on($_[0]);
     }
     return $_[0];
+}
+
+# преобразование mysql даты/времени в UNIX время
+sub mysql2time { mktime(mysqllocaltime(@_)) }
+
+# и в struct tm
+sub mysqllocaltime
+{
+    my ($date, $time) = @_;
+    $time ||= '';
+    if ("$date $time" =~ /^(\d+)-(\d+)-(\d+)(?:\s+(\d+):(\d+):(\d+))?/so)
+    {
+        return (int($6), int($5), int($4), int($3), int($2)-1, int($1)-1900);
+    }
+    return ();
 }
 
 1;
