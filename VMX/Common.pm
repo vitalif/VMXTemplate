@@ -546,7 +546,7 @@ sub utf8on
 }
 
 # преобразование mysql даты/времени в UNIX время
-sub mysql2time { mktime(mysqllocaltime(@_)) }
+sub mysql2time { $_[0] ? mktime(mysqllocaltime(@_)) : 0 }
 
 # и в struct tm
 sub mysqllocaltime
