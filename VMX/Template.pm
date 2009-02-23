@@ -403,6 +403,7 @@ sub compile
     my ($cbstart, $cbcount, $cbplus, $mm);
 
     my $code = $$coderef;
+    Encode::_utf8_on($code) if $self->{use_utf8};
 
     # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
@@ -417,8 +418,8 @@ sub compile
     # "первая замена"
     $code =~
         s%
+            (?>\%+)[ \t]*\S+[^\n]*?(?>\%+) |
             (?>\%+) |
-            (?>\%+)\s*\S+.*?(?>\%+) |
             \{[a-z0-9\-_]+\.\#\} |
             \{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+)((?:->[a-z0-9\-_]+)*)(?:\/([a-z0-9\-_]+))?\}
         % $self->generate_xx_ref($&,$1,$2,$3,$4)
@@ -551,18 +552,18 @@ sub generate_xx_ref
     my $self = shift;
     my @a = @_;
     my $a = shift @a;
-    if ($a =~ /^%%|%%$/so)
+    if ($a =~ /^\%\%|\%\%$/so)
     {
         my $r = $a;
-        $r =~ s/^%%/%/so;
-        $r =~ s/%%$/%/so;
+        $r =~ s/^\%\%/\%/so;
+        $r =~ s/\%\%$/\%/so;
         return $r;
     }
-    elsif ($a =~ /^%(.+)%$/so)
+    elsif ($a =~ /^\%(.+)\%$/so)
     {
         return $self->language_xform($self->{current_namespace}, $1);
     }
-    elsif ($a =~ /^%%+$/so)
+    elsif ($a =~ /^\%\%+$/so)
     {
         return substr($a, 1);
     }
