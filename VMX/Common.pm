@@ -389,7 +389,7 @@ sub insertall_hashref
     # осуществляем reselect данных
     $sql = "SELECT $reselect FROM `$table` WHERE `ji`=? ORDER BY `jin` ASC";
     @bind = ($conn_id);
-    my $resel = $dbh->selectall_hashref($sql, [], {}, @bind);
+    my $resel = $dbh->selectall_arrayref($sql, {Slice=>{}}, @bind) || [];
     for (my $i = 0; $i < @$resel; $i++)
     {
         $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
