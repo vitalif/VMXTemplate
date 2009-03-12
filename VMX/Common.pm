@@ -3,9 +3,11 @@
 
 package VMX::Common;
 
+use utf8;
 use strict;
 use locale;
-use utf8;
+use constant HASHARRAY => {Slice=>{}};
+
 use Encode;
 use URI::Escape qw(!uri_escape);
 use Carp;
@@ -19,8 +21,9 @@ use I18N::Langinfo qw(langinfo CODESET);
 
 require Exporter;
 
+our @EXPORT = qw(HASHARRAY);
 our @EXPORT_OK = qw(
-    quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
+    HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on mysql2time mysqllocaltime
@@ -42,6 +45,7 @@ sub import
     my @args = @_;
     my $dbi_hacks = 0;
     my $uri_escape_hacks = 0;
+    my $hasharray = 1;
     foreach (@args)
     {
         if ($_ eq 'dbi_hacks')
@@ -54,7 +58,12 @@ sub import
             $_ = '!uri_escape_hacks';
             $uri_escape_hacks = 1;
         }
+        elsif ($_ eq '!HASHARRAY')
+        {
+            $hasharray = 0;
+        }
     }
+    push @args, 'HASHARRAY' if $hasharray;
     if ($dbi_hacks)
     {
         *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
@@ -164,7 +173,7 @@ sub file_get_contents
 }
 
 # изменённый вариант функции DBI::_::st::fetchall_hashref
-# первая вещь - аналог fetchall_arrayref({Slice=>{}}), т.е. просто возвращает
+# первая вещь - аналог fetchall_arrayref(HASHARRAY), т.е. просто возвращает
 # массив хешей при передаче в качестве $key_field ссылки на пустой массив или undef.
 # вторая вещь - о которой все мы, пользователи MySQL, давно мечтали - возможность
 # сделать SELECT t1.*, t2.*, t3.* и при этом успешно разделить поля таблиц,
@@ -389,7 +398,7 @@ sub insertall_hashref
     # осуществляем reselect данных
     $sql = "SELECT $reselect FROM `$table` WHERE `ji`=? ORDER BY `jin` ASC";
     @bind = ($conn_id);
-    my $resel = $dbh->selectall_arrayref($sql, {Slice=>{}}, @bind) || [];
+    my $resel = $dbh->selectall_arrayref($sql, HASHARRAY, @bind) || [];
     for (my $i = 0; $i < @$resel; $i++)
     {
         $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
