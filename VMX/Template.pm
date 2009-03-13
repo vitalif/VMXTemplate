@@ -7,6 +7,7 @@ package VMX::Template;
 
 use strict;
 use VMX::Common qw(:all);
+use Digest::MD5 qw(md5_hex);
 use Hash::Merge;
 
 my $mtimes = {};            # время изменения файлов
@@ -50,9 +51,11 @@ sub new
         tpldata         => {},    # сюда будут сохранены: данные
         lang            => {},    # ~ : языковые данные
         tpldata_stack   => [],    # стек tpldata-ы для datapush и datapop
+        cache_dir       => undef, # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
         use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
         @_,
     };
+    $self->{cache_dir} =~ s!/*$!/!so if $self->{cache_dir};
     $self->{root} =~ s!/*$!/!so;
     bless $self, $class;
 }
@@ -381,6 +384,24 @@ sub compile
     my $self = shift;
     my ($coderef, $handle, $fn) = @_;
     return $compiled_code->{$coderef} if $compiled_code->{$coderef};
+    my $h;
+    if ($self->{cache_dir})
+    {
+        $h = $self->{cache_dir}.md5_hex($$coderef).'.pl';
+        if (-e $h)
+        {
+            $compiled_code->{$coderef} = do $h;
+            if ($@)
+            {
+                warn "[Template] error compiling '$handle': [$@] in FILE: $h";
+                unlink $h;
+            }
+            else
+            {
+                return $compiled_code->{$coderef};
+            }
+        }
+    }
 
     $self->{cur_template_path} = $self->{cur_template} = '';
     if ($fn)
@@ -535,6 +556,19 @@ my $_current_template = [ split /:/, \'' . $self->{cur_template} . '\' ];
 ' . join("\n", @code_lines) . '
 return $t;
 }';
+    if ($h)
+    {
+        my $fd;
+        if (open $fd, ">$h")
+        {
+            print $fd $code;
+            close $fd;
+        }
+        else
+        {
+            warn "[Template] error caching '$handle': $! while opening $h";
+        }
+    }
 
     $compiled_code->{$coderef} = eval $code;
     die "[Template] error compiling '$handle': [$@] in CODE:\n$code" if $@;
