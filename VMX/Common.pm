@@ -26,7 +26,7 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on mysql2time mysqllocaltime
+    normalize_url utf8on rfrom_to mysql2time mysqllocaltime
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -452,23 +452,34 @@ sub dumper_no_lf
 
 # str2time, принимающий формат даты вида DD.MM.YYYY
 my $init;
+my $orig_DIRussian;
 sub str2time
 {
     my ($str) = @_;
     my $time;
-    my $codeset = langinfo(CODESET());
-    Date_Init(@DATE_INIT), $init = 1 unless $init;
-    Encode::_utf8_on($str) if $codeset =~ /utf-?8/iso;
+    unless ($init)
+    {
+        $orig_DIRussian = \&Date::Manip::_Date_Init_Russian;
+        *Date::Manip::_Date_Init_Russian = \&date_init_russian;
+        Date_Init(@DATE_INIT);
+        $init = 1;
+    }
     $str = lc $str;
-    $time = $str;
-    Encode::_utf8_off($time);
-    Encode::from_to($time, $codeset, "koi8-r");
-    $time = UnixDate(ParseDate($time),"%s");
+    $time = UnixDate(ParseDate($str),"%s");
     return $time if defined $time;
     $time = $str;
     $time =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
     $time = Date::Parse::str2time($time);
     return $time;
+}
+
+sub date_init_russian
+{
+    my $r = &$orig_DIRussian(@_);
+    rfrom_to($_[0], 'koi8-r', 'utf-8');
+    utf8on($_[0]);
+    $_[0]->{month_abb}->[1]->[2] = 'мар';
+    return $r;
 }
 
 # если значение - вернуть значение, если coderef - вызвать и вернуть значение
@@ -567,6 +578,24 @@ sub mysqllocaltime
         return (int($6), int($5), int($4), int($3), int($2)-1, int($1)-1900);
     }
     return ();
+}
+
+# рекурсивная версия from_to
+sub rfrom_to
+{
+    if (ref($_[0]) && $_[0] =~ /HASH/so)
+    {
+        rfrom_to($_[0]->{$_}, $_[1], $_[2]) for keys %{$_[0]};
+    }
+    elsif (ref($_[0]) && $_[0] =~ /ARRAY/so)
+    {
+        rfrom_to($_, $_[1], $_[2]) for @{$_[0]};
+    }
+    else
+    {
+        Encode::from_to($_[0], $_[1], $_[2]);
+    }
+    return $_[0];
 }
 
 1;
