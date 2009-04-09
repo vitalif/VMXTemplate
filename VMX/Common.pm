@@ -26,7 +26,7 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on rfrom_to mysql2time mysqllocaltime
+    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -596,6 +596,17 @@ sub rfrom_to
         Encode::from_to($_[0], $_[1], $_[2]);
     }
     return $_[0];
+}
+
+# s///, возвращающий значение...
+# $1 $2 и т.п. в $replacement не работают
+# resub($re, $replacement, $value)
+sub resub
+{
+    my ($re, $replacement, $value) = @_;
+    $re = qr/$re/s unless ref $re eq 'REGEXP';
+    $value =~ s/$re/$replacement/g;
+    return $value;
 }
 
 1;
