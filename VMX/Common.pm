@@ -26,7 +26,7 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub
+    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub hashmrg
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -607,6 +607,28 @@ sub resub
     $re = qr/$re/s unless ref $re eq 'REGEXP';
     $value =~ s/$re/$replacement/g;
     return $value;
+}
+
+# недеструктивное объединение хешрефов
+sub hashmrg
+{
+    return undef unless @_;
+    my $h;
+    for (@_)
+    {
+        if ($_ && %$_)
+        {
+            if ($h)
+            {
+                $h = { %$h, %$_ };
+            }
+            else
+            {
+                $h = $_;
+            }
+        }
+    }
+    return $h;
 }
 
 1;
