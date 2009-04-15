@@ -26,7 +26,7 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub hashmrg
+    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub hashmrg litsplit
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -629,6 +629,27 @@ sub hashmrg
         }
     }
     return $h;
+}
+
+# разбиение строки по регэкспу, однако не как split(//), а с учётом литералов,
+# входящих в строку. границы литералов можно задавать доп.аргументом
+my $deflit = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
+
+# @a = litsplit /PATTERN/, EXPR[, LIMIT[, /LITERAL_PATTERN/]]
+sub litsplit
+{
+    my ($re, $s, $lim, $lit) = @_;
+    $lit ||= $deflit;
+    my @r;
+    my $l = 0;
+    my $ml;
+    $s =~ /^/g;
+    while ($s =~ /\G((?:$lit|.+)*?)$re/gc && (!$lim || $lim <= 0 || @r+1 < $lim))
+    {
+        push @r, $1;
+    }
+    push @r, substr($s, pos($s));
+    return @r;
 }
 
 1;
