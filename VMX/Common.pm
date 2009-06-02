@@ -631,15 +631,22 @@ sub hashmrg
     return $h;
 }
 
+# AQG = Apostrophe + Quote + Grave
+our $litsplit_AQG = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
+our $litsplit_AQ = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"/;
+our $litsplit_QG = qr/\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
+our $litsplit_AG = qr/\'(?:[^\'\\]+|\\.)+\'|\`(?:[^\`\\]+|\\.)+\`/;
+our $litsplit_A = qr/\'(?:[^\'\\]+|\\.)+\'/;
+our $litsplit_Q = qr/\"(?:[^\"\\]+|\\.)+\"/;
+our $litsplit_G = qr/\`(?:[^\`\\]+|\\.)+\`/;
+
 # разбиение строки по регэкспу, однако не как split(//), а с учётом литералов,
 # входящих в строку. границы литералов можно задавать доп.аргументом
-my $deflit = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
-
 # @a = litsplit /PATTERN/, EXPR[, LIMIT[, /LITERAL_PATTERN/]]
 sub litsplit
 {
     my ($re, $s, $lim, $lit) = @_;
-    $lit ||= $deflit;
+    $lit ||= $litsplit_AQG;
     my @r;
     my $l = 0;
     my $ml;
