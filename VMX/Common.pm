@@ -651,7 +651,7 @@ sub litsplit
     my $l = 0;
     my $ml;
     $s =~ /^/g;
-    while ($s =~ /\G((?:$lit|.+)*?)$re/gc && (!$lim || $lim <= 0 || @r+1 < $lim))
+    while ($s =~ /\G((?:$lit|.+?)*?)$re/gc && (!$lim || $lim <= 0 || @r+1 < $lim))
     {
         push @r, $1;
     }
