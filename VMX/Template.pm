@@ -534,7 +534,7 @@ sub compile_code_fragment
 my \$blk_${1}_count = ref($ref) && $ref =~ /ARRAY/so ? scalar \@{$ref} : $ref ? 1 : 0;
 ${to}
 for (my \$blk_${1}_i = $at; \$blk_${1}_i < \$blk_${1}_count; \$blk_${1}_i $by) {
-my \$blk_${1}_vars = ref($ref) && $ref =~ /ARRAY/so ? $ref ->{\$blk_${1}_i} : $ref;
+my \$blk_${1}_vars = ref($ref) && $ref =~ /ARRAY/so ? $ref ->[\$blk_${1}_i] : $ref;
 EOF
     }
     elsif ($e =~ /^END(?:\s+([a-z_][a-z0-9_]*))?$/iso)
@@ -544,7 +544,7 @@ EOF
             warn "$& without BEGIN, IF or SET";
             return undef;
         }
-        my $l = $self->{in}->{$#{$self->{in}}};
+        my $l = $self->{in}->[$#{$self->{in}}];
         if ($1 && ($l->[0] ne 'begin' || !$l->[1] || $l->[1] ne $1) ||
             !$1 && $l->[1])
         {
@@ -615,7 +615,7 @@ sub compile_expression
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so unless $after;
     # строковой или числовой литерал
-    if ($e =~ /^((\")(?:[^\"\\]+|\\.)+\"|\'(?:[^\'\\]+|\\.)+\'|[1-9]\d*(\.\d+)?|0\d*|0x\d+)\s*/iso)
+    if ($e =~ /^((\")(?:[^\"\\]+|\\.)*\"|\'(?:[^\'\\]+|\\.)*\'|[1-9]\d*(\.\d+)?|0\d*|0x\d+)\s*/iso)
     {
         if ($')
         {
@@ -721,7 +721,8 @@ sub varref
     my @e = ref $_[0] ? @{$_[0]} : split /\.+/, $_[0];
     $self->{last_varref_path} = join '.', @e;
     my $t = '$self->{tpldata}';
-    EQBLOCK: if (@{$self->{blocks}})
+    EQBLOCK: {
+    if (@{$self->{blocks}})
     {
         for (0..$#{$self->{blocks}})
         {
@@ -739,6 +740,7 @@ sub varref
             # локальная переменная
             $t = '$blk_'.$self->{blocks}->[$#{$self->{blocks}}].'_vars';
         }
+    }
     }
     for (@e)
     {
