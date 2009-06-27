@@ -26,7 +26,8 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub hashmrg litsplit
+    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
+    hashmrg litsplit
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -331,6 +332,19 @@ sub updaterow_hashref
     return $dbh->do($sql, {}, @bind);
 }
 
+# Множественный UPDATE - обновить много строк @%$rows,
+# но только по первичному ключу (каждая строка должна содержать его значение!)
+sub updateall_hashref
+{
+    my ($dbh, $table, $rows) = @_;
+    my @f = keys %{$rows->[0]};
+    my $sql = "INSERT INTO `$table` (`".join("`,`",@f)."`) VALUES ".
+        join(",",("(".(join(",", ("?") x scalar(@f))).")") x scalar(@$rows)).
+        " ON DUPLICATE KEY UPDATE ".join(',', map { "`$_`=VALUES(`$_`)" } @f);
+    my @bind = map { @$_{@f} } @$rows;
+    return $dbh->do($sql, {}, @bind);
+}
+
 # Удалить все строки, у которых значения полей с названиями ключей %$key
 # равны значениям %$key
 sub deleteall_hashref
@@ -607,6 +621,12 @@ sub resub
     $re = qr/$re/s unless ref $re eq 'REGEXP';
     $value =~ s/$re/$replacement/g;
     return $value;
+}
+
+# \Q\E от $_[0]
+sub requote
+{
+    "\Q$_[0]\E";
 }
 
 # недеструктивное объединение хешрефов
