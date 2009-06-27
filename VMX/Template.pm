@@ -149,8 +149,14 @@ sub load_lang_hashes
 # $obj->clear()
 sub clear
 {
-    shift->{tpldata} = {};
+    %{ shift->{tpldata} } = ();
     return 1;
+}
+
+# Получить хеш для записи данных
+sub vars
+{
+    shift->{tpldata};
 }
 
 # Функция загружает, компилирует и возвращает результат для хэндла
