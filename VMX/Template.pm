@@ -815,12 +815,6 @@ sub language_ref
     return $code;
 }
 
-# Функция компилирует ссылку на данные ленгпака
-sub language_refnull
-{
-    return $_[0]->language_ref($_[1], $_[2], $_[3], 1);
-}
-
 # Compile-time вычисление language_ref
 sub language_xform
 {
