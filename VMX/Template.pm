@@ -468,12 +468,18 @@ sub compile_code_fragment
     my $t;
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so;
-    if ($e =~ /^(ELS(?:E\s+)?)?IF\s+/iso)
+    if ($e =~ /^(ELS(?:E\s+)?)?IF(!?)\s+/iso)
     {
-        $t = $self->compile_expression($');
+        $t = $';
+        if ($2)
+        {
+            warn "Legacy IF! used, consider changing it to IF NOT";
+            $t = "NOT $t";
+        }
+        $t = $self->compile_expression($t);
         unless ($t)
         {
-            warn "Invalid expression: ($')";
+            warn "Invalid expression: ($t)";
             return undef;
         }
         return $1 ? "} elsif ($t) {\n" : "if ($t) {\n";
