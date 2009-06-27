@@ -331,19 +331,6 @@ sub updaterow_hashref
     return $dbh->do($sql, {}, @bind);
 }
 
-# Множественный UPDATE - обновить много строк @%$rows,
-# но только по первичному ключу (каждая строка должна содержать его значение!)
-sub updateall_hashref
-{
-    my ($dbh, $table, $rows) = @_;
-    my @f = keys %{$rows->[0]};
-    my $sql = "INSERT INTO `$table` (`".join("`,`",@f)."`) VALUES ".
-        join(",",("(".(join(",", ("?") x scalar(@f))).")") x scalar(@$rows)).
-        " ON DUPLICATE KEY UPDATE ".join(',', map { "`$_`=VALUES(`$_`)" } @f);
-    my @bind = map { @$_{@f} } @$rows;
-    return $dbh->do($sql, {}, @bind);
-}
-
 # Удалить все строки, у которых значения полей с названиями ключей %$key
 # равны значениям %$key
 sub deleteall_hashref
