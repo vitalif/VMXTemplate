@@ -765,6 +765,7 @@ sub function_sub     { fmop('-', @_) }
 sub function_mul     { fmop('*', @_) }
 sub function_div     { fmop('/', @_) }
 sub function_concat  { fmop('.', @_) }
+sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0" }
 sub function_not     { "!($_[1])" }
 sub function_even    { "!(($_[1]) & 1)" }
 sub function_odd     { "(($_[1]) & 1)" }
@@ -949,7 +950,7 @@ __END__
 
 Действуют аналогично Perl операторам == eq > < >= <= gt lt ge le.
 
-=head2 CONCAT, JOIN, SPLIT
+=head2 CONCAT, JOIN, SPLIT, COUNT
 
 Конкатенация всех своих аргументов - concat(аргументы).
 
@@ -959,6 +960,8 @@ __END__
 
 Разделение строки по регулярному выражению и лимиту - split(РЭ,аргумент,лимит).
 Лимит необязателен. (см. perldoc -f split)
+
+Количество элементов в массиве или 0 если не массив - count(аргумент).
 
 =head2 LC=LOWER=LOWERCASE, UC=UPPER=UPPERCASE
 
