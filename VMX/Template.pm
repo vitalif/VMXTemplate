@@ -136,6 +136,7 @@ sub preparse
         $textref = $fn;
         $fn = undef;
     }
+    # FIXME возможно, не стоит на это заморачиваться, а просто запускать шаблон дважды
     my $sub = $self->compile($textref, $handle, $fn, 1);
     eval { &$sub($self) };
     die "[Template] error pre-running '$handle': $@" if $@;
