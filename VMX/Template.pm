@@ -411,9 +411,9 @@ sub compile
         $r .= $c if $c;
         $pp = pos $code;
     }
-    if (($t = pos($code) - $pp) > 0)
+    if ($pp < length($code))
     {
-        $p = substr $code, $pp, $t;
+        $p = substr $code, $pp;
         $p =~ s/\\|\'/\\$&/gso;
         $r .= "\$t.='$p';\n" if !$nout || $self->{in_set};
     }
@@ -435,6 +435,7 @@ return $t;
         my $fd;
         if (open $fd, ">$h")
         {
+            no warnings 'utf8';
             print $fd $code;
             close $fd;
         }
@@ -481,6 +482,7 @@ sub compile_code_fragment
             warn "Invalid expression: ($t)";
             return undef;
         }
+        push @{$self->{in}}, [ 'if' ] unless $1;
         return $1 ? "} elsif ($t) {\n" : "if ($t) {\n";
     }
     elsif ($e =~ /^BEGIN\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
