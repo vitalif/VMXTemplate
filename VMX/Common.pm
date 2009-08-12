@@ -391,7 +391,7 @@ sub insertall_hashref
     if ($reselect)
     {
         my $i = 0;
-        $conn_id = $dbh->{mysql_connection_id};
+        $conn_id = $dbh->{mysql_thread_id};
         @$_{'ji','jin'} = ($conn_id, ++$i) foreach @$rows;
     }
     my @f = keys %{$rows->[0]};
