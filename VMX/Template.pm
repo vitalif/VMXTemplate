@@ -1,5 +1,7 @@
 #!/usr/bin/perl
-# Новая версия шаблонного движка VMX::Template!
+# Простой шаблонный движок.
+# Когда-то inspired by phpBB templates, которые в свою очередь inspired by
+# phplib templates. Однако уже далеко ушедши от них обоих.
 
 package VMX::Template;
 
@@ -12,7 +14,7 @@ my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
 my $langhashes = {};        # хеши ленгпаков
-my $assigncache = {};       # кэш eval'ов присвоений
+my %assigncache = {};       # кэш eval'ов присвоений
 
 # Конструктор
 # $obj = new VMX::Template, %params
@@ -22,11 +24,33 @@ sub new
     $class = ref ($class) || $class;
     my $self =
     {
+        conv =>
+        {
+            # char => func_name | \&sub_ref
+            T => 'strip_tags',
+            i => 'int',
+            s => 'htmlspecialchars',
+            l => 'lc',
+            u => 'uc',
+            q => 'quotequote',
+            H => 'strip_unsafe_tags',
+            L => \&language_ref,
+            Lz => \&language_refnull,
+        },
+        tests =>
+        {
+            '!'  => [ '!', 0 ],
+            odd  => [ 'test_odd', 0 ],
+            even => [ 'test_even', 0 ],
+            mod  => [ 'test_mod', 1 ],
+            eq   => [ 'test_eq', 1 ],
+        },
         root            => '.',   # каталог с шаблонами
         reload          => 1,     # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
         wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
         tpldata         => {},    # сюда будут сохранены: данные
         lang            => {},    # ~ : языковые данные
+        tpldata_stack   => [],    # стек tpldata-ы для datapush и datapop
         cache_dir       => undef, # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
         use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
         @_,
@@ -37,27 +61,18 @@ sub new
 }
 
 # Функция задаёт имена файлов для хэндлов
-# $obj->set_filenames (handle1 => 'template1.tpl', ...)
+# $obj->set_filenames (handle1 => 'template1.tpl', handle2 => \'{CODE} - Template code', ...)
 sub set_filenames
 {
     my $self = shift;
     my %fns = @_;
     while (my ($k, $v) = each %fns)
     {
-        $self->{filenames}->{$k} = "$v";
-    }
-    return 1;
-}
-
-# Задать код для хэндлов
-# $obj->set_code (handle1 => "{CODE} - Template code", ...);
-sub set_code
-{
-    my $self = shift;
-    my %codes = @_;
-    while (my ($k, $v) = each %codes)
-    {
-        $self->{filenames}->{$k} = \ $v;
+        if (ref $v && ref $v ne 'SCALAR')
+        {
+            $v = "$v";
+        }
+        $self->{filenames}->{$k} = $v;
     }
     return 1;
 }
@@ -100,51 +115,32 @@ sub load_lang_hashes
 # $obj->clear()
 sub clear
 {
-    %{ shift->{tpldata} } = ();
+    shift->{tpldata} = {};
     return 1;
 }
 
-# Получить хеш для записи данных
-sub vars
+# Функция сохраняет текущие данные шаблона в стек и уничтожает их
+# $obj->datapush ()
+sub datapush
 {
     my $self = shift;
-    my ($vars) = @_;
-    $self->{tpldata} = $vars if $vars;
-    return $self->{tpldata};
+    push (@{$self->{tpldata_stack}}, \$self->{tpldata});
+    $self->clear;
+    return 1;
 }
 
-# Функция выполняет код шаблона, не выводя страницу
-# Нужно, чтобы выполнить все присваивания переменных.
-# $obj->preparse('handle')
-sub preparse
+# Функция восстанавливает данные шаблона из стека
+# $obj->datapop()
+sub datapop
 {
     my $self = shift;
-    my ($handle) = @_;
-    my $fn = $self->{filenames}->{$handle};
-    my $textref;
-    unless (ref $fn)
-    {
-        die "[Template] unknown handle '$handle'"
-            unless $fn;
-        $fn = $self->{root}.$fn
-            if $fn !~ m!^/!so;
-        die "[Template] couldn't load template file '$fn' for handle '$handle'"
-            unless $textref = $self->loadfile($fn);
-    }
-    else
-    {
-        $textref = $fn;
-        $fn = undef;
-    }
-    # FIXME возможно, не стоит на это заморачиваться, а просто запускать шаблон дважды
-    my $sub = $self->compile($textref, $handle, $fn, 1);
-    eval { &$sub($self) };
-    die "[Template] error pre-running '$handle': $@" if $@;
-    return $self;
+    return 0 if (@{$self->{tpldata_stack}} <= 0);
+    $self->{tpldata} = pop @{$self->{tpldata_stack}};
+    return 1;
 }
 
 # Функция загружает, компилирует и возвращает результат для хэндла
-# $page = $obj->parse('handle')
+# $obj->parse('handle')
 sub parse
 {
     my $self = shift;
@@ -246,19 +242,19 @@ sub assign_block_vars
         # если вложенный блок
         my $ev;
         $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
-        unless ($ev = $assigncache->{"=$block"})
+        unless ($ev = $assigncache{"=$block"})
         {
             $ev = '$_[0]';
             my @blocks = split /\./, $block;
             my $lastblock = pop @blocks;
             foreach (@blocks)
             {
-                $ev .= "{'$_'}";
+                $ev .= "{'$_.'}";
                 $ev .= "[\$\#\{$ev\}]";
             }
-            $ev .= "{'$lastblock'}";
+            $ev .= "{'$lastblock.'}";
             $ev = "return sub { $ev ||= []; push \@\{$ev\}, \$_[1]; }";
-            $ev = $assigncache->{"=$block"} = eval $ev;
+            $ev = $assigncache{"=$block"} = eval $ev;
         }
         &$ev($self->{tpldata}, $vararray);
     }
@@ -293,17 +289,17 @@ sub append_block_vars
         # если вложенный блок
         my $ev;
         $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
-        unless ($ev = $assigncache->{"+$block"})
+        unless ($ev = $assigncache{"+$block"})
         {
             $ev = '$_[0]';
             my @blocks = split /\.+/, $block;
             foreach (@blocks)
             {
-                $ev .= "{'$_'}";
+                $ev .= "{'$_.'}";
                 $ev .= "[\$#\{$ev\}]";
             }
             $ev = 'return sub { for my $k (keys %{$_[1]}) { '.$ev.'{$k} = $_[1]->{$k}; } }';
-            $ev = $assigncache->{"+$block"} = eval $ev;
+            $ev = $assigncache{"+$block"} = eval $ev;
         }
         &$ev($self->{tpldata}, \%vararray);
     }
@@ -315,40 +311,86 @@ sub append_block_vars
 sub assign_vars
 {
     my $self = shift;
-    my $h;
-    if (@_ > 1 || !ref $_[0])
+    my %h;
+    if (@_ > 1 || !ref($_[0]))
     {
-        $h = { @_ };
+        %h = @_;
     }
     else
     {
-        $h = $_[0];
+        %h = %{$_[0]};
     }
-    $self->{tpldata} ||= {};
-    $self->{tpldata}->{$_} = $h->{$_} for keys %$h;
+    $self->{tpldata}{'.'}[0] ||= {};
+    $self->{tpldata}{'.'}[0]{$_} = $h{$_} for keys %h;
     return 1;
 }
 
-# Функция компилирует код.
-# Если $nout - истина, то не выводить страницу, а обрабатывать только <!-- SET --> и т.п.
-# FIXME Если бы ещё убрать необходимость двойной компиляции для $nout=0 и $nout=1.
-# $sub = $self->compile(\$code, $handle, $fn, $nout);
+# Аналог assign_vars, но преобразует имена переменных
+sub tr_assign_vars
+{
+    my $self = shift;
+    $self->assign_vars($self->tr_vars(@_));
+}
+
+# Аналог assign_block_vars, но преобразует имена переменных
+sub tr_assign_block_vars
+{
+    my $self = shift;
+    my $block = shift;
+    $self->assign_block_vars($block, $self->tr_vars(@_));
+}
+
+# Аналог append_block_vars, но преобразует имена переменных
+sub tr_append_block_vars
+{
+    my $self = shift;
+    my $block = shift;
+    $self->append_block_vars($block, $self->tr_vars(@_));
+}
+
+# Собственно функция, которая преобразует имена переменных
+sub tr_vars
+{
+    my $self = shift;
+    my $tr = shift;
+    my $prefix = shift;
+    my %h = ();
+    my ($k, $v);
+    if ($tr && !ref($tr))
+    {
+        unless ($self->{_tr_subroutine_cache}->{$tr})
+        {
+            # делаем так, чтобы всякие uc, lc и т.п работали
+            $self->{_tr_subroutine_cache}->{$tr} = eval 'sub { '.$tr.'($_[0]) }';
+        }
+        $tr = $self->{_tr_subroutine_cache}->{$tr};
+    }
+    while(@_)
+    {
+        $k = shift;
+        $v = shift;
+        $k = &$tr($k) if $tr;
+        $k = $prefix.$k if $prefix;
+        $h{$k} = $v;
+    }
+    return %h;
+}
+
+# Функция компилирует код
+# $sub = $self->compile(\$code, $handle, $fn);
 # print &$sub($self);
 sub compile
 {
     my $self = shift;
-    my ($coderef, $handle, $fn, $nout) = @_;
-    $nout = $nout ? 1 : 0;
-    return $compiled_code->{$nout.$coderef} if $compiled_code->{$nout.$coderef};
-
-    # кэширование на диске
+    my ($coderef, $handle, $fn) = @_;
+    return $compiled_code->{$coderef} if $compiled_code->{$coderef};
     my $h;
     if ($self->{cache_dir})
     {
-        $h = $self->{cache_dir}.$nout.md5_hex($$coderef).'.pl';
+        $h = $self->{cache_dir}.md5_hex($$coderef).'.pl';
         if (-e $h)
         {
-            $compiled_code->{$nout.$coderef} = do $h;
+            $compiled_code->{$coderef} = do $h;
             if ($@)
             {
                 warn "[Template] error compiling '$handle': [$@] in FILE: $h";
@@ -356,18 +398,17 @@ sub compile
             }
             else
             {
-                return $compiled_code->{$nout.$coderef};
+                return $compiled_code->{$coderef};
             }
         }
     }
 
-    # прописываем путь к текущему шаблону в переменную
     $self->{cur_template_path} = $self->{cur_template} = '';
     if ($fn)
     {
         $self->{cur_template} = $fn;
-        $self->{cur_template} = substr $self->{cur_template}, length $self->{root}
-            if substr($self->{cur_template}, 0, length $self->{root}) eq $self->{root};
+        $self->{cur_template} = substr($self->{cur_template}, length($self->{root}))
+            if substr($self->{cur_template}, 0, length($self->{root})) eq $self->{root};
         $self->{cur_template} =~ s/\.[^\.]+$//iso;
         $self->{cur_template} =~ s/:+//gso;
         $self->{cur_template} =~ s!/+!:!gso;
@@ -376,66 +417,150 @@ sub compile
             map { lc } split /:/, $self->{cur_template}) . '"}';
     }
 
+    my $nesting = 0;
+    my $included = {};
+    my @code_lines = ();
+    my @block_names = ('.');
+    my ($cbstart, $cbcount, $cbplus, $mm);
+
     my $code = $$coderef;
     Encode::_utf8_on($code) if $self->{use_utf8};
 
-    # удаляем комментарии <!--# ... #-->
+    # комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
+    # форматирование кода для красоты
+    $code =~ s/(?:^|\n)\s*(<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->)\s*(?:$|\n)/\x01$1\x01\n/gos;
+    1 while $code =~ s/(?<!\x01)<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->/\x01$&/gom;
+    1 while $code =~ s/<!--\s*(?:BEGIN|END|IF\S*|ELSE\S*|INCLUDE|SET|ENDSET)\s+.*?-->(?!\x01)/$&\x01/gom;
 
-    $self->{blocks} = [];
-    $self->{in} = [];
-    $self->{included} = {};
-    # вне <!-- SET --> при $nout=1 $t.= не делается
-    # за это отвечают также соотв. if'ы в compile_code_fragment
-    $self->{nout} = $nout;
-    $self->{in_set} = 0;
+    # ' и \ -> \' и \\
+    $code =~ s/\'|\\/\\$&/gos;
 
-    my $r = '';
-    my ($p, $c, $t);
-    my $pp = 0;
-    my $in;
+    # "первая замена"
+    $code =~
+        s%(?>\%+) *\w+[\w ]*?(?>\%+)|(?>\%+)|\{[a-z0-9\-_]+\.\#\}|\{((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+)((?:->[a-z0-9\-_]+)*)(?:\/([a-z0-9\-_]+))?\}%
+        $self->generate_xx_ref($&,$1,$2,$3,$4)
+        %goise;
 
-    # ищем фрагменты кода
-    $code =~ /^/gcso;
-    while ($code =~ /<!--(.*?)-->|\{(.*?)\}/gcso)
+    # \n -> \n\x01
+    $code =~ s/\n/\n\x01/gos;
+
+    # разбиваем код на строки
+    @code_lines = split /\x01/, $code;
+    foreach (@code_lines)
     {
-        $in = $self->{in_set};
-        $c = $1 ? $self->compile_code_fragment($1) : $self->compile_substitution($2);
-        next unless $c;
-        if (($t = pos($code) - $pp - length $&) > 0)
+        next unless $_;
+        if (/^\s*<!--\s*BEGIN\s+([a-z0-9\-_]+?)\s+([a-z \t\-_0-9]*)-->\s*$/iso)
         {
-            $p = substr $code, $pp, $t;
-            $p =~ s/\\|\'/\\$&/gso;
-            $r .= "\$t.='$p';\n" if !$nout || $in;
+            # начало блока
+            $nesting++;
+            $block_names[$nesting] = $1;
+            $self->{current_namespace} = join '.', @block_names;
+            $cbstart = 0; $cbcount = ''; $cbplus = '++';
+
+            {
+                my $o2 = $2;
+                if ($o2 =~ /^[ \t]*AT ([0-9]+)[ \t]*(?:([0-9]+)[ \t]*)?$/)
+                {
+                    $cbstart = $1;
+                    $cbcount = $2 ? $1+$2 : 0;
+                }
+                elsif ($o2 =~ /^[ \t]*MOD ([1-9][0-9]*) ([0-9]+)[ \t]*$/)
+                {
+                    $cbstart = $2;
+                    $cbplus = '+='.$1;
+                }
+            }
+
+            # либо min (N, $cbcount) если $cbcount задано
+            # либо просто N если нет
+            if ($nesting < 2)
+            {
+                # блок не вложенный
+                if ($cbcount) { $_ = "my \$_${1}_count = min (scalar(\@\{\$self->{tpldata}{'$1.'} || []\}), " . $cbcount . ');'; }
+                else { $_ = "my \$_${1}_count = scalar(\@{\$self->{tpldata}{'$1.'} || []});"; }
+                # начало цикла for
+                $_ .= "\nfor (my \$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
+            }
+            else
+            {
+                # блок вложенный
+                my $namespace = substr (join ('.', @block_names), 2);
+                my $varref = $self->generate_block_data_ref ($namespace);
+                if ($cbcount) { $_ = "my \$_${1}_count = min (scalar(\@\{$varref || []\}), $cbcount);"; }
+                else { $_ = "my \$_${1}_count = ($varref && \@\{$varref\}) ? scalar(\@\{$varref || []\}) : 0;"; }
+                $_ .= "\nfor (my \$_${1}_i = $cbstart; \$_${1}_i < \$_${1}_count; \$_${1}_i$cbplus)\n{";
+            }
         }
-        $r .= $c if $c;
-        $pp = pos $code;
-    }
-    if ($pp < length($code))
-    {
-        $p = substr $code, $pp;
-        $p =~ s/\\|\'/\\$&/gso;
-        $r .= "\$t.='$p';\n" if !$nout || $self->{in_set};
+        elsif (/^\s*<!--\s*END\s+(.*?)-->\s*$/so)
+        {
+            # чётко проверяем: блок нельзя завершать чем попало
+            delete $block_names[$nesting--] if ($nesting > 0 && trim ($1) eq $block_names[$nesting]);
+            $self->{current_namespace} = join '.', @block_names;
+            $_ = "} # END $1";
+        }
+        elsif (/^\s*<!--\s*(ELS(?:E\s*)?)?IF(\S*)\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_]+|#)((?:->[a-z0-9\-_]+)*)(?:\/([a-z0-9\-_]+))?\s*-->\s*$/iso)
+        {
+            my ($elsif, $varref, $t, $ta) = (
+                ($1 ? "} elsif" : "if"),
+                $self->generate_block_varref($3, $4, $5, $6, 1),
+                split /:/, $2, 2
+            );
+            if ($ta && $t && $self->{tests}->{lc $t}->[1])
+            {
+                $ta =~ s/\'|\\/\\$&/gso;
+                $ta = ", '$ta'";
+            }
+            else
+            {
+                $ta = "";
+            }
+            $t = $self->{tests}->{lc $t}->[0] || '' if $t;
+            $_ = "$elsif ($t($varref$ta)) {";
+        }
+        elsif (/^\s*<!--\s*ELSE\s*-->\s*$/so)
+        {
+            $_ = "} else {";
+        }
+        elsif (/^\s*<!--\s*INCLUDE\s*([^'\s]+)\s*-->\s*$/so)
+        {
+            my $n = $1;
+            $_ = "\$t .= \$self->parse('_INCLUDE$n');";
+            unless ($included->{$n})
+            {
+                $_ = "\$self->set_filenames('_INCLUDE$n' => '$n');\n    $_";
+                $included->{$n} = 1;
+            }
+        }
+        elsif (/^\s*<!--\s*SET\s+((?:[a-z0-9\-_]+\.)*)([a-z0-9\-_\/]+)\s*-->\s*$/iso)
+        {
+            my $varref = $self->generate_block_data_ref($1, 1)."{'$2'}";
+            $_ = "$varref = eval {\nmy \$t = '';";
+        }
+        elsif (/^\s*<!--\s*ENDSET\s*-->\s*$/so)
+        {
+            $_ = "return \$t;\n};";
+        }
+        else
+        {
+            $_ = "\$t .= '$_';";
+        }
     }
 
-    # дописываем начало и конец кода
+    # собираем код в строку
     $code = ($self->{use_utf8} ? "\nuse utf8;\n" : "").
 'sub {
 my $self = shift;
 my $t = "";
 my $_current_template = [ split /:/, \'' . $self->{cur_template} . '\' ];
-' . $r . '
+' . join("\n", @code_lines) . '
 return $t;
 }';
-    undef $r;
-
-    # кэшируем код на диск
     if ($h)
     {
         my $fd;
         if (open $fd, ">$h")
         {
-            no warnings 'utf8';
             print $fd $code;
             close $fd;
         }
@@ -445,408 +570,167 @@ return $t;
         }
     }
 
-    # компилируем код
-    $compiled_code->{$nout.$coderef} = eval $code;
+    $compiled_code->{$coderef} = eval $code;
     die "[Template] error compiling '$handle': [$@] in CODE:\n$code" if $@;
 
-    # возвращаем ссылку на процедуру
-    return $compiled_code->{$nout.$coderef};
+    return $compiled_code->{$coderef};
 }
 
-# компиляция фрагмента кода <!-- ... -->. это может быть:
-# 1) [ELSE] IF выражение
-# 2) BEGIN имя блока
-# 3) END [имя блока]
-# 4) SET переменная
-# 5) SET переменная = выражение
-# 6) INCLUDE имя_файла_шаблона
-# 7) выражение
-sub compile_code_fragment
+# Функция для "первой замены"
+sub generate_xx_ref
 {
     my $self = shift;
-    my ($e) = @_;
-    my $t;
-    $e =~ s/^\s+//so;
-    $e =~ s/\s+$//so;
-    if ($e =~ /^(ELS(?:E\s+)?)?IF(!?)\s+/iso)
+    my @a = @_;
+    my $a = shift @a;
+    if ($a =~ /^\%\%|\%\%$/so)
     {
-        $t = $';
-        if ($2)
-        {
-            warn "Legacy IF! used, consider changing it to IF NOT";
-            $t = "NOT $t";
-        }
-        $t = $self->compile_expression($t);
-        unless ($t)
-        {
-            warn "Invalid expression: ($t)";
-            return undef;
-        }
-        push @{$self->{in}}, [ 'if' ] unless $1;
-        return $1 ? "} elsif ($t) {\n" : "if ($t) {\n";
+        my $r = $a;
+        $r =~ s/^\%\%/\%/so;
+        $r =~ s/\%\%$/\%/so;
+        return $r;
     }
-    elsif ($e =~ /^BEGIN\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
+    elsif ($a =~ /^\%(.+)\%$/so)
     {
-        my $ref = $self->varref([@{$self->{blocks}}, $1]);
-        my $at = 0;
-        if ($2)
-        {
-            $at = $self->compile_expression($2);
-            unless ($at)
-            {
-                warn "Invalid expression: ($2) in AT";
-                return undef;
-            }
-        }
-        my $by = '++';
-        if ($3)
-        {
-            $by = $self->compile_expression($3);
-            unless ($by)
-            {
-                warn "Invalid expression: ($3) in BY";
-                return undef;
-            }
-            $by = '+=' . $by;
-        }
-        my $to = '';
-        if ($4)
-        {
-            $to = $self->compile_expression($4);
-            unless ($to)
-            {
-                warn "Invalid expression: ($4) in TO";
-                return undef;
-            }
-            $to = "\$blk_${1}_count = $to if $to < \$blk_${1}_count;";
-        }
-        push @{$self->{blocks}}, $1;
-        push @{$self->{in}}, [ 'begin', $1 ];
-        return <<EOF;
-my \$blk_${1}_count = ref($ref) && $ref =~ /ARRAY/so ? scalar \@{$ref} : $ref ? 1 : 0;
-${to}
-for (my \$blk_${1}_i = $at; \$blk_${1}_i < \$blk_${1}_count; \$blk_${1}_i $by) {
-my \$blk_${1}_vars = ref($ref) && $ref =~ /ARRAY/so ? $ref ->[\$blk_${1}_i] : $ref;
-EOF
+        return $self->language_xform($self->{current_namespace}, $1);
     }
-    elsif ($e =~ /^END(?:\s+([a-z_][a-z0-9_]*))?$/iso)
+    elsif ($a =~ /^\%\%+$/so)
     {
-        unless (@{$self->{in}})
-        {
-            warn "$& without BEGIN, IF or SET";
-            return undef;
-        }
-        my $l = $self->{in}->[$#{$self->{in}}];
-        if ($1 && ($l->[0] ne 'begin' || !$l->[1] || $l->[1] ne $1) ||
-            !$1 && $l->[1])
-        {
-            warn "$& after ".uc($l->[0])." $l->[1]";
-            return undef;
-        }
-        $self->{in_set}-- if $l->[0] eq 'set';
-        pop @{$self->{in}};
-        pop @{$self->{blocks}} if $1;
-        return $l->[0] eq 'set' ? "return \$t;\n};\n" : "} # $&\n";
+        return substr($a, 1);
     }
-    elsif ($e =~ /^SET\s+((?:[a-z0-9_]+\.)*[a-z0-9_]+)(\s*=\s*)?$/iso)
+    elsif ($a =~ /^\{([a-z0-9\-_]+)\.\#\}$/iso)
     {
-        if ($2)
-        {
-            $t = $self->compile_expression($');
-            unless ($t)
-            {
-                warn "Invalid expression: ($')";
-                return undef;
-            }
-        }
-        push @{$self->{in}}, [ 'set', $1 ];
-        $self->{in_set}++;
-        return $self->varref($1) . ' = ' . ($t || 'eval { my $t = ""') . ";\n";
+        return '\'.(1+$_'.$1.'_i).\'';
     }
-    elsif ($e =~ /^INCLUDE\s+(\S+)$/iso)
+    elsif ($a =~ /^\{.*\}$/so)
     {
-        my $n = $1;
-        my $p = $self->{nout} && !$self->{in_set} ? "preparse" : "parse";
-        $n =~ s/\'|\\/\\$&/gso;
-        $t = "\$t .= \$self->$p('_INCLUDE$n');\n";
-        unless ($self->{included}->{$n})
-        {
-            $t = "\$self->set_filenames('_INCLUDE$n' => '$n');\n$t";
-            $self->{included}->{$n} = 1;
-        }
-        return $t;
+        return "' . " . $self->generate_block_varref(@a) . " . '";
+    }
+    return $a;
+}
+
+# Функция генерирует подстановку переменной шаблона
+# $varref = $obj->generate_block_varref ($namespace, $varname, $varhash)
+sub generate_block_varref
+{
+    my $self = shift;
+    my ($namespace, $varname, $varhash, $varconv) = @_;
+    my $varref;
+
+    $varconv = undef unless $self->{conv}->{$varconv};
+    # обрезаем точки в конце
+    $namespace =~ s/\.*$//o;
+
+    $varref = $self->generate_block_data_ref ($namespace, 1);
+    # добавляем имя переменной
+    if ($varname ne '#')
+    {
+        $varref .= "{'$varname'}";
     }
     else
     {
-        $t = $self->compile_expression($e);
-        return "\$t .= $t;\n" if $t && (!$self->{nout} || $self->{in_set});
+        $varref = $namespace;
+        $varref =~ s/^(?:.*\.)?([^\.]+)\.*$/$1/;
+        $varref = '(1+$_'.$varref.'_i)';
     }
-    return undef;
-}
 
-# компиляция подстановки переменной {...} это просто выражение
-sub compile_substitution
-{
-    my $self = shift;
-    my ($e) = @_;
-    $e = $self->compile_expression($e);
-    return undef unless $e;
-    return "\$t .= $e;\n" if !$self->{nout} || $self->{in_set};
-}
-
-# компиляция выражения. это может быть:
-# 1) "строковой литерал"
-# 2) 123.123 или 0123 или 0x123
-# 3) переменная
-# 4) функция(выражение,выражение,...,выражение)
-# 5) функция выражение
-# 6) для legacy mode: переменная/имя_функции
-sub compile_expression
-{
-    my $self = shift;
-    my ($e, $after) = @_;
-    $after = undef if $after && ref $after ne 'SCALAR';
-    $$after = '' if $after;
-    $e =~ s/^\s+//so;
-    $e =~ s/\s+$//so unless $after;
-    # строковой или числовой литерал
-    if ($e =~ /^((\")(?:[^\"\\]+|\\.)*\"|\'(?:[^\'\\]+|\\.)*\'|-?[1-9]\d*(\.\d+)?|-?0\d*|-?0x\d+)\s*/iso)
+    # добавляем путь по вложенным хешам/массивам
+    if ($varhash)
     {
-        if ($')
+        $varhash = [ split /->/, $varhash ];
+        foreach (@$varhash)
         {
-            return undef unless $after;
-            $$after = $';
-        }
-        $e = $1;
-        $e =~ s/[\$\@\%]/\\$&/gso if $2;
-        return $e;
-    }
-    # функция нескольких аргументов
-    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s*\(/iso)
-    {
-        my $f = lc $1;
-        unless ($self->can("function_$f"))
-        {
-            warn "Unknown function: '$f'";
-            return undef;
-        }
-        my $a = $';
-        my @a;
-        while ($e = $self->compile_expression($a, \$a))
-        {
-            push @a, $e;
-            if ($a =~ /^\s*\)/so)
+            if (/^\d+$/so)
             {
-                last;
+                $varref .= "[$_]";
             }
-            elsif ($a !~ s/^\s*,//so)
+            elsif ($_)
             {
-                warn "Unexpected token: '$a' in $f() parameter list";
-                return undef;
+                $varref .= "{'$_'}";
             }
         }
-        if ($a !~ s/^\s*\)\s*//so)
-        {
-            warn "Unexpected token: '$a' in the end of $f() parameter list";
-            return undef;
-        }
-        if ($a)
-        {
-            return undef unless $after;
-            $$after = $a;
-        }
-        $f = "function_$f";
-        return $self->$f(@a);
     }
-    # функция одного аргумента
-    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s+(?=\S)/iso)
-    {
-        my $f = lc $1;
-        unless ($self->can("function_$f"))
-        {
-            warn "Unknown function: '$f'";
-            return undef;
-        }
-        my $a = $';
-        my $arg = $self->compile_expression($a, \$a);
-        unless ($arg)
-        {
-            warn "Invalid expression: ($e)";
-            return undef;
-        }
-        $a =~ s/^\s*//so;
-        if ($a)
-        {
-            return undef unless $after;
-            $$after = $a;
-        }
-        $f = "function_$f";
-        return $self->$f($arg);
-    }
-    # переменная плюс legacy-mode переменная/функция
-    elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+|\#))(?:\/([a-z]+))?\s*/iso)
-    {
-        if ($')
-        {
-            return undef unless $after;
-            $$after = $';
-        }
-        $e = $self->varref($1);
-        if ($2)
-        {
-            my $f = lc $2;
-            unless ($self->can("function_$f"))
-            {
-                warn "Unknown function: '$f' called in legacy mode ($&)";
-                return undef;
-            }
-            $f = "function_$f";
-            $e = $self->$f($e);
-        }
-        return $e;
-    }
-    return undef;
-}
 
-# генерация ссылки на переменную
-sub varref
-{
-    my $self = shift;
-    return "" unless $_[0];
-    my @e = ref $_[0] ? @{$_[0]} : split /\.+/, $_[0];
-    $self->{last_varref_path} = join '.', @e;
-    my $t = '$self->{tpldata}';
-    EQBLOCK: {
-    if (@{$self->{blocks}})
+    # генерируем преобразование
+    if ($varconv)
     {
-        for (0..$#{$self->{blocks}})
+        unless (ref $self->{conv}->{$varconv})
         {
-            last EQBLOCK unless $self->{blocks}->[$_] eq $e[$_];
-        }
-        splice @e, 0, @{$self->{blocks}};
-        if (@e == 1 && $e[0] eq '#')
-        {
-            # номер итерации блока
-            @e = ();
-            $t = '$blk_'.$self->{blocks}->[$#{$self->{blocks}}].'_i';
+            $varref = "(" . $self->{conv}->{$varconv} . "($varref))";
         }
         else
         {
-            # локальная переменная
-            $t = '$blk_'.$self->{blocks}->[$#{$self->{blocks}}].'_vars';
+            my $f = $self->{conv}->{$varconv};
+            unless ($namespace)
+            {
+                $f = &$f($self, $varname, $varref);
+            }
+            else
+            {
+                $f = &$f($self, "$namespace.$varname", $varref);
+            }
+            $varref = "($f)";
         }
     }
-    }
-    for (@e)
-    {
-        if (/^\d+$/so)
-        {
-            $t .= "->[$_]";
-        }
-        else
-        {
-            s/\'|\\/\\$&/gso;
-            $t .= "->{'$_'}";
-        }
-    }
-    return $t;
+
+    return $varref;
 }
 
-# операция над аргументами
-sub fmop
-{
-    my $op = shift;
-    shift; # my $self = shift;
-    return "((" . join(") $op (", @_) . "))";
-}
-
-# функции
-sub function_or      { fmop('||', @_) }
-sub function_and     { fmop('&&', @_) }
-sub function_add     { fmop('+', @_) }
-sub function_sub     { fmop('-', @_) }
-sub function_mul     { fmop('*', @_) }
-sub function_div     { fmop('/', @_) }
-sub function_concat  { fmop('.', @_) }
-sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0" }
-sub function_not     { "!($_[1])" }
-sub function_even    { "!(($_[1]) & 1)" }
-sub function_odd     { "(($_[1]) & 1)" }
-sub function_int     { "int($_[1])" }
-sub function_eq      { "(($_[1]) == ($_[2]))" }
-sub function_gt      { "(($_[1]) > ($_[2]))" }
-sub function_lt      { "(($_[1]) < ($_[2]))" }
-sub function_ge      { "(($_[1]) >= ($_[2]))" }
-sub function_le      { "(($_[1]) <= ($_[2]))" }
-sub function_seq     { "(($_[1]) eq ($_[2]))" }
-sub function_sgt     { "(($_[1]) gt ($_[2]))" }
-sub function_slt     { "(($_[1]) lt ($_[2]))" }
-sub function_sge     { "(($_[1]) ge ($_[2]))" }
-sub function_sle     { "(($_[1]) le ($_[2]))" }
-sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = \&function_lc;
-sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = \&function_uc;
-sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = \&function_requote;
-sub function_split   { "split($_[1], $_[2], $_[3])" }
-sub function_quote   { "quotequote($_[1])" }            *function_q = \&function_quote;
-sub function_html    { "htmlspecialchars($_[1])" }      *function_s = \&function_html;
-sub function_strip   { "strip_tags($_[1])" }            *function_t = \&function_strip;
-sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = \&function_h;
-sub function_l       { f_translate(undef, @_) }         *function_translate = \&function_l;
-sub function_lz      { f_translate(1, @_) }             *function_translate_null = \&function_lz;
-
-# объединяет не просто скаляры, а также все элементы массивов
-sub function_join
+# Функция генерирует обращение к массиву переменных блока
+# $blockref = $obj->generate_block_data_ref ($block, $include_last_iterator)
+sub generate_block_data_ref
 {
     my $self = shift;
-    my $e = shift;
-    $e = "join($e";
-    $e .= ", ref($_) eq 'ARRAY' ? \@{$_} : ($_)" for @_;
-    $e .= ")";
-    return $e;
-}
+    my $blockref = '$self->{tpldata}';
+    my ($block, $withlastit) = @_;
 
-# автоматически выбирает, в compile-time или в run-time делать перевод
-sub f_translate
-{
-    my $ifnull = shift;
-    my $e = eval $_[1];
-    if ($@)
-    {
-        # выражение - не константа, т.к. не вычисляется без $self
-        return $_[0]->language_ref($_[0]->{last_varref_path}, $_[1], $ifnull);
-    }
-    # выражение - константа
-    return $_[0]->language_xform($e);
+    # для корневого блока
+    return '$self->{tpldata}{\'.\'}' . ($withlastit ? '[0]' : '')
+        if $block =~ /^\.*$/so;
+
+    # строим цепочку блоков
+    $block =~ s/\.+$//so;
+    my @blocks = split (/\.+/, $block);
+    my $lastblock = pop (@blocks);
+    $blockref .= "{'$_.'}[\$_${_}_i]" foreach @blocks;
+    $blockref .= "{'$lastblock.'}";
+
+    # добавляем последний итератор, если надо
+    $blockref .= "[\$_${lastblock}_i]" if ($withlastit);
+    return $blockref;
 }
 
 # Функция компилирует ссылку на данные ленгпака
 sub language_ref
 {
     my $self = shift;
-    my ($var, $varref, $emptyifnull) = @_;
+    my ($var, $varref, $value, $ifnull) = @_;
     my $code = '';
     $code .= '->{' . lc($_) . '}' foreach split /\.+/, $var;
     $code .= '->{' . $varref . '}';
     $code = ($self->{cur_template_path} ?
         '(($self->{lang}' . $self->{cur_template_path} . $code . ') || ' : '') .
         '($self->{lang}' . $code . ')';
-    $code .= ' || (' . $varref . ')' unless $emptyifnull;
+    $code .= ' || (' . $varref . ')' unless $ifnull;
+    $code .= ')';
     return $code;
 }
+
+# Функция компилирует ссылку на данные ленгпака
+sub language_refnull { language_ref($_[0], $_[1], $_[2], $_[3], 1) }
 
 # Compile-time вычисление language_ref
 sub language_xform
 {
     my $self = shift;
-    my ($value) = @_;
+    my ($ns, $value) = @_;
     my ($ca, $cb) = ($self->{lang}, $self->{lang});
     foreach (split /:/, $self->{cur_template})
     {
         $cb = $cb->{lc $_} if $cb;
     }
-    if (@{$self->{blocks}})
+    if ($ns)
     {
-        foreach (@{$self->{blocks}})
+        foreach (split /\./, $ns)
         {
             $ca = $ca->{lc $_} if $ca;
             $cb = $cb->{lc $_} if $cb;
@@ -857,135 +741,187 @@ sub language_xform
     return $ca || $cb;
 }
 
+# Тесты
+
+sub test_even { !($_[0] & 1) }
+sub test_odd  { ($_[0] & 1 ? 1 : 0) }
+sub test_eq   { $_[0] eq $_[1] }
+
+sub test_mod
+{
+    my ($div, $mod) = split /\s*,\s*/, $_[1], 2;
+    $mod ||= 0;
+    return ($_[0] % $div) == $mod;
+}
+
 1;
 __END__
 
-=head1 Шаблонизатор VMX::Template
+=head1 Шаблонизатор VMX::Template, старая версия
 
-Данный модуль представляет собой новую версию VMX::Template, построенную на
-некоторых новых идеях, ликвидировавшую безобразие и legacy-код, накопленный
-в старой версии, однако сохранившую высокую производительность и простоту.
+Sway::Template - простой и быстрый шаблонизатор, выросший из шаблонизатора phpBB2.
 
-=head1 Идеи
+Legacy-версия. Новая стабильная версия входит в Solstice Homepage System (см. ветку svn branches/solstice).
 
-Уйти от assign_vars(), assign_block_vars(). Передавать, как и в обычных движках,
-просто хеш с данными $vars. Как, например, в Template::Toolkit. При этом
-сохранить данные методы для совместимости.
+=head1 Программный интерфейс
 
-Почистить синтаксис: ликвидировать "преобразования", "вложенный путь по
-переменной" (->key->index->key->и т.п.), специальный синтаксис для окончания SET,
-неочевидное обращение к счётчику block.#, tr_assign_* и т.п.
+ # Конструктор
+ $template = VMX::Template->new(
+     root            => '.',   # каталог с шаблонами
+     reload          => 1,     # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
+     wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
+     cache_dir       => undef, # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
+     use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
+ );
 
-Переписать с нуля компилятор.
+ # Выбор файла шаблона:
+ $template->set_filenames('alias' => 'file-name.tpl');
 
-Добавить в употребление функции, но только самые необходимые.
+ # Задание кода шаблона "на месте":
+ $template->set_filenames('alias' => \ 'код шаблона');
 
-Добавить обработку ошибок и диагностические сообщения.
+ # Загрузка файлов автоматических переводов:
+ # Каждый такой файл содержит код на языке Perl, возвращающий ссылку на хеш.
+ # Загрузка происходит с автоматическим пересчитыванием с диска при изменениях.
+ $template->load_lang("файл1.pl", "файл2.pl");
 
-=head1 Реализация
+ # Загрузка хешей в качестве языковых данных:
+ $template->load_lang_hashes({ block => { var => 'перевод' } });
 
-Путь к переменной теперь может включать в себя числа.
+ # Присвоение переменных корневого уровня:
+ $template->assign_vars(KEY => "значение");
 
-Вне BEGIN - {block} будет иметь значение ARRAY(0x...) т.е. массив всех
-итераций блока block, а {block.0} будет иметь значение HASH(0x...), т.е.
-первую итерацию блока block.
+ # Присвоение переменных блока-цикла в новую итерацию блока:
+ $template->assign_block_vars("block", KEY => "значение");
+ # Или то же, но без копирования готового хешрефа:
+ $template->assign_block_vars("block", { KEY => "значение" });
+ # Или то же, но в последнюю заданную итерацию блока, а не в новую:
+ $template->append_block_vars("block", KEY => "значение");
+
+ # Выполнение шаблона и получение результатов (страницы):
+ # Выбранные файлы автоматически перезачитываются с диска при изменениях.
+ # Код кэшируется на 2-х уровнях: на диске в виде perl-кода и в памяти в скомпилированном виде.
+ $page = $template->parse('alias');
+
+ # Очистка сохранённых данных для генерации новой страницы:
+ $template->clear;
+
+=head1 Синтаксис
+
+Идея синтаксиса шаблонов - быть максимально простым и не поганить HTML-код.
+
+=head2 Комментарии
+
+<!--# Комментарий, не попадающий в результат исполнения #-->
+
+=head2 Включение (INCLUDE)
+
+ Включение шаблона с именем filename.tpl:
+ <!-- INCLUDE filename.tpl -->
+
+=head2 Подстановки переменных
+
+{переменная} или {переменная->путь} или {переменная/преобразование}
+
+Где переменная - цепочка идентификаторов, разделённая точками.
+Все, кроме последнего - имена блоков, последний - имя переменной.
+После имени переменной может идти путь по ней, если она представляет собой хеш или массив.
+Путь - цепочка идентификаторов или чисел, разделённая стрелками ->
+Например, {DOMAIN} - подстановка корневой переменной DOMAIN.
+А {site.url.DOMAIN} - подстановка переменной DOMAIN блока url, вложенного в блок site.
+А {site.url.CONFIG->rules->0/s} - подстановка первого элемента массива, вложенного
+в переменную CONFIG блока url, вложенного в блок site, по ключу rules, в
+HTML-безопасном виде (т.е. с преобразованием s, см.ниже).
+
+А преобразование - одно из:
+
+ T - удаление всех HTML тегов из значения
+ H - удаление всех HTML тегов из значения, кроме разрешённых в VMX::Common
+ i - преобразование значения к целому числу
+ s - замена всех символов < > & " ' на HTML сущности &lt; &gt; &amp; &quot; &apos;
+ l - перевод значения в нижний регистр
+ u - перевод значения в верхний регистр
+ q - замена всех символов " ' \ на \" \' \\
+ L - замена значения на его контекстный перевод, если таковой имеется
+ Lz - замена значения на его контекстный перевод, если таковой имеется, и на пустое значение, если нет
+
+=head2 Условный вывод (IF)
+
+ <!-- IF[тест] подстановка -->
+ <!-- END -->
+
+Где подстановка - любая допустимая в {фигурных.скобках} подстановка.
+
+Тесты:
+
+ !    - логическое отрицание
+ EVEN - истина в случае, если значение - чётное число
+ ODD  - истина в случае, если значение - нечётное число
+ EQ:строка            - истина в случае, если значение переменной совпадает с "строка"
+ MOD:делитель,остаток - истина в случае, если остаток от деления значения переменной на "делитель" равен "остатку"
+
+Например:
+
+ <!-- IF! site.url.CONFIG->rules->0/Lz -->
+ <!-- END -->
+
+=head2 Циклический вывод (BEGIN block)
+
+Циклический вывод, начать с итерации start (считаются с нуля), и вывести максимум по итерацию count.
+Либо обработать все итерации с номерами, дающими остаток от деления на "div" равный "mod".
+Имя блока состоит из латинских символов, цифр и символа '_' (подчёркивания).
+
+Итак, варианты начала:
 
  <!-- BEGIN block -->
+ <!-- BEGIN block AT start -->
+ <!-- BEGIN block AT start count -->
+ <!-- BEGIN block MOD div mod -->
 
-Внутри BEGIN - {block} будет иметь значение HASH(0x...), т.е. уже значение
-текущей итерации блока block, а {block.#} будет иметь значением номер текущей
-итерации {block.var}, считаемый с 0, а не с 1, как в старой версии.
+Конец блока - всегда <!-- END block -->.
 
- <!-- END block -->
-
-На <!-- END другоеимя --> после <!-- BEGIN block --> ругнётся, ибо нефиг.
-Если block в хеше данных - не массив, а хеш - значит, итерация у блока только
-одна, и <!-- BEGIN block --> работает как for($long_expression) {} в Perl.
-
-Операторов НЕТ, но есть функции.
 Пример:
 
- <!-- IF OR(function(block.key1),AND(block.key2,block.key3)) -->
+ <!-- BEGIN block -->
+ <!-- BEGIN inner_block -->
+ {block.inner_block.VARIABLE}
+ {inner_block.#}
+ <!-- END inner_block -->
+ <!-- END block -->
 
-Синтаксис вызова функции нескольких аргументов:
+И специальный случай: внутри внутреннего блока {inner_block.#} имеет значением
+номер текущей итерации внутреннего блока, считающийся с 1. Именно {inner_block.#},
+а не {block.inner_block.#}.
 
- <!-- function(block.key, 0, "abc") -->
+=head2 Автоматические контекстные переводы
 
-Подстановка:
+Они доступны в двух вариантах: %Переводимая строка% и {переменная/L}.
 
- {function(block.key, 0, "abc")}
+Идея в том, чтобы автоматически заменять строки на другие строки в зависимости
+от их расположения в файле шаблона (контекста).
 
-Синтаксис вызова функции одного аргумента:
+Контекст включает в себя:
 
- <!-- function(block.key) -->
- <!-- function block.key -->
- {block.key/L}
- {L block.key}
+  - путь к файлу шаблона.
+  - путь к текущему блоку-циклу.
+  - в случае перевода переменной - имя переменной.
 
-Условный вывод:
+Данные перевода представляют собой вложенный хеш. Подставляемые строки
+берутся по наиболее детализированному доступному пути в нём. Т.е. если есть
+->1->2->3, берётся ->1->2->3, если нет ->1->2->3, но есть ->2->3, берётся ->2->3,
+иначе берётся просто ->3.
 
- <!-- IF function(block.key) --><!-- ELSEIF ... --><!-- END -->
- <!-- IF NOT block.key -->...<!-- END -->
+Соответственно и загружаемые файлы переводов должны содержать просто код,
+возвращающий хешреф. Т.е. в простейшем случае - просто хешреф.
 
-Запись значения переменной:
+=head2 Сохранение значения переменной
 
- <!-- SET block.key -->...<!-- END -->
+Следующий синтаксис:
 
-или
+ <!-- SET переменная -->
+ Любой код.
+ <!-- ENDSET -->
 
- <!-- SET block.key = выражение -->
-
-=head1 Функции
-
-=head2 OR, AND, NOT
-
-Логические ИЛИ, И, НЕ, действующие аналогично Perl операторам || && !.
-
-=head2 EVEN, ODD
-
-Истина в случае, если аргумент чётный или нечётный соответственно.
-
-=head2 INT, ADD, MUL, DIV, MOD
-
-Преобразование к целому числу и арифметические операции.
-
-=head2 EQ, SEQ, GT, LT, GE, LE, SGT, SLT, SGE, SLE
-
-Действуют аналогично Perl операторам == eq > < >= <= gt lt ge le.
-
-=head2 CONCAT, JOIN, SPLIT, COUNT
-
-Конкатенация всех своих аргументов - concat(аргументы).
-
-Конкатенация элементов массива через разделитель - join(строка,аргументы).
-Причём если какие-то аргументы - массивы, конкатенирует все их элементы,
-а не их самих.
-
-Разделение строки по регулярному выражению и лимиту - split(РЭ,аргумент,лимит).
-Лимит необязателен. (см. perldoc -f split)
-
-Количество элементов в массиве или 0 если не массив - count(аргумент).
-
-=head2 LC=LOWER=LOWERCASE, UC=UPPER=UPPERCASE
-
-Нижний и верхний регистр.
-
-=head2 L=TRANSLATE, LZ=TRANSLATE_NULL
-
-Контекстный перевод и он же либо пустое значение.
-
-=head2 S=HTML, T=STRIP, H=STRIP_UNSAFE
-
-Преобразование символов < > & " ' в HTML-сущности,
-
-Удаление всех тегов,
-
-Удаление запрещённых тегов.
-
-=head2 Q=QUOTE, REQUOTE=RE_QUOTE=PREG_QUOTE
-
-Экранирование символов " ' \
-
-А также экранирование символов, являющихся специальными в регулярных выражениях (см. perldoc perlre).
+Сохраняет в "переменную" результат трансляции кода между SET и ENDSET.
 
 =cut
