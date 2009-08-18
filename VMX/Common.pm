@@ -27,7 +27,7 @@ our @EXPORT_OK = qw(
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit
+    hashmrg litsplit strip_tagspace
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -149,6 +149,17 @@ sub strip_tags
     my $ex = join '|', @{(shift || [])};
     $ex = "(?!/?($ex))" if $ex;
     s/<\/?$ex(!?[a-z0-9_\-]+)[^<>]*>//gis;
+    return $_;
+}
+
+# преобразование \s+ и тегов в 1 пробел
+sub strip_tagspace
+{
+    local $_ = shift;
+    my $ex = join '|', @{(shift || [])};
+    $ex = "(?!/?($ex))" if $ex;
+    s/\s*(<\/?$ex(!?[a-z0-9_\-]+)[^<>]*>\s*)+/ /gis;
+    s/\s+/ /gis;
     return $_;
 }
 
