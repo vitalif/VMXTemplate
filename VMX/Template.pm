@@ -831,6 +831,7 @@ sub language_ref
         '(($self->{lang}' . $self->{cur_template_path} . $code . ') || ' : '') .
         '($self->{lang}' . $code . ')';
     $code .= ' || (' . $varref . ')' unless $emptyifnull;
+    $code .= ')';
     return $code;
 }
 
