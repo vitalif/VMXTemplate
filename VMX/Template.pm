@@ -468,7 +468,7 @@ sub compile_code_fragment
     my $t;
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so;
-    if ($e =~ /^(ELS(?:E\s+)?)?IF(!?)\s+/iso)
+    if ($e =~ /^(ELS(?:E\s+)?)?IF(!?)\s*/iso)
     {
         $t = $';
         if ($2)
@@ -484,6 +484,10 @@ sub compile_code_fragment
         }
         push @{$self->{in}}, [ 'if' ] unless $1;
         return $1 ? "} elsif ($t) {\n" : "if ($t) {\n";
+    }
+    elsif ($e =~ /^ELSE\s*$/iso)
+    {
+        return "} else {";
     }
     elsif ($e =~ /^BEGIN\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
     {
