@@ -12,6 +12,7 @@ my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
 my $langhashes = {};        # хеши ленгпаков
+my $langmerged = {};        # кэш объединённых ленгпаков
 my $assigncache = {};       # кэш eval'ов присвоений
 
 # Конструктор
@@ -67,22 +68,36 @@ sub set_code
 sub load_lang
 {
     my $self = shift;
-    return $self->load_lang_hashes(map
+    return $self->{lang} unless @_;
+    my $modified = 0;
+    my ($mtime, $load);
+    for (@_)
     {
-        my $load = 0;
-        my $mtime;
+        $load = 0;
         if (!defined($mtimes->{$_}) || $self->{reload})
         {
-            $mtime = [ stat($_) ] -> [ 9 ];
-            $load = 1 if !defined($mtimes->{$_}) || $mtime > $mtimes->{$_};
+            $mtime = [ stat $_ ] -> [ 9 ];
+            $modified = $load = 1 if !defined($mtimes->{$_}) || $mtime > $mtimes->{$_};
         }
         if ($load)
         {
             $mtimes->{$_} = $mtime;
             $langhashes->{$_} = do $_;
         }
-        $langhashes->{$_};
-    } @_);
+        $mtime = $_;
+        $mtime =~ tr!/!_!;
+        $self->{_lkey} .= '_' . $mtime;
+    }
+    if ($load || !$langmerged->{$self->{_lkey}})
+    {
+        $self->load_lang_hashes(map { $langhashes->{$_} } @_);
+        $langmerged->{$self->{_lkey}} = $self->{lang};
+    }
+    else
+    {
+        $self->{lang} = $langmerged->{$self->{_lkey}};
+    }
+    return $self->{lang};
 }
 
 # Функция загружает хеши переводов
@@ -92,7 +107,17 @@ sub load_lang_hashes
     my $self = shift;
     my $i = 0;
     Hash::Merge::set_behavior('RIGHT_PRECEDENT');
-    $self->{lang} = Hash::Merge::merge ($self->{lang}, $_) foreach @_;
+    for (@_)
+    {
+        if (%{$self->{lang}})
+        {
+            $self->{lang} = Hash::Merge::merge ($self->{lang}, $_);
+        }
+        else
+        {
+            $self->{lang} = $_;
+        }
+    }
     return $i;
 }
 
@@ -381,6 +406,7 @@ sub compile
 
     # удаляем комментарии <!--# ... #-->
     $code =~ s/\s*<!--#.*?#-->//gos;
+    $code =~ s/(?:^|\n)[ \t\r]*(<!--\s*[a-z]+(\s+.*)?-->)/$1/giso;
 
     $self->{blocks} = [];
     $self->{in} = [];
@@ -468,7 +494,7 @@ sub compile_code_fragment
     my $t;
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so;
-    if ($e =~ /^(ELS(?:E\s+)?)?IF(!?)\s*/iso)
+    if ($e =~ /^(ELS(?:E\s*)?)?IF(!?)\s*/iso)
     {
         $t = $';
         if ($2)
