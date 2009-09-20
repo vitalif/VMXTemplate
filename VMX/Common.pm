@@ -1,23 +1,13 @@
 #!/usr/bin/perl
-# Некоторые простые полезные функции
+# Простые полезные функции
 
 package VMX::Common;
 
 use utf8;
 use strict;
-use locale;
-use constant HASHARRAY => {Slice=>{}};
-
 use Encode;
-use URI::Escape qw(!uri_escape);
-use Carp;
 
-use DBI;
-use Digest::MD5;
-use Date::Parse;
-use Date::Manip;
-use POSIX qw(mktime);
-use I18N::Langinfo qw(langinfo CODESET);
+use constant HASHARRAY => {Slice=>{}};
 
 require Exporter;
 
@@ -31,6 +21,7 @@ our @EXPORT_OK = qw(
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
+# для strip_unsafe_tags()
 our $allowed_html = [qw/
     div span a b i u p h\d+ strike strong small big blink center ol pre sub
     sup font br table tr td th tbody tfoot thead tt ul li em img marquee
@@ -40,7 +31,7 @@ our @DATE_INIT = ("Language=Russian", "DateFormat=non-US");
 
 my $uri_escape_original;
 
-# Exporter-ский импорт + подмена функции в DBI
+# Exporter-ский импорт + подмена функций в DBI и URI::Escape
 sub import
 {
     my @args = @_;
@@ -67,6 +58,7 @@ sub import
     push @args, 'HASHARRAY' if $hasharray;
     if ($dbi_hacks)
     {
+        require DBI;
         *DBI::_::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
         *DBI::st::fetchall_hashref = *VMX::Common::fetchall_hashref;
         $DBI::DBI_methods{st}{fetchall_hashref} = { U =>[1,2,'[ $key_field ]'] };
@@ -74,6 +66,7 @@ sub import
     }
     if ($uri_escape_hacks)
     {
+        require URI::Escape;
         $uri_escape_original = \&URI::Escape::uri_escape;
         *URI::Escape::uri_escape = *VMX::Common::uri_escape;
     }
@@ -441,6 +434,7 @@ sub filemd5
     my $r;
     if (open $f, "<$file")
     {
+        require Digest::MD5;
         my $ctx = Digest::MD5->new;
         $ctx->addfile($f);
         $r = $ctx->hexdigest;
@@ -484,6 +478,7 @@ sub str2time
     my $time;
     unless ($init)
     {
+        require Date::Manip;
         $orig_DIRussian = \&Date::Manip::_Date_Init_Russian;
         *Date::Manip::_Date_Init_Russian = \&date_init_russian;
         Date_Init(@DATE_INIT);
@@ -494,6 +489,7 @@ sub str2time
     return $time if defined $time;
     $time = $str;
     $time =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
+    require Date::Parse;
     $time = Date::Parse::str2time($time);
     return $time;
 }
@@ -561,6 +557,7 @@ sub normalize_url ($$)
 }
 
 # uri_escape, автоматически дёргающий uri_escape_utf8 если текст is_utf8
+# не вызывайте это напрямую! только при use VMX::Common qw(uri_escape_hacks);
 sub uri_escape
 {
     if (Encode::is_utf8($_[0]))
@@ -591,7 +588,11 @@ sub utf8on
 }
 
 # преобразование mysql даты/времени в UNIX время
-sub mysql2time { $_[0] ? mktime(mysqllocaltime(@_)) : 0 }
+sub mysql2time
+{
+    require POSIX;
+    $_[0] ? POSIX::mktime(mysqllocaltime(@_)) : 0
+}
 
 # и в struct tm
 sub mysqllocaltime
@@ -671,12 +672,33 @@ our $litsplit_A = qr/\'(?:[^\'\\]+|\\.)+\'/;
 our $litsplit_Q = qr/\"(?:[^\"\\]+|\\.)+\"/;
 our $litsplit_G = qr/\`(?:[^\`\\]+|\\.)+\`/;
 
+my $litsplit_types = {
+    aqg => $litsplit_AQG,
+    agq => $litsplit_AQG,
+    qag => $litsplit_AQG,
+    qga => $litsplit_AQG,
+    gaq => $litsplit_AQG,
+    gqa => $litsplit_AQG,
+    aq  => $litsplit_AQ,
+    qa  => $litsplit_AQ,
+    gq  => $litsplit_QG,
+    qg  => $litsplit_QG,
+    ag  => $litsplit_AG,
+    ga  => $litsplit_AG,
+    a   => $litsplit_A,
+    q   => $litsplit_Q,
+    g   => $litsplit_G,
+};
+
 # разбиение строки по регэкспу, однако не как split(//), а с учётом литералов,
 # входящих в строку. границы литералов можно задавать доп.аргументом
+# по умолчанию заключённые в 'одинарные', "двойные", или `обратные` кавычки строки.
 # @a = litsplit /PATTERN/, EXPR[, LIMIT[, /LITERAL_PATTERN/]]
+# LITERAL_PATTERN может быть равно сочетаниям букв "aqg"
 sub litsplit
 {
     my ($re, $s, $lim, $lit) = @_;
+    $lit = $litsplit_types{lc $$lit} if ref($lit) eq 'SCALAR';
     $lit ||= $litsplit_AQG;
     my @r;
     my $l = 0;
