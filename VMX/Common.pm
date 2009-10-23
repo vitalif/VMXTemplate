@@ -481,11 +481,11 @@ sub str2time
         require Date::Manip;
         $orig_DIRussian = \&Date::Manip::_Date_Init_Russian;
         *Date::Manip::_Date_Init_Russian = \&date_init_russian;
-        Date_Init(@DATE_INIT);
+        Date::Manip::Date_Init(@DATE_INIT);
         $init = 1;
     }
     $str = lc $str;
-    $time = UnixDate(ParseDate($str),"%s");
+    $time = Date::Manip::UnixDate(Date::Manip::ParseDate($str),"%s");
     return $time if defined $time;
     $time = $str;
     $time =~ s/(\d{2})\.(\d{2})\.(\d{4})/$2\/$1\/$3/gso;
@@ -698,7 +698,7 @@ my $litsplit_types = {
 sub litsplit
 {
     my ($re, $s, $lim, $lit) = @_;
-    $lit = $litsplit_types{lc $$lit} if ref($lit) eq 'SCALAR';
+    $lit = $litsplit_types->{lc $$lit} if ref($lit) eq 'SCALAR';
     $lit ||= $litsplit_AQG;
     my @r;
     my $l = 0;
