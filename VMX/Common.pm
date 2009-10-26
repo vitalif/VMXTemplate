@@ -8,16 +8,28 @@ use strict;
 use Encode;
 
 use constant HASHARRAY => {Slice=>{}};
+use constant {
+    TS_UNIX     => 0,
+    TS_DB       => 1,
+    TS_MW       => 2,
+    TS_EXIF     => 3,
+    TS_ORACLE   => 4,
+    TS_ISO_8601 => 5,
+    TS_RFC822   => 6,
+};
 
 require Exporter;
 
-our @EXPORT = qw(HASHARRAY);
+our @EXPORT = qw(
+    HASHARRAY
+    TS_UNIX TS_MW TS_DB TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
+);
 our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
     insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit strip_tagspace
+    hashmrg litsplit strip_tagspace timestamp
 );
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -492,6 +504,80 @@ sub str2time
     require Date::Parse;
     $time = Date::Parse::str2time($time);
     return $time;
+}
+
+my @Mon = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+my %mon = qw(jan 0 feb 1 mar 2 apr 3 may 4 jun 5 jul 6 aug 7 sep 8 oct 9 nov 10 dec 11);
+my @Wday = qw(Sun Mon Tue Wed Thu Fri Sat);
+
+# ограниченная распознавалка дат
+sub timestamp
+{
+    my ($ts, $format) = @_;
+
+    require POSIX;
+    if (!$ts)
+    {
+        # Epoch
+        $ts = time;
+    }
+    elsif (int($ts) eq $ts)
+    {
+        # TS_UNIX
+    }
+    elsif ($ts =~ /^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?$/so)
+    {
+        # TS_DB, TS_MW, TS_EXIF, TS_ISO_8601
+        $ts = POSIX::mktime($6, $5, $4, $3, $2-1, $1-1900);
+    }
+    elsif ($ts =~ /^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/so)
+    {
+        # TS_ORACLE
+        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3 < 100 ? $3 : $3-1900);
+    }
+    elsif ($ts =~ /^\s*..., (\d\d?) (...) (\d{4,}) (\d\d):(\d\d):(\d\d)\s*([\+\- ]\d\d)\s*$/so)
+    {
+        # TS_RFC822
+        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3-1900);
+    }
+    else
+    {
+        # Bogus value, fall back to epoch
+        $ts = time;
+    }
+
+    if (!$format)
+    {
+        # TS_UNIX
+        return $ts;
+    }
+    elsif ($format == TS_MW)
+    {
+        return POSIX::strftime("%Y%m%d%H%M%S", localtime($ts));
+    }
+    elsif ($format == TS_DB)
+    {
+        return POSIX::strftime("%Y-%m-%d %H:%M:%S", localtime($ts));
+    }
+    elsif ($format == TS_ISO_8601)
+    {
+        return POSIX::strftime("%Y-%m-%dT%H:%M:%SZ", localtime($ts));
+    }
+    elsif ($format == TS_EXIF)
+    {
+        return POSIX::strftime("%Y:%m:%d %H:%M:%S", localtime($ts));
+    }
+    elsif ($format == TS_RFC822)
+    {
+        my @l = localtime($ts);
+        return POSIX::strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", @l);
+    }
+    elsif ($format == TS_ORACLE)
+    {
+        my @l = localtime($ts);
+        return POSIX::strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", @l);
+    }
+    return $ts;
 }
 
 sub date_init_russian
