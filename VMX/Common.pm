@@ -27,7 +27,7 @@ our @EXPORT = qw(
 our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref
-    insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
+    insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
     hashmrg litsplit strip_tagspace timestamp
 );
@@ -337,15 +337,17 @@ sub updaterow_hashref
     return 0 unless
         $dbh && $table &&
         $row && ref($row) eq 'HASH' && %$row &&
-        $key && ref($key) eq 'HASH' && %$key;
+        $key && (ref($key) eq 'HASH' && %$key || $key eq '1');
     my @f = keys %$row;
-    my @k = keys %$key;
-    my $sql =
-        'UPDATE `'.$table.'` SET '.
-        join(', ', map { "`$_`=?" } @f).
-        ' WHERE '.join(' AND ', map { "`$_`=?" } @k);
-    my @bind = (@$row{@f}, @$key{@k});
-    return $dbh->do($sql, {}, @bind);
+    my @bind = @$row{@f};
+    my $sql = 'UPDATE `'.$table.'` SET '.join(', ', map { "`$_`=?" } @f);
+    if ($key ne 1)
+    {
+        my @k = keys %$key;
+        $sql .= ' WHERE '.join(' AND ', map { "`$_`=?" } @k);
+        push @bind, @$key{@k};
+    }
+    return $dbh->do($sql, undef, @bind);
 }
 
 # Множественный UPDATE - обновить много строк @%$rows,
@@ -358,7 +360,7 @@ sub updateall_hashref
         join(",",("(".(join(",", ("?") x scalar(@f))).")") x scalar(@$rows)).
         " ON DUPLICATE KEY UPDATE ".join(',', map { "`$_`=VALUES(`$_`)" } @f);
     my @bind = map { @$_{@f} } @$rows;
-    return $dbh->do($sql, {}, @bind);
+    return $dbh->do($sql, undef, @bind);
 }
 
 # Удалить все строки, у которых значения полей с названиями ключей %$key
@@ -390,7 +392,7 @@ sub deleteall_hashref
         }
     }
     $sql = "DELETE FROM `$table` WHERE " . join " AND ", @$sql;
-    return $dbh->do($sql, {}, @bind);
+    return $dbh->do($sql, undef, @bind);
 }
 
 # Вставить набор записей $rows = [{},{},{},...] в таблицу $table
@@ -401,7 +403,7 @@ sub insertall_hashref
 {
     my ($dbh, $table, $rows, $reselect, $replace) = @_;
     return 0 unless
-        $dbh && $table && 
+        $dbh && $table &&
         $rows && ref($rows) eq 'ARRAY' && @$rows;
     my $conn_id = undef;
     if ($reselect)
@@ -415,7 +417,7 @@ sub insertall_hashref
         ' INTO `'.$table.'` (`'.join('`,`',@f).'`) VALUES '.
         join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
     my @bind = map { @$_{@f} } @$rows;
-    my $st = $dbh->do($sql, {}, @bind);
+    my $st = $dbh->do($sql, undef, @bind);
     return $st if !$st || !$reselect;
     if (ref($reselect) eq 'ARRAY')
     {
@@ -434,8 +436,32 @@ sub insertall_hashref
         $rows->[$i]->{$_} = $resel->[$i]->{$_} for keys %{$resel->[$i]};
     }
     $sql = "UPDATE `$table` SET `ji`=NULL, `jin`=NULL WHERE `ji`=?";
-    $dbh->do($sql, {}, @bind);
+    $dbh->do($sql, undef, @bind);
     return $st;
+}
+
+# то же, но массив и без reselectов
+sub insertall_arrayref
+{
+    my ($dbh, $table, $key, $rows, $replace) = @_;
+    return 0 unless
+        $dbh && $table &&
+        $rows && ref($rows) eq 'ARRAY' && @$rows &&
+        $key && ref($key) eq 'ARRAY' && @$key;
+    my $sql = ($replace ? 'REPLACE' : 'INSERT').
+        ' INTO `'.$table.'` (`'.join('`,`', @$key).'`) VALUES ';
+    my $bind;
+    if (ref $rows->[0])
+    {
+        $bind = [ map { @$_ } @$rows ];
+        $sql .= join(',', ('('.(join(',', ('?') x scalar(@$key))).')') x scalar(@$rows));
+    }
+    else
+    {
+        $bind = $rows;
+        $sql .= join(',', ('('.(join(',', ('?') x scalar(@$key))).')') x int(@$rows/@$key));
+    }
+    return $dbh->do($sql, undef, @$bind);
 }
 
 # вычисление MD5 хеша от файла
