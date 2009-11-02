@@ -775,7 +775,7 @@ sub hashmrg
     return $h;
 }
 
-# AQG = Apostrophe + Quote + Grave
+# AQG = 'Apostrophe', "Quote", `Grave Accent`
 our $litsplit_AQG = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
 our $litsplit_AQ = qr/\'(?:[^\'\\]+|\\.)+\'|\"(?:[^\"\\]+|\\.)+\"/;
 our $litsplit_QG = qr/\"(?:[^\"\\]+|\\.)+\"|\`(?:[^\`\\]+|\\.)+\`/;
