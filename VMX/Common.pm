@@ -7,8 +7,8 @@ use utf8;
 use strict;
 use Encode;
 
-use constant HASHARRAY => {Slice=>{}};
 use constant {
+    HASHARRAY   => {Slice=>{}},
     TS_UNIX     => 0,
     TS_DB       => 1,
     TS_MW       => 2,
@@ -30,7 +30,7 @@ our @EXPORT_OK = qw(
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
     hashmrg litsplit strip_tagspace timestamp
-);
+), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
 # для strip_unsafe_tags()
@@ -49,7 +49,7 @@ sub import
     my @args = @_;
     my $dbi_hacks = 0;
     my $uri_escape_hacks = 0;
-    my $hasharray = 1;
+    my $export = { map { $_ => 1 } @EXPORT };
     foreach (@args)
     {
         if ($_ eq 'dbi_hacks')
@@ -62,12 +62,12 @@ sub import
             $_ = '!uri_escape_hacks';
             $uri_escape_hacks = 1;
         }
-        elsif ($_ eq '!HASHARRAY')
+        elsif (substr($_,0,1) eq '!' && $export->{substr($_,1)})
         {
-            $hasharray = 0;
+            delete $export->{substr($_,1)};
         }
     }
-    push @args, 'HASHARRAY' if $hasharray;
+    push @args, keys %$export;
     if ($dbi_hacks)
     {
         require DBI;
