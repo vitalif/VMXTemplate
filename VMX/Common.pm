@@ -11,18 +11,19 @@ use constant {
     HASHARRAY   => {Slice=>{}},
     TS_UNIX     => 0,
     TS_DB       => 1,
-    TS_MW       => 2,
-    TS_EXIF     => 3,
-    TS_ORACLE   => 4,
-    TS_ISO_8601 => 5,
-    TS_RFC822   => 6,
+    TS_DB_DATE  => 2,
+    TS_MW       => 3,
+    TS_EXIF     => 4,
+    TS_ORACLE   => 5,
+    TS_ISO_8601 => 6,
+    TS_RFC822   => 7,
 };
 
 require Exporter;
 
 our @EXPORT = qw(
     HASHARRAY
-    TS_UNIX TS_MW TS_DB TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
+    TS_UNIX TS_MW TS_DB TS_DB_DATE TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
 );
 our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
@@ -542,19 +543,15 @@ sub timestamp
     my ($ts, $format) = @_;
 
     require POSIX;
-    if (!$ts)
+    if (int($ts) eq $ts)
     {
-        # Epoch
-        $ts = time;
+        # TS_UNIX or Epoch
+        $ts = time if !$ts;
     }
-    elsif (int($ts) eq $ts)
+    elsif ($ts =~ /^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/so)
     {
-        # TS_UNIX
-    }
-    elsif ($ts =~ /^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?$/so)
-    {
-        # TS_DB, TS_MW, TS_EXIF, TS_ISO_8601
-        $ts = POSIX::mktime($6, $5, $4, $3, $2-1, $1-1900);
+        # TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
+        $ts = POSIX::mktime($6||0, $5||0, $4||0, $3, $2-1, $1-1900);
     }
     elsif ($ts =~ /^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/so)
     {
@@ -568,8 +565,8 @@ sub timestamp
     }
     else
     {
-        # Bogus value, fall back to epoch
-        $ts = time;
+        # Bogus value, return undef
+        return undef;
     }
 
     if (!$format)
@@ -584,6 +581,10 @@ sub timestamp
     elsif ($format == TS_DB)
     {
         return POSIX::strftime("%Y-%m-%d %H:%M:%S", localtime($ts));
+    }
+    elsif ($format == TS_DB_DATE)
+    {
+        return POSIX::strftime("%Y-%m-%d", localtime($ts));
     }
     elsif ($format == TS_ISO_8601)
     {
