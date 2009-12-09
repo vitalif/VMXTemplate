@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 # Новая версия шаблонного движка VMX::Template!
+# "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
 
 package VMX::Template;
 
@@ -23,13 +24,17 @@ sub new
     $class = ref ($class) || $class;
     my $self =
     {
-        root            => '.',   # каталог с шаблонами
-        reload          => 1,     # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
-        wrapper         => undef, # фильтр, вызываемый перед выдачей результата parse
-        tpldata         => {},    # сюда будут сохранены: данные
-        lang            => {},    # ~ : языковые данные
-        cache_dir       => undef, # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
-        use_utf8        => undef, # шаблоны в UTF-8 и с флагом UTF-8
+        root            => '.',    # каталог с шаблонами
+        reload          => 1,      # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
+        wrapper         => undef,  # фильтр, вызываемый перед выдачей результата parse
+        tpldata         => {},     # сюда будут сохранены: данные
+        lang            => {},     # ~ : языковые данные
+        cache_dir       => undef,  # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
+        use_utf8        => undef,  # шаблоны в UTF-8 и с флагом UTF-8
+        begin_code      => '<!--', # начало кода
+        end_code        => '-->',  # конец кода
+        begin_subst     => '{',    # начало подстановки (необязательно)
+        end_subst       => '}',    # конец подстановки (необязательно)
         @_,
     };
     $self->{cache_dir} =~ s!/*$!/!so if $self->{cache_dir};
@@ -404,9 +409,15 @@ sub compile
     my $code = $$coderef;
     Encode::_utf8_on($code) if $self->{use_utf8};
 
-    # удаляем комментарии <!--# ... #-->
-    $code =~ s/\s*<!--#.*?#-->//gos;
-    $code =~ s/(?:^|\n)[ \t\r]*(<!--\s*[a-z]+(\s+.*)?-->)/$1/giso;
+    # начала/концы спецстрок
+    my $bc = $self->{begin_code} || '<!--';
+    my $ec = $self->{end_code} || '-->';
+    my $bs = $self->{end_subst} && $self->{begin_subst} || undef;
+    my $es = $self->{begin_subst} && $self->{end_subst} || undef;
+
+    # удаляем комментарии <!--# ... -->
+    $code =~ s/\s*\Q$bc\E#.*?\Q$ec\E//gos;
+    $code =~ s/(?:^|\n)[ \t\r]*(\Q$bc\E\s*[a-z]+(\s+.*)?\Q$ec\E)/$1/giso;
 
     $self->{blocks} = [];
     $self->{in} = [];
@@ -421,12 +432,17 @@ sub compile
     my $pp = 0;
     my $in;
 
+    # регулярное выражения для поиска фрагментов кода
+    my $re = '\Q' . $bc . '\E(.*?)\Q' . $ec . '\E';
+    $re .= '|\Q' . $bs . '\E(.*?)\Q' . $es . '\E' if $bs;
+    $re = qr/$re/s;
+
     # ищем фрагменты кода
     $code =~ /^/gcso;
-    while ($code =~ /<!--(.*?)-->|\{(.*?)\}/gcso)
+    while ($code =~ /$re/gcso)
     {
         $in = $self->{in_set};
-        $c = $1 ? $self->compile_code_fragment($1) : $self->compile_substitution($2);
+        $c = $2 ? $self->compile_substitution($2) : $self->compile_code_fragment($1);
         next unless $c;
         if (($t = pos($code) - $pp - length $&) > 0)
         {
