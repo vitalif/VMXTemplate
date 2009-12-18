@@ -802,7 +802,7 @@ sub function_strftime { "POSIX::strftime($_[1], localtime(($_[2]) || undef))" }
 sub exec_subst
 {
     my $str = shift;
-    $str =~ s/\$([1-9]\d*)/$_[$1-1]/giso;
+    $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9\d*)\})/$_[($2||$3)-1]/gisoe;
     return $str;
 }
 
