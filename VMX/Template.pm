@@ -8,6 +8,7 @@ use strict;
 use VMX::Common qw(:all);
 use Digest::MD5 qw(md5_hex);
 use Hash::Merge;
+use POSIX;
 
 my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
@@ -745,6 +746,18 @@ sub fmop
     return "((" . join(") $op (", @_) . "))";
 }
 
+# вызов функции с аргументами и раскрытием массивов
+sub fearr
+{
+    my $f = shift;
+    my $self = shift;
+    my $e = shift;
+    $e = "$f($e";
+    $e .= ", ref($_) eq 'ARRAY' ? \@{$_} : ($_)" for @_;
+    $e .= ")";
+    return $e;
+}
+
 # функции
 sub function_or      { fmop('||', @_) }
 sub function_and     { fmop('&&', @_) }
@@ -776,34 +789,21 @@ sub function_quote   { "quotequote($_[1])" }            *function_q = \&function
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = \&function_html;
 sub function_strip   { "strip_tags($_[1])" }            *function_t = \&function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = \&function_h;
-
 # объединяет не просто скаляры, а также все элементы массивов
-sub function_join
-{
-    my $self = shift;
-    my $e = shift;
-    $e = "join($e";
-    $e .= ", ref($_) eq 'ARRAY' ? \@{$_} : ($_)" for @_;
-    $e .= ")";
-    return $e;
-}
-
+sub function_join    { fearr('join', @_) }              *function_implode = \&function_join;
 # подставляет на места $1, $2 и т.п. в строке аргументы
-sub function_subst
-{
-    my $self = shift;
-    my $str = shift;
-    $str =~ s/\$(\d+)/$_[$1+1]/giso;
-    return $str;
-}
-
+sub function_subst   { fearr('exec_subst', @_) }
+# sprintf
+sub function_sprintf { fearr('sprintf', @_) }
 # strftime
-sub function_strftime
+sub function_strftime { "POSIX::strftime($_[1], localtime(($_[2]) || undef))" }
+
+# выполняет подстановку function_subst
+sub exec_subst
 {
-    my $self = shift;
-    my ($f, $t) = @_;
-    require POSIX;
-    return POSIX::strftime($f, localtime($t || undef));
+    my $str = shift;
+    $str =~ s/\$([1-9]\d*)/$_[$1-1]/giso;
+    return $str;
 }
 
 1;
