@@ -12,8 +12,6 @@ use Hash::Merge;
 my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
-my $langhashes = {};        # хеши ленгпаков
-my $langmerged = {};        # кэш объединённых ленгпаков
 my $assigncache = {};       # кэш eval'ов присвоений
 
 # Конструктор
@@ -28,7 +26,6 @@ sub new
         reload          => 1,      # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
         wrapper         => undef,  # фильтр, вызываемый перед выдачей результата parse
         tpldata         => {},     # сюда будут сохранены: данные
-        lang            => {},     # ~ : языковые данные
         cache_dir       => undef,  # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
         use_utf8        => undef,  # шаблоны в UTF-8 и с флагом UTF-8
         begin_code      => '<!--', # начало кода
@@ -66,64 +63,6 @@ sub set_code
         $self->{filenames}->{$k} = \ $v;
     }
     return 1;
-}
-
-# Функция загружает файлы переводов (внутри хеши)
-# $obj->load_lang ($filename, $filename, ...);
-sub load_lang
-{
-    my $self = shift;
-    return $self->{lang} unless @_;
-    my $modified = 0;
-    my ($mtime, $load);
-    for (@_)
-    {
-        $load = 0;
-        if (!defined($mtimes->{$_}) || $self->{reload})
-        {
-            $mtime = [ stat $_ ] -> [ 9 ];
-            $modified = $load = 1 if !defined($mtimes->{$_}) || $mtime > $mtimes->{$_};
-        }
-        if ($load)
-        {
-            $mtimes->{$_} = $mtime;
-            $langhashes->{$_} = do $_;
-        }
-        $mtime = $_;
-        $mtime =~ tr!/!_!;
-        $self->{_lkey} .= '_' . $mtime;
-    }
-    if ($load || !$langmerged->{$self->{_lkey}})
-    {
-        $self->load_lang_hashes(map { $langhashes->{$_} } @_);
-        $langmerged->{$self->{_lkey}} = $self->{lang};
-    }
-    else
-    {
-        $self->{lang} = $langmerged->{$self->{_lkey}};
-    }
-    return $self->{lang};
-}
-
-# Функция загружает хеши переводов
-# $obj->load_lang_hashes ($hash, $hash, ...);
-sub load_lang_hashes
-{
-    my $self = shift;
-    my $i = 0;
-    Hash::Merge::set_behavior('RIGHT_PRECEDENT');
-    for (@_)
-    {
-        if (%{$self->{lang}})
-        {
-            $self->{lang} = Hash::Merge::merge ($self->{lang}, $_);
-        }
-        else
-        {
-            $self->{lang} = $_;
-        }
-    }
-    return $i;
 }
 
 # Функция уничтожает данные шаблона
@@ -837,8 +776,6 @@ sub function_quote   { "quotequote($_[1])" }            *function_q = \&function
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = \&function_html;
 sub function_strip   { "strip_tags($_[1])" }            *function_t = \&function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = \&function_h;
-sub function_l       { f_translate(undef, @_) }         *function_translate = \&function_l;
-sub function_lz      { f_translate(1, @_) }             *function_translate_null = \&function_lz;
 
 # объединяет не просто скаляры, а также все элементы массивов
 sub function_join
@@ -851,57 +788,22 @@ sub function_join
     return $e;
 }
 
-# автоматически выбирает, в compile-time или в run-time делать перевод
-sub f_translate
-{
-    my $ifnull = shift;
-    my $e = eval $_[1];
-    if ($@)
-    {
-        # выражение - не константа, т.к. не вычисляется без $self
-        return $_[0]->language_ref($_[0]->{last_varref_path}, $_[1], $ifnull);
-    }
-    # выражение - константа
-    return $_[0]->language_xform($e);
-}
-
-# Функция компилирует ссылку на данные ленгпака
-sub language_ref
+# подставляет на места $1, $2 и т.п. в строке аргументы
+sub function_subst
 {
     my $self = shift;
-    my ($var, $varref, $emptyifnull) = @_;
-    my $code = '';
-    $code .= '->{' . lc($_) . '}' foreach split /\.+/, $var;
-    $code .= '->{' . $varref . '}';
-    $code = ($self->{cur_template_path} ?
-        '(($self->{lang}' . $self->{cur_template_path} . $code . ') || ' : '') .
-        '($self->{lang}' . $code . ')';
-    $code .= ' || (' . $varref . ')' unless $emptyifnull;
-    $code .= ')';
-    return $code;
+    my $str = shift;
+    $str =~ s/\$(\d+)/$_[$1+1]/giso;
+    return $str;
 }
 
-# Compile-time вычисление language_ref
-sub language_xform
+# strftime
+sub function_strftime
 {
     my $self = shift;
-    my ($value) = @_;
-    my ($ca, $cb) = ($self->{lang}, $self->{lang});
-    foreach (split /:/, $self->{cur_template})
-    {
-        $cb = $cb->{lc $_} if $cb;
-    }
-    if (@{$self->{blocks}})
-    {
-        foreach (@{$self->{blocks}})
-        {
-            $ca = $ca->{lc $_} if $ca;
-            $cb = $cb->{lc $_} if $cb;
-        }
-    }
-    $ca = $ca->{$value} if $ca;
-    $cb = $cb->{$value} if $cb;
-    return $ca || $cb;
+    my ($f, $t) = @_;
+    require POSIX;
+    return POSIX::strftime($f, localtime($t || undef));
 }
 
 1;
