@@ -795,8 +795,17 @@ sub function_join    { fearr('join', @_) }              *function_implode = \&fu
 sub function_subst   { fearr('exec_subst', @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', @_) }
+
 # strftime
-sub function_strftime { "POSIX::strftime($_[1], localtime(($_[2]) || undef))" }
+sub function_strftime
+{
+    my $self = shift;
+    my $e = $_[1];
+    $e = "($e).' '.($_[2])" if $_[2];
+    $e = "POSIX::strftime($_[0], localtime(timestamp($e))";
+    $e = "utf8on($e)" if $self->{use_utf8};
+    return $e;
+}
 
 # выполняет подстановку function_subst
 sub exec_subst
