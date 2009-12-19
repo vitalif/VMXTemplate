@@ -106,10 +106,6 @@ sub preparse
         $textref = $fn;
         $fn = undef;
     }
-    # FIXME возможно, не стоит на это заморачиваться, а просто запускать шаблон дважды
-    my $sub = $self->compile($textref, $handle, $fn, 1);
-    eval { &$sub($self) };
-    die "[Template] error pre-running '$handle': $@" if $@;
     return $self;
 }
 
@@ -300,25 +296,22 @@ sub assign_vars
 }
 
 # Функция компилирует код.
-# Если $nout - истина, то не выводить страницу, а обрабатывать только <!-- SET --> и т.п.
-# FIXME Если бы ещё убрать необходимость двойной компиляции для $nout=0 и $nout=1.
-# $sub = $self->compile(\$code, $handle, $fn, $nout);
+# $sub = $self->compile(\$code, $handle, $fn);
 # print &$sub($self);
 sub compile
 {
     my $self = shift;
-    my ($coderef, $handle, $fn, $nout) = @_;
-    $nout = $nout ? 1 : 0;
-    return $compiled_code->{$nout.$coderef} if $compiled_code->{$nout.$coderef};
+    my ($coderef, $handle, $fn) = @_;
+    return $compiled_code->{$coderef} if $compiled_code->{$coderef};
 
     # кэширование на диске
     my $h;
     if ($self->{cache_dir})
     {
-        $h = $self->{cache_dir}.$nout.md5_hex($$coderef).'.pl';
+        $h = $self->{cache_dir}.md5_hex($$coderef).'.pl';
         if (-e $h)
         {
-            $compiled_code->{$nout.$coderef} = do $h;
+            $compiled_code->{$coderef} = do $h;
             if ($@)
             {
                 warn "[Template] error compiling '$handle': [$@] in FILE: $h";
@@ -326,7 +319,7 @@ sub compile
             }
             else
             {
-                return $compiled_code->{$nout.$coderef};
+                return $compiled_code->{$coderef};
             }
         }
     }
@@ -362,9 +355,6 @@ sub compile
     $self->{blocks} = [];
     $self->{in} = [];
     $self->{included} = {};
-    # вне <!-- SET --> при $nout=1 $t.= не делается
-    # за это отвечают также соотв. if'ы в compile_code_fragment
-    $self->{nout} = $nout;
     $self->{in_set} = 0;
 
     my $r = '';
@@ -388,7 +378,7 @@ sub compile
         {
             $p = substr $code, $pp, $t;
             $p =~ s/\\|\'/\\$&/gso;
-            $r .= "\$t.='$p';\n" if !$nout || $in;
+            $r .= "\$t.='$p';\n";
         }
         $r .= $c if $c;
         $pp = pos $code;
@@ -397,7 +387,7 @@ sub compile
     {
         $p = substr $code, $pp;
         $p =~ s/\\|\'/\\$&/gso;
-        $r .= "\$t.='$p';\n" if !$nout || $self->{in_set};
+        $r .= "\$t.='$p';\n";
     }
 
     # дописываем начало и конец кода
@@ -428,11 +418,11 @@ return $t;
     }
 
     # компилируем код
-    $compiled_code->{$nout.$coderef} = eval $code;
+    $compiled_code->{$coderef} = eval $code;
     die "[Template] error compiling '$handle': [$@] in CODE:\n$code" if $@;
 
     # возвращаем ссылку на процедуру
-    return $compiled_code->{$nout.$coderef};
+    return $compiled_code->{$coderef};
 }
 
 # компиляция фрагмента кода <!-- ... -->. это может быть:
@@ -553,9 +543,8 @@ EOF
     elsif ($e =~ /^INCLUDE\s+(\S+)$/iso)
     {
         my $n = $1;
-        my $p = $self->{nout} && !$self->{in_set} ? "preparse" : "parse";
         $n =~ s/\'|\\/\\$&/gso;
-        $t = "\$t .= \$self->$p('_INCLUDE$n');\n";
+        $t = "\$t .= \$self->parse('_INCLUDE$n');\n";
         unless ($self->{included}->{$n})
         {
             $t = "\$self->set_filenames('_INCLUDE$n' => '$n');\n$t";
@@ -566,7 +555,7 @@ EOF
     else
     {
         $t = $self->compile_expression($e);
-        return "\$t .= $t;\n" if $t && (!$self->{nout} || $self->{in_set});
+        return "\$t .= $t;\n" if $t;
     }
     return undef;
 }
@@ -578,7 +567,7 @@ sub compile_substitution
     my ($e) = @_;
     $e = $self->compile_expression($e);
     return undef unless $e;
-    return "\$t .= $e;\n" if !$self->{nout} || $self->{in_set};
+    return "\$t .= $e;\n";
 }
 
 # компиляция выражения. это может быть:
