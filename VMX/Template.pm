@@ -438,6 +438,7 @@ return $t;
 # компиляция фрагмента кода <!-- ... -->. это может быть:
 # 1) [ELSE] IF выражение
 # 2) BEGIN имя блока
+#    FOR имя блока
 # 3) END [имя блока]
 # 4) SET переменная
 # 5) SET переменная = выражение
@@ -471,7 +472,7 @@ sub compile_code_fragment
     {
         return "} else {";
     }
-    elsif ($e =~ /^BEGIN\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
+    elsif ($e =~ /^(BEGIN|FOR(EACH)?)\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
     {
         my $ref = $self->varref([@{$self->{blocks}}, $1]);
         my $at = 0;
