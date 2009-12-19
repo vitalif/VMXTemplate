@@ -358,7 +358,7 @@ sub compile
     }
 
     # удаляем комментарии <!--# ... -->
-    $code =~ s/\s*\Q$bc\E\s*#.*?\Q$ec\E//gos;
+    $code =~ s/\s*\Q$bc\E[ \t]*#.*?\Q$ec\E//gos;
     $code =~ s/(?:^|\n)[ \t\r]*(\Q$bc\E\s*[a-z]+(\s+.*)?\Q$ec\E)/$1/giso;
 
     $self->{blocks} = [];
