@@ -33,6 +33,7 @@ sub new
         end_code        => '-->',  # конец кода
         begin_subst     => '{',    # начало подстановки (необязательно)
         end_subst       => '}',    # конец подстановки (необязательно)
+        strict_end      => 0,      # жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
         @_,
     };
     $self->{cache_dir} =~ s!/*$!/!so if $self->{cache_dir};
@@ -345,11 +346,19 @@ sub compile
     # начала/концы спецстрок
     my $bc = $self->{begin_code} || '<!--';
     my $ec = $self->{end_code} || '-->';
-    my $bs = $self->{end_subst} && $self->{begin_subst} || undef;
-    my $es = $self->{begin_subst} && $self->{end_subst} || undef;
+    my @blk = ([ $bc, $ec, 'compile_code_fragment' ]);
+    if ($self->{begin_subst} && $self->{end_subst})
+    {
+        push @blk, [ $self->{begin_subst}, $self->{end_subst}, 'compile_substitution' ];
+    }
+    for (@blk)
+    {
+        $_->[3] = length $_->[0];
+        $_->[4] = length $_->[1];
+    }
 
     # удаляем комментарии <!--# ... -->
-    $code =~ s/\s*\Q$bc\E#.*?\Q$ec\E//gos;
+    $code =~ s/\s*\Q$bc\E\s*#.*?\Q$ec\E//gos;
     $code =~ s/(?:^|\n)[ \t\r]*(\Q$bc\E\s*[a-z]+(\s+.*)?\Q$ec\E)/$1/giso;
 
     $self->{blocks} = [];
@@ -357,37 +366,52 @@ sub compile
     $self->{included} = {};
     $self->{in_set} = 0;
 
-    my $r = '';
-    my ($p, $c, $t);
-    my $pp = 0;
-    my $in;
-
-    # регулярное выражения для поиска фрагментов кода
-    my $re = '\Q' . $bc . '\E(.*?)\Q' . $ec . '\E';
-    $re .= '|\Q' . $bs . '\E(.*?)\Q' . $es . '\E' if $bs;
-    $re = qr/$re/s;
-
-    # ищем фрагменты кода
-    $code =~ /^/gcso;
-    while ($code =~ /$re/gcso)
+    # ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
+    my ($r, $pp, $b, $i, $e, $f, $frag, @p) = ('', 0);
+    while ($code && $pp < length $code)
     {
-        $in = $self->{in_set};
-        $c = $2 ? $self->compile_substitution($2) : $self->compile_code_fragment($1);
-        next unless $c;
-        if (($t = pos($code) - $pp - length $&) > 0)
+        @p = map { index $code, $_->[0], $pp } @blk;
+        $b = undef;
+        for $i (0..$#p)
         {
-            $p = substr $code, $pp, $t;
-            $p =~ s/\\|\'/\\$&/gso;
-            $r .= "\$t.='$p';\n";
+            # ближайшее найденное
+            $b = $i if !$b || $p[$i] >= 0 && $p[$i] < $p[$b];
         }
-        $r .= $c if $c;
-        $pp = pos $code;
-    }
-    if ($pp < length($code))
-    {
-        $p = substr $code, $pp;
-        $p =~ s/\\|\'/\\$&/gso;
-        $r .= "\$t.='$p';\n";
+        if (defined $b)
+        {
+            # это означает, что в случае отсутствия корректной инструкции
+            # в найденной позиции надо пропустить ТОЛЬКО её начало и попробовать
+            # найти что-нибудь снова!
+            $pp = $p[$b]+$blk[$b][3];
+            $e = index $code, $blk[$b][1], $pp;
+            if ($e >= 0)
+            {
+                $frag = substr $code, $p[$b]+$blk[$b][3], $e-$p[$b]-$blk[$b][3]-$blk[$b][4];
+                $f = $blk[$b][2];
+                $frag = $self->$f($frag);
+                if (defined $frag)
+                {
+                    # есть инструкция
+                    $pp -= $blk[$b][3];
+                    if ($pp > 0)
+                    {
+                        $pp = substr $code, 0, $pp, '';
+                        $pp =~ s/([\\\'])/\\$1/gso;
+                        $r .= "\$t.='$pp';\n";
+                        $pp = 0;
+                    }
+                    $r .= $frag;
+                    substr $code, 0, $e-$p[$b], '';
+                }
+            }
+        }
+        else
+        {
+            # финиш
+            $code =~ s/([\\\'])/\\$1/gso;
+            $r .= "\$t.='$code';\n";
+            $code = '';
+        }
     }
 
     # дописываем начало и конец кода
@@ -514,8 +538,9 @@ EOF
             return undef;
         }
         my $l = $self->{in}->[$#{$self->{in}}];
-        if ($1 && ($l->[0] ne 'begin' || !$l->[1] || $l->[1] ne $1) ||
-            !$1 && $l->[0] eq 'begin' && $l->[1])
+        if ($self->{strict_end} &&
+            ($1 && ($l->[0] ne 'begin' || !$l->[1] || $l->[1] ne $1) ||
+            !$1 && $l->[0] eq 'begin' && $l->[1]))
         {
             warn "$& after ".uc($l->[0])." $l->[1]";
             return undef;
@@ -801,7 +826,7 @@ sub function_strftime
 sub exec_subst
 {
     my $str = shift;
-    $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9\d*)\})/$_[($2||$3)-1]/gisoe;
+    $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/$_[($2||$3)-1]/gisoe;
     return $str;
 }
 
