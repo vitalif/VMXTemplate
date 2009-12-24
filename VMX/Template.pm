@@ -13,7 +13,6 @@ use POSIX;
 my $mtimes = {};            # время изменения файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
-my $assigncache = {};       # кэш eval'ов присвоений
 
 # Конструктор
 # $obj = new VMX::Template, %params
@@ -41,32 +40,6 @@ sub new
     bless $self, $class;
 }
 
-# Функция задаёт имена файлов для хэндлов
-# $obj->set_filenames (handle1 => 'template1.tpl', ...)
-sub set_filenames
-{
-    my $self = shift;
-    my %fns = @_;
-    while (my ($k, $v) = each %fns)
-    {
-        $self->{filenames}->{$k} = "$v";
-    }
-    return 1;
-}
-
-# Задать код для хэндлов
-# $obj->set_code (handle1 => "{CODE} - Template code", ...);
-sub set_code
-{
-    my $self = shift;
-    my %codes = @_;
-    while (my ($k, $v) = each %codes)
-    {
-        $self->{filenames}->{$k} = \ $v;
-    }
-    return 1;
-}
-
 # Функция уничтожает данные шаблона
 # $obj->clear()
 sub clear
@@ -75,67 +48,52 @@ sub clear
     return 1;
 }
 
+# Функция очищает кэш в памяти
+sub clear_memory_cache
+{
+    my $self = shift;
+    %$compiled_code = ();
+    %$uncompiled_code = ();
+    %$mtimes = ();
+    return $self;
+}
+
 # Получить хеш для записи данных
 sub vars
 {
     my $self = shift;
     my ($vars) = @_;
+    my $t = $self->{tpldata};
     $self->{tpldata} = $vars if $vars;
-    return $self->{tpldata};
-}
-
-# Функция выполняет код шаблона, не выводя страницу
-# Нужно, чтобы выполнить все присваивания переменных.
-# $obj->preparse('handle')
-sub preparse
-{
-    my $self = shift;
-    my ($handle) = @_;
-    my $fn = $self->{filenames}->{$handle};
-    my $textref;
-    unless (ref $fn)
-    {
-        die "[Template] unknown handle '$handle'"
-            unless $fn;
-        $fn = $self->{root}.$fn
-            if $fn !~ m!^/!so;
-        die "[Template] couldn't load template file '$fn' for handle '$handle'"
-            unless $textref = $self->loadfile($fn);
-    }
-    else
-    {
-        $textref = $fn;
-        $fn = undef;
-    }
-    return $self;
+    return $t;
 }
 
 # Функция загружает, компилирует и возвращает результат для хэндла
-# $page = $obj->parse('handle')
+# $page = $obj->parse( 'file/name.tpl' );
+# Если имя файла - ссылка на скаляр, значит, это ссылка на код шаблона
+# $page = $obj->parse( \ 'inlined template {CODE}' );
 sub parse
 {
     my $self = shift;
-    my ($handle) = @_;
-    my $fn = $self->{filenames}->{$handle};
+    my ($fn) = @_;
     my $textref;
     unless (ref $fn)
     {
-        die "[Template] unknown handle '$handle'"
-            unless $fn;
-        $fn = $self->{root}.$fn
-            if $fn !~ m!^/!so;
-        die "[Template] couldn't load template file '$fn' for handle '$handle'"
+        die __PACKAGE__.": empty filename '$fn'" unless length $fn;
+        $fn = $self->{root}.$fn if $fn !~ m!^/!so;
+        die __PACKAGE__.": couldn't load template file '$fn'"
             unless $textref = $self->loadfile($fn);
     }
     else
     {
+        return $$fn unless $$fn;
         $textref = $fn;
         $fn = undef;
     }
-    my $sub = $self->compile($textref, $handle, $fn);
+    my $sub = $self->compile($textref, $fn);
     my $str = eval { &$sub($self) };
-    die "[Template] error running '$handle': $@" if $@;
-    &{$self->{wrapper}} ($str) if $self->{wrapper};
+    die __PACKAGE__.": error running '$fn': $@" if $@;
+    &{$self->{wrapper}}($str) if $self->{wrapper};
     return $str;
 }
 
@@ -175,134 +133,13 @@ sub loadfile
     return $uncompiled_code->{$fn};
 }
 
-# Функция присваивает переменные блока в новую итерацию
-# $obj->assign_block_vars ($block, varname1 => value1, varname2 => value2, ...)
-# Так тоже можно (при этом избежим лишнего копирования хеша!):
-# $obj->assign_block_vars ($block, { varname1 => value1, varname2 => value2, ... })
-sub assign_block_vars
-{
-    my $self = shift;
-    my $block = shift;
-    my $vararray;
-    if (@_ > 1)
-    {
-        # копирование хеша, да...
-        $vararray = { @_ };
-    }
-    else
-    {
-        # а так можно и не копировать
-        ($vararray) = @_;
-    }
-    $block =~ s/^\.+//so;
-    $block =~ s/\.+$//so;
-    if (!$block)
-    {
-        # если не блок, а корневой уровень
-        $self->assign_vars($vararray);
-    }
-    elsif ($block !~ /\.[^\.]/so)
-    {
-        # если блок, но не вложенный
-        $block =~ s/\.*$/./so; # добавляем . в конец, если надо
-        $self->{tpldata}->{$block} ||= [];
-        push @{$self->{tpldata}->{$block}}, $vararray;
-    }
-    else
-    {
-        # если вложенный блок
-        my $ev;
-        $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
-        unless ($ev = $assigncache->{"=$block"})
-        {
-            $ev = '$_[0]';
-            my @blocks = split /\./, $block;
-            my $lastblock = pop @blocks;
-            foreach (@blocks)
-            {
-                $ev .= "{'$_'}";
-                $ev .= "[\$\#\{$ev\}]";
-            }
-            $ev .= "{'$lastblock'}";
-            $ev = "return sub { $ev ||= []; push \@\{$ev\}, \$_[1]; }";
-            $ev = $assigncache->{"=$block"} = eval $ev;
-        }
-        &$ev($self->{tpldata}, $vararray);
-    }
-    return 1;
-}
-
-# Функция добавляет переменные к текущей итерации блока
-# $obj->append_block_vars ($block, varname1 => value1, varname2 => value2, ...)
-sub append_block_vars
-{
-    my $self = shift;
-    my $block = shift;
-    my %vararray = @_;
-    my $lastit;
-    if (!$block || $block eq '.')
-    {
-        # если не блок, а корневой уровень
-        $self->assign_vars(@_);
-    }
-    elsif ($block !~ /\../so)
-    {
-        # если блок, но не вложенный
-        $block =~ s/\.*$/./so; # добавляем . в конец, если надо
-        $self->{tpldata}{$block} ||= [];
-        $lastit = $#{$self->{tpldata}{$block}};
-        $lastit = 0 if $lastit < 0;
-        $self->{tpldata}{$block}[$lastit]{$_} = $vararray{$_}
-            for keys %vararray;
-    }
-    else
-    {
-        # если вложенный блок
-        my $ev;
-        $block =~ s/\.+$//so; # обрезаем точки в конце (хоть их 10 там)
-        unless ($ev = $assigncache->{"+$block"})
-        {
-            $ev = '$_[0]';
-            my @blocks = split /\.+/, $block;
-            foreach (@blocks)
-            {
-                $ev .= "{'$_'}";
-                $ev .= "[\$#\{$ev\}]";
-            }
-            $ev = 'return sub { for my $k (keys %{$_[1]}) { '.$ev.'{$k} = $_[1]->{$k}; } }';
-            $ev = $assigncache->{"+$block"} = eval $ev;
-        }
-        &$ev($self->{tpldata}, \%vararray);
-    }
-    return 1;
-}
-
-# Функция присваивает переменные корневого уровня
-# $obj->assign_vars (varname1 => value1, varname2 => value2, ...)
-sub assign_vars
-{
-    my $self = shift;
-    my $h;
-    if (@_ > 1 || !ref $_[0])
-    {
-        $h = { @_ };
-    }
-    else
-    {
-        $h = $_[0];
-    }
-    $self->{tpldata} ||= {};
-    $self->{tpldata}->{$_} = $h->{$_} for keys %$h;
-    return 1;
-}
-
 # Функция компилирует код.
-# $sub = $self->compile(\$code, $handle, $fn);
+# $sub = $self->compile(\$code, $fn);
 # print &$sub($self);
 sub compile
 {
     my $self = shift;
-    my ($coderef, $handle, $fn) = @_;
+    my ($coderef, $fn) = @_;
     return $compiled_code->{$coderef} if $compiled_code->{$coderef};
 
     # кэширование на диске
@@ -315,7 +152,7 @@ sub compile
             $compiled_code->{$coderef} = do $h;
             if ($@)
             {
-                warn "[Template] error compiling '$handle': [$@] in FILE: $h";
+                warn __PACKAGE__.": error compiling '$fn': [$@] in FILE: $h";
                 unlink $h;
             }
             else
@@ -323,21 +160,6 @@ sub compile
                 return $compiled_code->{$coderef};
             }
         }
-    }
-
-    # прописываем путь к текущему шаблону в переменную
-    $self->{cur_template_path} = $self->{cur_template} = '';
-    if ($fn)
-    {
-        $self->{cur_template} = $fn;
-        $self->{cur_template} = substr $self->{cur_template}, length $self->{root}
-            if substr($self->{cur_template}, 0, length $self->{root}) eq $self->{root};
-        $self->{cur_template} =~ s/\.[^\.]+$//iso;
-        $self->{cur_template} =~ s/:+//gso;
-        $self->{cur_template} =~ s!/+!:!gso;
-        $self->{cur_template} =~ s/[^\w_:]+//gso;
-        $self->{cur_template_path} = '->{"' . join('"}->{"',
-            map { lc } split /:/, $self->{cur_template}) . '"}';
     }
 
     my $code = $$coderef;
@@ -375,7 +197,7 @@ sub compile
         for $i (0..$#p)
         {
             # ближайшее найденное
-            $b = $i if !$b || $p[$i] >= 0 && $p[$i] < $p[$b];
+            $b = $i if $p[$i] >= 0 && (!$b || $p[$i] < $p[$b]);
         }
         if (defined $b)
         {
@@ -386,7 +208,7 @@ sub compile
             $e = index $code, $blk[$b][1], $pp;
             if ($e >= 0)
             {
-                $frag = substr $code, $p[$b]+$blk[$b][3], $e-$p[$b]-$blk[$b][3]-$blk[$b][4];
+                $frag = substr $code, $p[$b]+$blk[$b][3], $e-$p[$b]-$blk[$b][3];
                 $f = $blk[$b][2];
                 $frag = $self->$f($frag);
                 if (defined $frag)
@@ -401,7 +223,7 @@ sub compile
                         $pp = 0;
                     }
                     $r .= $frag;
-                    substr $code, 0, $e-$p[$b], '';
+                    substr $code, 0, $e+$blk[$b][4]-$p[$b], '';
                 }
             }
         }
@@ -419,7 +241,6 @@ sub compile
 'sub {
 my $self = shift;
 my $t = "";
-my $_current_template = [ split /:/, \'' . $self->{cur_template} . '\' ];
 ' . $r . '
 return $t;
 }';
@@ -437,13 +258,13 @@ return $t;
         }
         else
         {
-            warn "[Template] error caching '$handle': $! while opening $h";
+            warn __PACKAGE__.": error caching '$fn': $! while opening $h";
         }
     }
 
     # компилируем код
     $compiled_code->{$coderef} = eval $code;
-    die "[Template] error compiling '$handle': [$@] in CODE:\n$code" if $@;
+    die __PACKAGE__.": error compiling '$fn': [$@] in CODE:\n$code" if $@;
 
     # возвращаем ссылку на процедуру
     return $compiled_code->{$coderef};
@@ -486,7 +307,7 @@ sub compile_code_fragment
     {
         return "} else {";
     }
-    elsif ($e =~ /^(BEGIN|FOR(EACH)?)\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
+    elsif ($e =~ /^(?:BEGIN|FOR(?:EACH)?)\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
     {
         my $ref = $self->varref([@{$self->{blocks}}, $1]);
         my $at = 0;
@@ -569,12 +390,7 @@ EOF
     {
         my $n = $1;
         $n =~ s/\'|\\/\\$&/gso;
-        $t = "\$t .= \$self->parse('_INCLUDE$n');\n";
-        unless ($self->{included}->{$n})
-        {
-            $t = "\$self->set_filenames('_INCLUDE$n' => '$n');\n$t";
-            $self->{included}->{$n} = 1;
-        }
+        $t = "\$t .= \$self->parse('$n');\n";
         return $t;
     }
     else
