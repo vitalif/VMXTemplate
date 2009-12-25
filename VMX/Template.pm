@@ -626,6 +626,10 @@ sub function_join    { fearr('join', @_) }              *function_implode = \&fu
 sub function_subst   { fearr('exec_subst', @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', @_) }
+# создание хеша
+sub function_hash    { shift; "{" . join(",", @_) . "}"; }
+# создание массива
+sub function_array   { shift; "[" . join(",", @_) . "]"; }
 
 # strftime
 sub function_strftime
