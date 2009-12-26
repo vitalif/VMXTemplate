@@ -86,13 +86,17 @@ sub parse
     }
     else
     {
-        return $$fn unless $$fn;
+        length $$fn || return $$fn;
         $textref = $fn;
         $fn = undef;
     }
-    my $sub = $self->compile($textref, $fn);
-    my $str = eval { &$sub($self) };
-    die __PACKAGE__.": error running '$fn': $@" if $@;
+    my $str = $self->compile($textref, $fn);
+    if (ref $str)
+    {
+        # если не coderef, то шаблон - не шаблон, а тупо константа
+        $str = eval { &$str($self) };
+        die __PACKAGE__.": error running '$fn': $@" if $@;
+    }
     &{$self->{wrapper}}($str) if $self->{wrapper};
     return $str;
 }
@@ -231,19 +235,28 @@ sub compile
         {
             # финиш
             $code =~ s/([\\\'])/\\$1/gso;
-            $r .= "\$t.='$code';\n";
-            $code = '';
+            if (!$r)
+            {
+                # шаблон - тупо константа!
+                $pp = -1;
+                $r = "'$code';";
+            }
+            else
+            {
+                $r .= "\$t.='$code';\n";
+            }
+            undef $code;
         }
     }
 
     # дописываем начало и конец кода
-    $code = ($self->{use_utf8} ? "\nuse utf8;\n" : "").
+    $code = ($self->{use_utf8} ? "\nuse utf8;\n" : "") . ($pp < 0 ? $r :
 'sub {
 my $self = shift;
 my $t = "";
 ' . $r . '
 return $t;
-}';
+}');
     undef $r;
 
     # кэшируем код на диск
@@ -390,13 +403,13 @@ EOF
     {
         my $n = $1;
         $n =~ s/\'|\\/\\$&/gso;
-        $t = "\$t .= \$self->parse('$n');\n";
+        $t = "\$t.=\$self->parse('$n');\n";
         return $t;
     }
     else
     {
         $t = $self->compile_expression($e);
-        return "\$t .= $t;\n" if $t;
+        return "\$t.=$t;\n" if $t;
     }
     return undef;
 }
@@ -408,7 +421,7 @@ sub compile_substitution
     my ($e) = @_;
     $e = $self->compile_expression($e);
     return undef unless $e;
-    return "\$t .= $e;\n";
+    return "\$t.=$e;\n";
 }
 
 # компиляция выражения. это может быть:
