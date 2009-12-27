@@ -283,10 +283,155 @@ return $t;
     return $compiled_code->{$coderef};
 }
 
+# ELSE
+# ELSE IF expression
+sub compile_code_fragment_else
+{
+    my ($self, $kw, $t) = @_;
+    if ($t =~ /^IF\s+(.*)$/iso)
+    {
+        return compile_code_fragment_if($self, 'elsif', $1);
+    }
+    return $_[2] ? undef : "} else {";
+}
+
+# IF expression
+# ELSIF expression
+my %cf_if = ('elseif' => "} els", 'elsif' => "} els", 'if' => "");
+sub compile_code_fragment_if
+{
+    my ($self, $kw, $t) = @_;
+    $t = $self->compile_expression($t);
+    unless ($t)
+    {
+        warn "Invalid expression in $kw: ($t)";
+        return undef;
+    }
+    $kw = $cf_if{$kw};
+    push @{$self->{in}}, [ 'if' ] unless $kw;
+    return $kw . "if ($t) {\n";
+}
+*compile_code_fragment_elsif = *compile_code_fragment_if;
+*compile_code_fragment_elseif = *compile_code_fragment_if;
+
+# END [block]
+sub compile_code_fragment_end
+{
+    my ($self, $kw, $t) = @_;
+    unless (@{$self->{in}})
+    {
+        warn "$& without BEGIN, IF or SET";
+        return undef;
+    }
+    my ($w, $id) = @{$self->{in}->[$#{$self->{in}}]};
+    if ($self->{strict_end} &&
+        ($t && ($w ne 'begin' || !$id || $id ne $t) ||
+        !$t && $w eq 'begin' && $id))
+    {
+        warn uc($kw)." $t after ".uc($w)." $id";
+        return undef;
+    }
+    pop @{$self->{in}};
+    if ($w eq 'set')
+    {
+        $self->{in_set}--;
+        return "return \$t;\n};\n";
+    }
+    elsif ($w eq 'begin' || $w eq 'for')
+    {
+        $w eq 'begin' && pop @{$self->{blocks}};
+        return "}} END $t\n";
+    }
+    return "} # END $t\n";
+}
+
+# SET varref ... END
+# SET varref = expression
+sub compile_code_fragment_set
+{
+    my ($self, $kw, $t) = @_;
+    return undef if $t !~ /^((?:\w+\.)*\w+)(\s*=\s*(.*))?/iso;
+    my $e;
+    if ($3)
+    {
+        $e = $self->compile_expression($3);
+        unless ($e)
+        {
+            warn "Invalid expression in $kw: ($')";
+            return undef;
+        }
+    }
+    push @{$self->{in}}, [ 'set', $1 ];
+    $self->{in_set}++;
+    return $self->varref($1) . ' = ' . ($t || 'eval { my $t = ""') . ";\n";
+}
+
+# INCLUDE template.tpl
+sub compile_code_fragment_include
+{
+    my ($self, $kw, $t) = @_;
+    $t =~ s/\'|\\/\\$&/gso;
+    return "\$t.=\$self->parse('$t');\n";
+}
+
+sub array_items { ref($_[0]) && $_[0] =~ /ARRAY/ ? @{$_[0]} : ($_[0]) }
+
+# FOR[EACH] varref = array
+# или
+# FOR[EACH] varref (тогда записывается в себя)
+sub compile_code_fragment_for
+{
+    my ($self, $kw, $t, $in) = @_;
+    if ($t =~ /^((?:\w+\.)*\w+)(\s*=\s*(.*))?/so)
+    {
+        push @{$self->{in}}, [ 'for', $t ] unless $in;
+        my $v = $self->varref($1);
+        my $v_i = $self->varref($1.'#');
+        $t = $3 ? $self->compile_expression($3) : $v;
+        return "{
+my \$i = 0;
+for (array_items($v)) {
+local $v = \$_;
+local $v_i = \$i++;
+";
+    }
+    return undef;
+}
+*compile_code_fragment_foreach = *compile_code_fragment_for;
+
+# BEGIN block [AT e] [BY e] [TO e]
+# тоже legacy, но пока оставлю...
+sub compile_code_fragment_begin
+{
+    my ($self, $kw, $t) = @_;
+    if ($t =~ /^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?/iso)
+    {
+        push @{$self->{blocks}}, $1;
+        push @{$self->{in}}, [ 'begin', $1 ];
+        $t = join '.', @{$self->{blocks}};
+        my $e = $t;
+        if ($2)
+        {
+            $e = "subarray($e, $2";
+            $e .= ", $4" if $4;
+            $e .= ")";
+        }
+        if ($3)
+        {
+            $e = "subarray_divmod($e, $3)";
+        }
+        if ($e ne $t)
+        {
+            $e = "$t = $e";
+        }
+        return compile_code_fragment_for($self, 'for', $e, 1);
+    }
+    return undef;
+}
+
 # компиляция фрагмента кода <!-- ... -->. это может быть:
 # 1) [ELSE] IF выражение
-# 2) BEGIN имя блока
-#    FOR имя блока
+# 2) BEGIN/FOR/FOREACH имя блока
 # 3) END [имя блока]
 # 4) SET переменная
 # 5) SET переменная = выражение
@@ -296,115 +441,22 @@ sub compile_code_fragment
 {
     my $self = shift;
     my ($e) = @_;
-    my $t;
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so;
-    if ($e =~ /^(ELS(?:E\s*)?)?IF(!?)\s*/iso)
+    my ($sub, $r);
+    if ($e =~ s/^(?:(ELS)(?:E\s*)?)?IF!\s+/$1IF NOT /so)
     {
-        $t = $';
-        if ($2)
-        {
-            warn "Legacy IF! used, consider changing it to IF NOT";
-            $t = "NOT $t";
-        }
-        $t = $self->compile_expression($t);
-        unless ($t)
-        {
-            warn "Invalid expression: ($t)";
-            return undef;
-        }
-        push @{$self->{in}}, [ 'if' ] unless $1;
-        return $1 ? "} elsif ($t) {\n" : "if ($t) {\n";
+        # обратная совместимость... нафига она нужна?...
+        # но пока пусть останется...
+        warn "Legacy IF! used, consider changing it to IF NOT";
     }
-    elsif ($e =~ /^ELSE\s*$/iso)
+    my ($kw, $t) = split /\s+/, $e, 2;
+    $kw = lc $kw;
+    if (($kw !~ /\W/so) &&
+        ($sub = $self->can("compile_code_fragment_$kw")) &&
+        defined($r = &$sub($self, $kw, $t)))
     {
-        return "} else {";
-    }
-    elsif ($e =~ /^(?:BEGIN|FOR(?:EACH)?)\s+([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?$/iso)
-    {
-        my $ref = $self->varref([@{$self->{blocks}}, $1]);
-        my $at = 0;
-        if ($2)
-        {
-            $at = $self->compile_expression($2);
-            unless ($at)
-            {
-                warn "Invalid expression: ($2) in AT";
-                return undef;
-            }
-        }
-        my $by = '++';
-        if ($3)
-        {
-            $by = $self->compile_expression($3);
-            unless ($by)
-            {
-                warn "Invalid expression: ($3) in BY";
-                return undef;
-            }
-            $by = '+=' . $by;
-        }
-        my $to = '';
-        if ($4)
-        {
-            $to = $self->compile_expression($4);
-            unless ($to)
-            {
-                warn "Invalid expression: ($4) in TO";
-                return undef;
-            }
-            $to = "\$blk_${1}_count = $to if $to < \$blk_${1}_count;";
-        }
-        push @{$self->{blocks}}, $1;
-        push @{$self->{in}}, [ 'begin', $1 ];
-        return <<EOF;
-my \$blk_${1}_count = ref($ref) && $ref =~ /ARRAY/so ? scalar \@{$ref} : $ref ? 1 : 0;
-${to}
-for (my \$blk_${1}_i = $at; \$blk_${1}_i < \$blk_${1}_count; \$blk_${1}_i $by) {
-my \$blk_${1}_vars = ref($ref) && $ref =~ /ARRAY/so ? $ref ->[\$blk_${1}_i] : $ref;
-EOF
-    }
-    elsif ($e =~ /^END(?:\s+([a-z_][a-z0-9_]*))?$/iso)
-    {
-        unless (@{$self->{in}})
-        {
-            warn "$& without BEGIN, IF or SET";
-            return undef;
-        }
-        my $l = $self->{in}->[$#{$self->{in}}];
-        if ($self->{strict_end} &&
-            ($1 && ($l->[0] ne 'begin' || !$l->[1] || $l->[1] ne $1) ||
-            !$1 && $l->[0] eq 'begin' && $l->[1]))
-        {
-            warn "$& after ".uc($l->[0])." $l->[1]";
-            return undef;
-        }
-        $self->{in_set}-- if $l->[0] eq 'set';
-        pop @{$self->{in}};
-        pop @{$self->{blocks}} if $1;
-        return $l->[0] eq 'set' ? "return \$t;\n};\n" : "} # $&\n";
-    }
-    elsif ($e =~ /^SET\s+((?:[a-z0-9_]+\.)*[a-z0-9_]+)(\s*=\s*)?/iso)
-    {
-        if ($2)
-        {
-            $t = $self->compile_expression($');
-            unless ($t)
-            {
-                warn "Invalid expression: ($')";
-                return undef;
-            }
-        }
-        push @{$self->{in}}, [ 'set', $1 ];
-        $self->{in_set}++;
-        return $self->varref($1) . ' = ' . ($t || 'eval { my $t = ""') . ";\n";
-    }
-    elsif ($e =~ /^INCLUDE\s+(\S+)$/iso)
-    {
-        my $n = $1;
-        $n =~ s/\'|\\/\\$&/gso;
-        $t = "\$t.=\$self->parse('$n');\n";
-        return $t;
+        return $r;
     }
     else
     {
@@ -440,19 +492,19 @@ sub compile_expression
     $e =~ s/^\s+//so;
     $e =~ s/\s+$//so unless $after;
     # строковой или числовой литерал
-    if ($e =~ /^((\")(?:[^\"\\]+|\\.)*\"|\'(?:[^\'\\]+|\\.)*\'|-?[1-9]\d*(\.\d+)?|-?0\d*|-?0x\d+)\s*/iso)
+    if ($e =~ /^((\")(?:[^\"\\]+|\\.)*\"|\'(?:[^\'\\]+|\\.)*\'|-?[1-9]\d*(\.\d+)?|-?0\d*|-?0x\d+)\s*(.*)$/iso)
     {
-        if ($')
+        if ($4)
         {
             return undef unless $after;
-            $$after = $';
+            $$after = $4;
         }
         $e = $1;
         $e =~ s/[\$\@\%]/\\$&/gso if $2;
         return $e;
     }
     # функция нескольких аргументов
-    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s*\(/iso)
+    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s*\((.*)$/iso)
     {
         my $f = lc $1;
         unless ($self->can("function_$f"))
@@ -460,7 +512,7 @@ sub compile_expression
             warn "Unknown function: '$f'";
             return undef;
         }
-        my $a = $';
+        my $a = $2;
         my @a;
         while ($e = $self->compile_expression($a, \$a))
         {
@@ -489,7 +541,7 @@ sub compile_expression
         return $self->$f(@a);
     }
     # функция одного аргумента
-    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s+(?=\S)/iso)
+    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/iso)
     {
         my $f = lc $1;
         unless ($self->can("function_$f"))
@@ -497,7 +549,7 @@ sub compile_expression
             warn "Unknown function: '$f'";
             return undef;
         }
-        my $a = $';
+        my $a = $2;
         my $arg = $self->compile_expression($a, \$a);
         unless ($arg)
         {
@@ -514,12 +566,12 @@ sub compile_expression
         return $self->$f($arg);
     }
     # переменная плюс legacy-mode переменная/функция
-    elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+|\#))(?:\/([a-z]+))?\s*/iso)
+    elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+|\#))(?:\/([a-z]+))?\s*(.*)$/iso)
     {
-        if ($')
+        if ($3)
         {
             return undef unless $after;
-            $$after = $';
+            $$after = $3;
         }
         $e = $self->varref($1);
         if ($2)
@@ -544,29 +596,7 @@ sub varref
     my $self = shift;
     return "" unless $_[0];
     my @e = ref $_[0] ? @{$_[0]} : split /\.+/, $_[0];
-    $self->{last_varref_path} = join '.', @e;
     my $t = '$self->{tpldata}';
-    EQBLOCK: {
-    if (@{$self->{blocks}})
-    {
-        for (0..$#{$self->{blocks}})
-        {
-            last EQBLOCK unless $self->{blocks}->[$_] eq $e[$_];
-        }
-        splice @e, 0, @{$self->{blocks}};
-        if (@e == 1 && $e[0] eq '#')
-        {
-            # номер итерации блока
-            @e = ();
-            $t = '$blk_'.$self->{blocks}->[$#{$self->{blocks}}].'_i';
-        }
-        else
-        {
-            # локальная переменная
-            $t = '$blk_'.$self->{blocks}->[$#{$self->{blocks}}].'_vars';
-        }
-    }
-    }
     for (@e)
     {
         if (/^\d+$/so)
@@ -643,6 +673,29 @@ sub function_sprintf { fearr('sprintf', @_) }
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
+# подмассив по номерам элементов
+sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }
+# подмассив по кратности номеров элементов
+sub function_subarray_divmod { shift; "exec_subarray_divmod(" . join(",", @_) . ")"; }
+
+# подмассив
+sub exec_subarray
+{
+    my ($array, $from, $to) = @_;
+    return $array unless $from;
+    $to ||= 0;
+    $to += @$array if $to <= 0;
+    return [ @$array[$from..$to] ];
+}
+
+# подмассив по кратности номеров элементов
+sub exec_subarray_divmod
+{
+    my ($array, $div, $mod) = @_;
+    return $array unless $div;
+    $mod ||= 0;
+    return [ @$array[grep { $_ % $div == $mod } 0..$#$array] ];
+}
 
 # strftime
 sub function_strftime
