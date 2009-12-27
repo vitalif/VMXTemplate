@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 # Новая версия шаблонного движка VMX::Template!
 # "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
+# Компилятор переписан уже 2 раза - сначала на regexы, потом на index() :-)
+# А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
 
 package VMX::Template;
 
@@ -30,6 +32,7 @@ sub new
         use_utf8        => undef,  # шаблоны в UTF-8 и с флагом UTF-8
         begin_code      => '<!--', # начало кода
         end_code        => '-->',  # конец кода
+        eat_code_line   => 1,      # съедать "лишний" перевод строки, если в строке только инструкция?
         begin_subst     => '{',    # начало подстановки (необязательно)
         end_subst       => '}',    # конец подстановки (необязательно)
         strict_end      => 0,      # жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
@@ -172,20 +175,17 @@ sub compile
     # начала/концы спецстрок
     my $bc = $self->{begin_code} || '<!--';
     my $ec = $self->{end_code} || '-->';
-    my @blk = ([ $bc, $ec, 'compile_code_fragment' ]);
+    # маркер начала, маркер конца, обработчик, съедать ли начало и конец строки
+    my @blk = ([ $bc, $ec, 'compile_code_fragment', $self->{eat_code_line} ]);
     if ($self->{begin_subst} && $self->{end_subst})
     {
         push @blk, [ $self->{begin_subst}, $self->{end_subst}, 'compile_substitution' ];
     }
     for (@blk)
     {
-        $_->[3] = length $_->[0];
-        $_->[4] = length $_->[1];
+        $_->[4] = length $_->[0];
+        $_->[5] = length $_->[1];
     }
-
-    # удаляем комментарии <!--# ... -->
-    $code =~ s/\s*\Q$bc\E[ \t]*#.*?\Q$ec\E//gos;
-    $code =~ s/(?:^|\n)[ \t\r]*(\Q$bc\E\s*[a-z]+(\s+.*)?\Q$ec\E)/$1/giso;
 
     $self->{blocks} = [];
     $self->{in} = [];
@@ -201,33 +201,35 @@ sub compile
         for $i (0..$#p)
         {
             # ближайшее найденное
-            $b = $i if $p[$i] >= 0 && (!$b || $p[$i] < $p[$b]);
+            $b = $i if $p[$i] >= 0 && (!defined $b || $p[$i] < $p[$b]);
         }
         if (defined $b)
         {
             # это означает, что в случае отсутствия корректной инструкции
             # в найденной позиции надо пропустить ТОЛЬКО её начало и попробовать
             # найти что-нибудь снова!
-            $pp = $p[$b]+$blk[$b][3];
+            $pp = $p[$b]+$blk[$b][4];
             $e = index $code, $blk[$b][1], $pp;
             if ($e >= 0)
             {
-                $frag = substr $code, $p[$b]+$blk[$b][3], $e-$p[$b]-$blk[$b][3];
+                $frag = substr $code, $p[$b]+$blk[$b][4], $e-$p[$b]-$blk[$b][4];
                 $f = $blk[$b][2];
                 $frag = $self->$f($frag);
                 if (defined $frag)
                 {
                     # есть инструкция
-                    $pp -= $blk[$b][3];
+                    $pp -= $blk[$b][4];
                     if ($pp > 0)
                     {
                         $pp = substr $code, 0, $pp, '';
                         $pp =~ s/([\\\'])/\\$1/gso;
-                        $r .= "\$t.='$pp';\n";
+                        # съедаем перевод строки, если надо
+                        $blk[$b][5] && $pp =~ s/\r?\n\r?[ \t]*$//so;
+                        $r .= "\$t.='$pp';\n" if length $pp;
                         $pp = 0;
                     }
                     $r .= $frag;
-                    substr $code, 0, $e+$blk[$b][4]-$p[$b], '';
+                    substr $code, 0, $e+$blk[$b][5]-$p[$b], '';
                 }
             }
         }
@@ -320,7 +322,7 @@ sub compile_code_fragment_end
     my ($self, $kw, $t) = @_;
     unless (@{$self->{in}})
     {
-        warn "$& without BEGIN, IF or SET";
+        warn "END $t without BEGIN, IF or SET";
         return undef;
     }
     my ($w, $id) = @{$self->{in}->[$#{$self->{in}}]};
@@ -340,9 +342,9 @@ sub compile_code_fragment_end
     elsif ($w eq 'begin' || $w eq 'for')
     {
         $w eq 'begin' && pop @{$self->{blocks}};
-        return "}} END $t\n";
+        return "}}\n";
     }
-    return "} # END $t\n";
+    return "}\n";
 }
 
 # SET varref ... END
@@ -374,8 +376,6 @@ sub compile_code_fragment_include
     return "\$t.=\$self->parse('$t');\n";
 }
 
-sub array_items { ref($_[0]) && $_[0] =~ /ARRAY/ ? @{$_[0]} : ($_[0]) }
-
 # FOR[EACH] varref = array
 # или
 # FOR[EACH] varref (тогда записывается в себя)
@@ -387,13 +387,21 @@ sub compile_code_fragment_for
         push @{$self->{in}}, [ 'for', $t ] unless $in;
         my $v = $self->varref($1);
         my $v_i = $self->varref($1.'#');
+        if (substr($v_i,-1) eq substr($v,-1))
+        {
+            $v_i = "local $v_i = \$i++;\n"
+        }
+        else
+        {
+            # небольшой хак для $1 =~ \.\d+$
+            $v_i = '';
+        }
         $t = $3 ? $self->compile_expression($3) : $v;
         return "{
 my \$i = 0;
 for (array_items($v)) {
 local $v = \$_;
-local $v_i = \$i++;
-";
+$v_i";
     }
     return undef;
 }
@@ -441,8 +449,13 @@ sub compile_code_fragment
 {
     my $self = shift;
     my ($e) = @_;
-    $e =~ s/^\s+//so;
+    $e =~ s/^[ \t]+//so;
     $e =~ s/\s+$//so;
+    if ($e =~ /^\#/so)
+    {
+        # комментарий!
+        return '';
+    }
     my ($sub, $r);
     if ($e =~ s/^(?:(ELS)(?:E\s*)?)?IF!\s+/$1IF NOT /so)
     {
@@ -489,7 +502,7 @@ sub compile_expression
     my ($e, $after) = @_;
     $after = undef if $after && ref $after ne 'SCALAR';
     $$after = '' if $after;
-    $e =~ s/^\s+//so;
+    $e =~ s/^[ \t]+//so;
     $e =~ s/\s+$//so unless $after;
     # строковой или числовой литерал
     if ($e =~ /^((\")(?:[^\"\\]+|\\.)*\"|\'(?:[^\'\\]+|\\.)*\'|-?[1-9]\d*(\.\d+)?|-?0\d*|-?0x\d+)\s*(.*)$/iso)
@@ -546,7 +559,7 @@ sub compile_expression
         my $f = lc $1;
         unless ($self->can("function_$f"))
         {
-            warn "Unknown function: '$f'";
+            warn "Unknown function: '$f' in '$e'";
             return undef;
         }
         my $a = $2;
@@ -620,6 +633,10 @@ sub fmop
     return "((" . join(") $op (", @_) . "))";
 }
 
+# вспомогательная функция - возвращает элементы массива или скаляр,
+# если он не ссылка на массив
+sub array_items { ref($_[0]) && $_[0] =~ /ARRAY/ ? @{$_[0]} : ($_[0]) }
+
 # вызов функции с аргументами и раскрытием массивов
 sub fearr
 {
@@ -627,7 +644,7 @@ sub fearr
     my $self = shift;
     my $e = shift;
     $e = "$f($e";
-    $e .= ", ref($_) eq 'ARRAY' ? \@{$_} : ($_)" for @_;
+    $e .= ", array_items($_)" for @_;
     $e .= ")";
     return $e;
 }
