@@ -579,7 +579,7 @@ sub compile_expression
         return $self->$f($arg);
     }
     # переменная плюс legacy-mode переменная/функция
-    elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+|\#))(?:\/([a-z]+))?\s*(.*)$/iso)
+    elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/iso)
     {
         if ($3)
         {
@@ -694,6 +694,17 @@ sub function_array   { shift; "[" . join(",", @_) . "]"; }
 sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }
 # подмассив по кратности номеров элементов
 sub function_subarray_divmod { shift; "exec_subarray_divmod(" . join(",", @_) . ")"; }
+
+# map()
+sub function_map
+{
+    my $self = shift;
+    my $f = shift;
+    $f = "function_$f";
+    $self->can($f) || return undef;
+    $f = $self->$f('$_');
+    return fearr($f, $self, @_);
+}
 
 # подмассив
 sub exec_subarray
