@@ -365,7 +365,7 @@ sub compile_code_fragment_set
     }
     push @{$self->{in}}, [ 'set', $1 ];
     $self->{in_set}++;
-    return $self->varref($1) . ' = ' . ($t || 'eval { my $t = ""') . ";\n";
+    return $self->varref($1) . ' = ' . ($e || 'eval { my $t = ""') . ";\n";
 }
 
 # INCLUDE template.tpl
