@@ -657,6 +657,7 @@ sub function_sub     { fmop('-', @_) }
 sub function_mul     { fmop('*', @_) }
 sub function_div     { fmop('/', @_) }
 sub function_concat  { fmop('.', @_) }
+sub function_log     { "log($_[1])" }
 sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0" }
 sub function_not     { "!($_[1])" }
 sub function_even    { "!(($_[1]) & 1)" }
@@ -672,16 +673,18 @@ sub function_sgt     { "(($_[1]) gt ($_[2]))" }
 sub function_slt     { "(($_[1]) lt ($_[2]))" }
 sub function_sge     { "(($_[1]) ge ($_[2]))" }
 sub function_sle     { "(($_[1]) le ($_[2]))" }
-sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = \&function_lc;
-sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = \&function_uc;
-sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = \&function_requote;
+sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
+sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
+sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
+sub function_replace { "resub($_[1], $_[2], $_[3])" }
 sub function_split   { "split($_[1], $_[2], $_[3])" }
-sub function_quote   { "quotequote($_[1])" }            *function_q = \&function_quote;
-sub function_html    { "htmlspecialchars($_[1])" }      *function_s = \&function_html;
-sub function_strip   { "strip_tags($_[1])" }            *function_t = \&function_strip;
-sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = \&function_h;
+sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
+sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html;
+sub function_uriquote{ "uri_escape($_[1])" }            *function_uri_escape = *function_urlencode = *function_uriquote;
+sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip;
+sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
 # объединяет не просто скаляры, а также все элементы массивов
-sub function_join    { fearr('join', @_) }              *function_implode = \&function_join;
+sub function_join    { fearr('join', @_) }              *function_implode = *function_join;
 # подставляет на места $1, $2 и т.п. в строке аргументы
 sub function_subst   { fearr('exec_subst', @_) }
 # sprintf
@@ -694,6 +697,13 @@ sub function_array   { shift; "[" . join(",", @_) . "]"; }
 sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }
 # подмассив по кратности номеров элементов
 sub function_subarray_divmod { shift; "exec_subarray_divmod(" . join(",", @_) . ")"; }
+# получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
+# по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
+sub function_get     { shift; "exec_get(" . join(",", @_) . ")"; }
+# для хеша
+sub function_hget    { "($_[1])->\{$_[2]}" }
+# для массива
+sub function_aget    { "($_[1])->\[$_[2]]" }
 
 # map()
 sub function_map
@@ -707,22 +717,36 @@ sub function_map
 }
 
 # подмассив
+# exec_subarray([], 0, 10)
+# exec_subarray([], 2)
+# exec_subarray([], 0, -1)
 sub exec_subarray
 {
     my ($array, $from, $to) = @_;
     return $array unless $from;
     $to ||= 0;
+    $from += @$array if $from < 0;
     $to += @$array if $to <= 0;
     return [ @$array[$from..$to] ];
 }
 
 # подмассив по кратности номеров элементов
+# exec_subarray_divmod([], 2)
+# exec_subarray_divmod([], 2, 1)
 sub exec_subarray_divmod
 {
     my ($array, $div, $mod) = @_;
     return $array unless $div;
     $mod ||= 0;
     return [ @$array[grep { $_ % $div == $mod } 0..$#$array] ];
+}
+
+# получение элемента хеша или массива
+sub exec_get
+{
+    defined $_[1] && ref $_[0] || return $_[0];
+    $_[0] =~ /ARRAY/ && return $_[0]->[$_[1]];
+    return $_[0]->{$_[1]};
 }
 
 # strftime
