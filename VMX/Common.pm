@@ -29,7 +29,7 @@ our @EXPORT_OK = qw(
     HASHARRAY quotequote min max trim htmlspecialchars strip_tags strip_unsafe_tags
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref updateall_hashref
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
-    normalize_url utf8on rfrom_to mysql2time mysqllocaltime resub requote
+    normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
     hashmrg litsplit strip_tagspace timestamp
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
@@ -696,6 +696,24 @@ sub utf8on
     else
     {
         Encode::_utf8_on($_[0]);
+    }
+    return $_[0];
+}
+
+# utf8_off для скаляра или рекурсивный для хешей/массивов
+sub utf8off
+{
+    if (ref($_[0]) && $_[0] =~ /HASH/so)
+    {
+        utf8off($_[0]->{$_}) for keys %{$_[0]};
+    }
+    elsif (ref($_[0]) && $_[0] =~ /ARRAY/so)
+    {
+        utf8off($_) for @{$_[0]};
+    }
+    else
+    {
+        Encode::_utf8_off($_[0]);
     }
     return $_[0];
 }
