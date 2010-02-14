@@ -713,7 +713,7 @@ sub function_map
     $f = "function_$f";
     $self->can($f) || return undef;
     $f = $self->$f('$_');
-    return fearr($f, $self, @_);
+    return fearr("map{$f}", $self, @_);
 }
 
 # подмассив
