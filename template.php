@@ -396,6 +396,7 @@ $v = array_pop(\$stack);
                 $this->error("Invalid expression in $kw: ($m[3])");
                 return NULL;
             }
+            return $this->varref($m[1]) . ' = ' . $e . ";\n";
         }
         $st->in[] = array('set', $m[1]);
         $st->in_set++;
@@ -411,7 +412,11 @@ $v = array_pop(\$stack);
 
     static function array1($a)
     {
-        return is_array($a) && !self::is_assoc($a) ? $a : array($a);
+        if (is_null($a))
+            return array();
+        if (is_array($a) && !self::is_assoc($a))
+            return $a;
+        return array($a);
     }
 
     // FOR[EACH] varref = array
@@ -573,14 +578,14 @@ $iset";
                     break;
                 else if ($a == ($b = preg_replace('/^\s*,/s', '', $a)))
                 {
-                    $this->error("Unexpected token: '$a' in $f() parameter list");
+                    $this->error("Unexpected token: '$a' in $f($m[2] parameter list");
                     return NULL;
                 }
                 $a = $b;
             }
             if ($a == ($b = preg_replace('/^\s*\)\s*/', '', $a)))
             {
-                $this->error("Unexpected token: '$a' in the end of $f() parameter list");
+                $this->error("Unexpected token: '$a' in the end of $f($m[2] parameter list");
                 return NULL;
             }
             $a = $b;
@@ -792,8 +797,8 @@ $iset";
     /* удаление всех, заданных или "небезопасных" HTML-тегов */
     function function_strip($e, $t)             { return "strip_tags($e".($t?",$t":"").")"; }
     function function_t($e, $t)                 { return "strip_tags($e".($t?",$t":"").")"; }
-    function function_strip_unsafe($e)          { return "strip_tags($e, self::$safe_tags)"; }
-    function function_h($e)                     { return "strip_tags($e, self::$safe_tags)"; }
+    function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
+    function function_h($e)                     { return "strip_tags($e, self::\$safe_tags)"; }
 
     /* объединение всех скаляров и всех элементов аргументов-массивов */
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
