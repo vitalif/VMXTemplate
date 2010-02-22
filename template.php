@@ -329,7 +329,7 @@ class Template
             $this->error("Invalid expression in $kw: '$t'");
             return NULL;
         }
-        $cf_if = array('elseif' => "} els", 'elsif' => "} els", 'if' => "");
+        $cf_if = array('elseif' => "} else", 'elsif' => "} else", 'if' => "");
         $kw = $cf_if[$kw];
         if (!$kw)
             $st->in[] = array('if');
@@ -757,6 +757,7 @@ $iset";
     function function_uc($e)         { return "strtoupper($e)"; }
     function function_upper($e)      { return "strtoupper($e)"; }
     function function_uppercase($e)  { return "strtoupper($e)"; }
+    function function_strlimit($s,$l){ return "self::strlimit($s,$l)"; }
 
     /* экранирование символов, специльных для регулярок */
     function function_requote($e)    { return "preg_quote($e)"; }
@@ -896,6 +897,20 @@ $iset";
         $args = func_get_args();
         $str = preg_replace_callback('/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is', create_function('$m', 'return $args[$m[2]?$m[2]:$m[3]];'), $str);
         return $str;
+    }
+
+    // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
+    static function strlimit($str, $maxlen)
+    {
+        if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
+            return $str;
+        $str = substr($str, 0, $maxlen);
+        $p = strrpos($str, ' ');
+        if (!$p || ($pt = strrpos($str, "\t")) > $ps)
+            $p = $pt;
+        if ($p)
+            $str = substr($str, 0, $p);
+        return $str . '...';
     }
 
     // ограниченная распознавалка дат
