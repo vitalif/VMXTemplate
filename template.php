@@ -547,7 +547,7 @@ $iset";
         else
             $e = rtrim($e);
         // строковой или числовой литерал
-        if (preg_match('/^((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\'|-?[1-9]\d*(\.\d+)?|-?0\d*|-?0x\d+)\s*(.*)$/is', $e, $m))
+        if (preg_match('/^((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\'|-?0\d+|-?[0-9]\d*(\.\d+)?|-?0x\d+)\s*(.*)$/is', $e, $m))
         {
             if ($m[4])
             {
@@ -571,7 +571,7 @@ $iset";
             }
             $a = $m[2];
             $args = array();
-            while ($e = $this->compile_expression($a, array(&$a)))
+            while (!is_null($e = $this->compile_expression($a, array(&$a))))
             {
                 $args[] = $e;
                 if (preg_match('/^\s*\)/s', $a))
