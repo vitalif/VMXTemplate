@@ -719,10 +719,20 @@ $iset";
         return $e;
     }
 
+    // перлоподобный OR-оператор, который возвращает первое истинное значение
+    static function perlish_or()
+    {
+        $a = func_get_args();
+        foreach ($a as $v)
+            if ($v)
+                return $v;
+        return false;
+    }
+
     /* функции */
 
     /* "или", "и", +, -, *, /, конкатенация */
-    function function_or()       { $a = func_get_args(); return $this->fmop('||', $a); }
+    function function_or()       { $a = func_get_args(); return "self::perlish_or(".join(",", $a).")"; }
     function function_and()      { $a = func_get_args(); return $this->fmop('&&', $a); }
     function function_add()      { $a = func_get_args(); return $this->fmop('+', $a); }
     function function_sub()      { $a = func_get_args(); return $this->fmop('-', $a); }
@@ -796,8 +806,8 @@ $iset";
     function function_urlencode($e)             { return "urlencode($e)"; }
 
     /* удаление всех, заданных или "небезопасных" HTML-тегов */
-    function function_strip($e, $t)             { return "strip_tags($e".($t?",$t":"").")"; }
-    function function_t($e, $t)                 { return "strip_tags($e".($t?",$t":"").")"; }
+    function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
+    function function_t($e, $t='')              { return "strip_tags($e".($t?",$t":"").")"; }
     function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
     function function_h($e)                     { return "strip_tags($e, self::\$safe_tags)"; }
 
