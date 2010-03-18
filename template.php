@@ -791,9 +791,9 @@ $iset";
     }
 
     /* экранирование кавычек */
-    function function_quote($e)                 { return "addslashes($e)"; }
-    function function_addslashes($e)            { return "addslashes($e)"; }
-    function function_q($e)                     { return "addslashes($e)"; }
+    function function_quote($e)                 { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
+    function function_addslashes($e)            { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
+    function function_q($e)                     { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
 
     /* преобразование символов <>&'" в HTML-сущности &lt; &gt; &amp; &apos; &quot; */
     function function_htmlspecialchars($e)      { return "htmlspecialchars($e,ENT_QUOTES)"; }
@@ -860,6 +860,12 @@ $iset";
     function function_get($a, $k)       { return $a."[$k]"; }
     function function_hget($a, $k)      { return $a."[$k]"; }
     function function_aget($a, $k)      { return $a."[$k]"; }
+
+    // shift, unshift, pop, push
+    function function_shift($a)         { return "array_shift($a)"; }
+    function function_pop($a)           { return "array_pop($a)"; }
+    function function_unshift($a, $v)   { return "array_unshift($a, $v)"; }
+    function function_push($a, $v)      { return "array_push($a, $v)"; }
 
     /* map() */
     function function_map($f)
@@ -932,7 +938,7 @@ $iset";
             self::$mon = array_reverse(split(' ', 'jan feb mar apr may jun jul aug sep oct nov dec'));
             self::$Wday = split(' ', 'Sun Mon Tue Wed Thu Fri Sat');
         }
-        if (intval($ts) == $ts)
+        if (!strcmp(intval($ts), $ts))
         {
             // TS_UNIX or Epoch
             if (!$ts)
@@ -941,7 +947,7 @@ $iset";
         elseif (preg_match('/^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/s', $ts, $m))
         {
             // TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
-            $ts = mktime($m[4], $m[5], $m[6], $m[2], $m[3], $m[1]);
+            $ts = mktime(0+$m[4], 0+$m[5], 0+$m[6], $m[2], $m[3], $m[1]);
         }
         elseif (preg_match('/^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/s', $ts, $m))
         {
