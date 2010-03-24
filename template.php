@@ -922,7 +922,7 @@ $iset";
             return $str;
         $str = substr($str, 0, $maxlen);
         $p = strrpos($str, ' ');
-        if (!$p || ($pt = strrpos($str, "\t")) > $ps)
+        if (!$p || ($pt = strrpos($str, "\t")) > $p)
             $p = $pt;
         if ($p)
             $str = substr($str, 0, $p);
