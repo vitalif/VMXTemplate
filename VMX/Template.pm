@@ -4,6 +4,9 @@
 # Компилятор переписан уже 2 раза - сначала на regexы, потом на index() :-)
 # А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
 
+# Homepage: http://yourcmc.ru/wiki/VMX::Template
+# Author: Vitaliy Filippov, 2006-2010
+
 package VMX::Template;
 
 use strict;
@@ -689,12 +692,14 @@ sub function_join    { fearr('join', @_) }              *function_implode = *fun
 sub function_subst   { fearr('exec_subst', @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', @_) }
+# ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
+sub function_strlimit{ "strlimit($_[1], $_[2])" }
 # создание хеша
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
 # подмассив по номерам элементов
-sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }
+sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }    *function_array_slice = *function_subarray;
 # подмассив по кратности номеров элементов
 sub function_subarray_divmod { shift; "exec_subarray_divmod(" . join(",", @_) . ")"; }
 # получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
@@ -704,6 +709,11 @@ sub function_get     { shift; "exec_get(" . join(",", @_) . ")"; }
 sub function_hget    { "($_[1])->\{$_[2]}" }
 # для массива
 sub function_aget    { "($_[1])->\[$_[2]]" }
+
+sub function_shift   { "shift(\@{$_[1]})"; }
+sub function_pop     { "pop(\@{$_[1]})"; }
+sub function_unshift { shift(@_); "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
+sub function_push    { shift(@_); "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
 
 # map()
 sub function_map

@@ -30,7 +30,7 @@ our @EXPORT_OK = qw(
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref updateall_hashref
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit strip_tagspace timestamp
+    hashmrg litsplit strip_tagspace timestamp strlimit
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -841,6 +841,28 @@ sub litsplit
     }
     push @r, substr($s, pos($s));
     return @r;
+}
+
+# ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
+sub strlimit
+{
+    my ($str, $maxlen) = @_;
+    if (!$maxlen || $maxlen < 1 || length($str) <= $maxlen)
+    {
+        return $str;
+    }
+    $str = substr($str, 0, $maxlen);
+    my $p = rindex($str, ' ');
+    if ($p < 0 || (my $pt = rindex($str, "\t")) > $p)
+    {
+        $p = $pt;
+    }
+    if ($p > 0)
+    {
+        # обрезаем
+        $str = substr($str, 0, $p);
+    }
+    return $str . '...';
 }
 
 1;
