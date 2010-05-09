@@ -656,11 +656,21 @@ sub normalize_url ($$)
     return $url if $url =~ m%^[a-z]+://%iso;
     if ($url =~ m%^/%so)
     {
-        $base = $1 if $base =~ m%^([a-z]+://[^/]*)%so;
+        $base = $1 if $base =~ m%^([a-z]+://[^/]*)%iso;
     }
     elsif ($url =~ /^\?/so)
     {
         $base = $& if $base =~ m/^[^\?]*/so;
+    }
+    elsif ($url =~ s/^((\.\.\/)+)\/*//so)
+    {
+        my $n = length($1)/3;
+        my $d;
+        $base =~ m%^([a-z]+://[^/]*)/*(.*)$%iso;
+        ($base, $d) = ($1, $2);
+        $d =~ s!(/+[^/]*){0,$n}$!!s;
+        $base .= '/';
+        $base .= "$d/" if $d;
     }
     else
     {

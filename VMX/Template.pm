@@ -683,6 +683,7 @@ sub function_replace { "resub($_[1], $_[2], $_[3])" }
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html;
+sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
 sub function_uriquote{ "uri_escape($_[1])" }            *function_uri_escape = *function_urlencode = *function_uriquote;
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
@@ -714,6 +715,8 @@ sub function_shift   { "shift(\@{$_[1]})"; }
 sub function_pop     { "pop(\@{$_[1]})"; }
 sub function_unshift { shift(@_); "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
 sub function_push    { shift(@_); "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
+
+sub function_dump    { "exec_dump(" . join(",", @_) . ")" }
 
 # map()
 sub function_map
@@ -776,6 +779,16 @@ sub exec_subst
     my $str = shift;
     $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/$_[($2||$3)-1]/gisoe;
     return $str;
+}
+
+# Data::Dumper
+sub exec_dump
+{
+    require Data::Dumper;
+    local $Data::Dumper::Indent = 1;
+    local $Data::Dumper::Varname = '';
+    local $Data::Dumper::Sortkeys = 1;
+    return scalar Data::Dumper::Dumper(@_);
 }
 
 1;
