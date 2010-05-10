@@ -404,7 +404,7 @@ sub compile_code_fragment_for
         $t = $3 ? $self->compile_expression($3) : $v;
         return "{
 my \$i = 0;
-for (array_items($v)) {
+for (array_items($t)) {
 local $v = \$_;
 $v_i";
     }
@@ -661,6 +661,7 @@ sub function_add     { fmop('+', @_) }
 sub function_sub     { fmop('-', @_) }
 sub function_mul     { fmop('*', @_) }
 sub function_div     { fmop('/', @_) }
+sub function_mod     { fmop('%', @_) }
 sub function_concat  { fmop('.', @_) }
 sub function_log     { "log($_[1])" }
 sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0" }
@@ -715,10 +716,10 @@ sub function_aget    { "($_[1])->\[$_[2]]" }
 
 sub function_shift   { "shift(\@{$_[1]})"; }
 sub function_pop     { "pop(\@{$_[1]})"; }
-sub function_unshift { shift(@_); "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
-sub function_push    { shift(@_); "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
+sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
+sub function_push    { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
 
-sub function_dump    { "exec_dump(" . join(",", @_) . ")" }
+sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }
 
 # map()
 sub function_map
