@@ -196,7 +196,7 @@ sub compile
     $self->{in_set} = 0;
 
     # ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
-    my ($r, $pp, $b, $i, $e, $f, $frag, @p) = ('', 0);
+    my ($r, $pp, $line, $b, $i, $e, $f, $frag, @p) = ('', 0, 0);
     while ($code && $pp < length $code)
     {
         @p = map { index $code, $_->[0], $pp } @blk;
@@ -225,14 +225,16 @@ sub compile
                     if ($pp > 0)
                     {
                         $pp = substr $code, 0, $pp, '';
+                        $line += $pp =~ tr/\n/\n/;
                         $pp =~ s/([\\\'])/\\$1/gso;
                         # съедаем перевод строки, если надо
                         $blk[$b][5] && $pp =~ s/\r?\n\r?[ \t]*$//so;
                         $r .= "\$t.='$pp';\n" if length $pp;
                         $pp = 0;
                     }
+                    $r .= "#line $line \"$fn\"\n";
                     $r .= $frag;
-                    substr $code, 0, $e+$blk[$b][5]-$p[$b], '';
+                    $line += substr($code, 0, $e+$blk[$b][5]-$p[$b], '') =~ tr/\n/\n/;
                 }
             }
         }
