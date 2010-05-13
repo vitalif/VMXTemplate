@@ -307,11 +307,11 @@ sub compile_code_fragment_else
 my %cf_if = ('elseif' => "} els", 'elsif' => "} els", 'if' => "");
 sub compile_code_fragment_if
 {
-    my ($self, $kw, $t) = @_;
-    $t = $self->compile_expression($t);
+    my ($self, $kw, $e) = @_;
+    my $t = $self->compile_expression($e);
     unless ($t)
     {
-        warn "Invalid expression in $kw: ($t)";
+        warn "Invalid expression in $kw: ($e)";
         return undef;
     }
     $kw = $cf_if{$kw};
@@ -670,11 +670,13 @@ sub function_even    { "!(($_[1]) & 1)" }
 sub function_odd     { "(($_[1]) & 1)" }
 sub function_int     { "int($_[1])" }
 sub function_eq      { "(($_[1]) == ($_[2]))" }
+sub function_ne      { "(($_[1]) != ($_[2]))" }
 sub function_gt      { "(($_[1]) > ($_[2]))" }
 sub function_lt      { "(($_[1]) < ($_[2]))" }
 sub function_ge      { "(($_[1]) >= ($_[2]))" }
 sub function_le      { "(($_[1]) <= ($_[2]))" }
 sub function_seq     { "(($_[1]) eq ($_[2]))" }
+sub function_sne     { "(($_[1]) ne ($_[2]))" }
 sub function_sgt     { "(($_[1]) gt ($_[2]))" }
 sub function_slt     { "(($_[1]) lt ($_[2]))" }
 sub function_sge     { "(($_[1]) ge ($_[2]))" }
