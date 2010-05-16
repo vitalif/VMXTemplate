@@ -309,7 +309,7 @@ sub compile_code_fragment_if
 {
     my ($self, $kw, $e) = @_;
     my $t = $self->compile_expression($e);
-    unless ($t)
+    unless (defined $t)
     {
         warn "Invalid expression in $kw: ($e)";
         return undef;
@@ -353,6 +353,7 @@ sub compile_code_fragment_end
 }
 
 # SET varref ... END
+# FUNCTION varref ... END
 # SET varref = expression
 sub compile_code_fragment_set
 {
@@ -362,16 +363,18 @@ sub compile_code_fragment_set
     if ($3)
     {
         $e = $self->compile_expression($3);
-        unless ($e)
+        unless (defined $e)
         {
             warn "Invalid expression in $kw: ($')";
             return undef;
         }
     }
+    my $ekw = lc($kw) eq 'function' ? 'sub { my $self = shift; local $self->{tpldata}->{args} = [ @_ ];' : 'eval {';
     push @{$self->{in}}, [ 'set', $1 ];
     $self->{in_set}++;
-    return $self->varref($1) . ' = ' . ($e || 'eval { my $t = ""') . ";\n";
+    return $self->varref($1) . ' = ' . ($e || $ekw . ' my $t = ""') . ";\n";
 }
+*compile_code_fragment_function = *compile_code_fragment_set;
 
 # INCLUDE template.tpl
 sub compile_code_fragment_include
@@ -521,18 +524,18 @@ sub compile_expression
         $e =~ s/[\$\@\%]/\\$&/gso if $2;
         return $e;
     }
-    # функция нескольких аргументов
-    elsif ($e =~ /^([a-z_][a-z0-9_]*)\s*\((.*)$/iso)
+    # функция нескольких аргументов или вызов замыкания из tpldata
+    elsif ($e =~ /^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/iso)
     {
         my $f = lc $1;
-        unless ($self->can("function_$f"))
+        my $varref;
+        if ($2 || !$self->can("function_$f"))
         {
-            warn "Unknown function: '$f'";
-            return undef;
+            $varref = $self->varref($1);
         }
-        my $a = $2;
+        my $a = $3;
         my @a;
-        while ($e = $self->compile_expression($a, \$a))
+        while (defined($e = $self->compile_expression($a, \$a)))
         {
             push @a, $e;
             if ($a =~ /^\s*\)/so)
@@ -555,6 +558,12 @@ sub compile_expression
             return undef unless $after;
             $$after = $a;
         }
+        if ($varref)
+        {
+            # вызов переменной-замыкания
+            return '&{'.$varref.'}($self,'.join(',',@a).')';
+        }
+        # встроенная функция
         $f = "function_$f";
         return $self->$f(@a);
     }
@@ -569,7 +578,7 @@ sub compile_expression
         }
         my $a = $2;
         my $arg = $self->compile_expression($a, \$a);
-        unless ($arg)
+        unless (defined $arg)
         {
             warn "Invalid expression: ($e)";
             return undef;
@@ -585,6 +594,7 @@ sub compile_expression
     }
     # переменная плюс legacy-mode переменная/функция
     elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/iso)
+        #/^([a-z_][a-z0-9_]*(?:\.*[a-z0-9_]+)*\#?)(?:\/([a-z]+))?\s*(.*)$/iso)
     {
         if ($3)
         {
@@ -685,12 +695,13 @@ sub function_lc      { "lc($_[1])" }                    *function_lower = *funct
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
+sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html;
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
 sub function_uriquote{ "uri_escape($_[1])" }            *function_uri_escape = *function_urlencode = *function_uriquote;
-sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip;
+sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
 # объединяет не просто скаляры, а также все элементы массивов
 sub function_join    { fearr('join', @_) }              *function_implode = *function_join;
