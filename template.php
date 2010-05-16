@@ -324,7 +324,7 @@ class Template
     function compile_code_fragment_if($st, $kw, $t)
     {
         $e = $this->compile_expression($t);
-        if (!$e)
+        if ($e === NULL)
         {
             $this->error("Invalid expression in $kw: '$t'");
             return NULL;
@@ -382,6 +382,8 @@ $v = array_pop(\$stack);
         return "}\n";
     }
 
+    // @TODO FUNCTION varref ... END
+
     // SET varref ... END
     // SET varref = expression
     function compile_code_fragment_set($st, $kw, $t)
@@ -391,7 +393,7 @@ $v = array_pop(\$stack);
         if ($m[3])
         {
             $e = $this->compile_expression($m[3]);
-            if (!$e)
+            if ($e === NULL)
             {
                 $this->error("Invalid expression in $kw: ($m[3])");
                 return NULL;
@@ -525,7 +527,7 @@ $iset";
     function compile_substitution($st, $e)
     {
         $e = $this->compile_expression($e);
-        if ($e)
+        if ($e !== NULL)
             return "\$t.=$e;\n";
         return NULL;
     }
@@ -608,7 +610,7 @@ $iset";
             }
             $a = $m[2];
             $arg = $this->compile_expression($a, array(&$a));
-            if (!$arg)
+            if ($arg === NULL)
             {
                 $this->error("Invalid expression: ($e)");
                 return NULL;
@@ -784,8 +786,18 @@ $iset";
         return "str_replace($s, $sub, $v)";
     }
 
+    /* подстрока */
+    function function_substr($s, $start, $length = NULL)
+    {
+        return "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+    }
+    function function_substring($s, $start, $length = NULL)
+    {
+        return "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+    }
+
     /* разбиение строки по регулярному выражению */
-    function function_split($re, $v, $limit=-1)
+    function function_split($re, $v, $limit = -1)
     {
         return "preg_split('#'.str_replace('#','\\\\#',$re).'#s', $v, $limit)";
     }
@@ -807,6 +819,7 @@ $iset";
 
     /* удаление всех, заданных или "небезопасных" HTML-тегов */
     function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
+    function function_strip_tags($e, $t='')     { return "strip_tags($e".($t?",$t":"").")"; }
     function function_t($e, $t='')              { return "strip_tags($e".($t?",$t":"").")"; }
     function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
     function function_h($e)                     { return "strip_tags($e, self::\$safe_tags)"; }
