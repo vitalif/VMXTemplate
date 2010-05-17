@@ -365,13 +365,16 @@ sub compile_code_fragment_set
         $e = $self->compile_expression($3);
         unless (defined $e)
         {
-            warn "Invalid expression in $kw: ($')";
+            warn "Invalid expression in $kw: ($3)";
             return undef;
         }
     }
+    else
+    {
+        push @{$self->{in}}, [ 'set', $1 ];
+        $self->{in_set}++;
+    }
     my $ekw = lc($kw) eq 'function' ? 'sub { my $self = shift; local $self->{tpldata}->{args} = [ @_ ];' : 'eval {';
-    push @{$self->{in}}, [ 'set', $1 ];
-    $self->{in_set}++;
     return $self->varref($1) . ' = ' . ($e || $ekw . ' my $t = ""') . ";\n";
 }
 *compile_code_fragment_function = *compile_code_fragment_set;
@@ -727,6 +730,7 @@ sub function_hget    { "($_[1])->\{$_[2]}" }
 # для массива
 sub function_aget    { "($_[1])->\[$_[2]]" }
 
+sub function_array_merge { shift; '[@{'.join('},@{',@_).'}]' }
 sub function_shift   { "shift(\@{$_[1]})"; }
 sub function_pop     { "pop(\@{$_[1]})"; }
 sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
