@@ -367,6 +367,11 @@ class Template
             $st->in_set--;
             return $this->varref($in[1]) . " = \$t;\n\$t = array_pop(\$stack);\n";
         }
+        elseif ($w == 'function')
+        {
+            $st->in_set--;
+            return "EOF);\n";
+        }
         elseif ($w == 'begin' || $w == 'for')
         {
             if ($w == 'begin')
@@ -382,9 +387,8 @@ $v = array_pop(\$stack);
         return "}\n";
     }
 
-    // @TODO FUNCTION varref ... END
-
     // SET varref ... END
+    // FUNCTION varref ... END
     // SET varref = expression
     function compile_code_fragment_set($st, $kw, $t)
     {
@@ -392,6 +396,11 @@ $v = array_pop(\$stack);
             return NULL;
         if ($m[3])
         {
+            if ($kw != 'set')
+            {
+                $this->error("Only SET is allowed for inline expressions, but '".strtoupper($kw)."' given (expression = $m[3])");
+                return NULL;
+            }
             $e = $this->compile_expression($m[3]);
             if ($e === NULL)
             {
@@ -400,8 +409,10 @@ $v = array_pop(\$stack);
             }
             return $this->varref($m[1]) . ' = ' . $e . ";\n";
         }
-        $st->in[] = array('set', $m[1]);
+        $st->in[] = array($kw, $m[1]);
         $st->in_set++;
+        if ($kw == 'function')
+            return $this->varref($m[1]) . ' = create_function(<<<EOF'; 
         return "\$stack[] = \$t;\n\$t = '';\n";
     }
 
@@ -562,16 +573,13 @@ $iset";
                 $e = str_replace('$', '\\$', $e);
             return $e;
         }
-        // функция нескольких аргументов
-        else if (preg_match('/^([a-z_][a-z0-9_]*)\s*\((.*)$/is', $e, $m))
+        // функция нескольких аргументов или вызов замыкания
+        else if (preg_match('/^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/is', $e, $m))
         {
             $f = strtolower($m[1]);
-            if (!method_exists($this, "function_$f"))
-            {
-                $this->error("Unknown function: '$f'");
-                return NULL;
-            }
-            $a = $m[2];
+            if ($m[2] || !method_exists($this, "function_$f"))
+                $varref = $self->varref($m[1]);
+            $a = $m[3];
             $args = array();
             while (!is_null($e = $this->compile_expression($a, array(&$a))))
             {
@@ -597,6 +605,8 @@ $iset";
                     return NULL;
                 $after[0] = $a;
             }
+            if ($varref)
+                return "\$this->exec_call('$f', $varref, array(".implode(",", $args)."))";
             return call_user_func_array(array($this, "function_$f"), $args);
         }
         // функция одного аргумента
@@ -729,6 +739,15 @@ $iset";
             if ($v)
                 return $v;
         return false;
+    }
+
+    // вызов своей функции
+    function exec_call($f, $sub, $args)
+    {
+        if (is_callable($sub))
+            return call_user_func_array($sub, $args);
+        $this->error("Unknown function: '$f'");
+        return NULL;
     }
 
     /* функции */
@@ -867,6 +886,9 @@ $iset";
 
     // подмассив по кратности номеров элементов
     function function_subarray_divmod() { $a = func_get_args(); return "self::exec_subarray_divmod(" . join(",", $a) . ")"; }
+
+    // объединение массивов
+    function function_array_merge()     { $a = func_get_args(); return "array_merge(" . join(",", $a) . ")"; }
 
     // получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
     // по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
