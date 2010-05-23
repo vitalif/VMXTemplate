@@ -10,7 +10,7 @@
 package VMX::Template;
 
 use strict;
-use VMX::Common qw(:all);
+use VMX::Common qw(:all uri_escape_hacks);
 use Digest::MD5 qw(md5_hex);
 use Hash::Merge;
 use POSIX;
@@ -703,7 +703,7 @@ sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html;
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
-sub function_uriquote{ "uri_escape($_[1])" }            *function_uri_escape = *function_urlencode = *function_uriquote;
+sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
 # объединяет не просто скаляры, а также все элементы массивов
