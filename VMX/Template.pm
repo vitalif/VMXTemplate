@@ -716,6 +716,8 @@ sub function_sprintf { fearr('sprintf', @_) }
 sub function_strlimit{ "strlimit($_[1], $_[2])" }
 # создание хеша
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
+# ключи хеша
+sub function_keys    { 'keys(%{'.$_[1].'})'; }           *function_hash_keys = *function_keys;
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
 # подмассив по номерам элементов
