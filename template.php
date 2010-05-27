@@ -918,6 +918,36 @@ $iset";
         return self::fearr("array_map", $args);
     }
 
+    /* дамп переменной */
+    function function_var_dump($var)
+    {
+        return "self::exec_dump($var)";
+    }
+    function function_dump($var)
+    {
+        return "self::exec_dump($var)";
+    }
+
+    /* включение другого файла */
+    function function_include($file)
+    {
+        return "\$this->parse($file)";
+    }
+    function function_parse($file)
+    {
+        return "\$this->parse($file)";
+    }
+
+    // дамп переменной
+    static function exec_dump($var)
+    {
+        ob_start();
+        var_dump($var);
+        $var = ob_get_contents();
+        ob_end_clean();
+        return $var;
+    }
+
     // подмассив по кратности номеров элементов
     // exec_subarray_divmod([], 2)
     // exec_subarray_divmod([], 2, 1)
