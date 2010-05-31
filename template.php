@@ -411,9 +411,16 @@ $v = array_pop(\$stack);
         }
         $st->in[] = array($kw, $m[1]);
         $st->in_set++;
+        /* FIXME не работает в PHP < 5.3
+           да и вообще-то не очень хорош механизм функций,
+           ибо не кэшируется */
         if ($kw == 'function')
-            return $this->varref($m[1]) . ' = create_function(<<<EOF'; 
+            return $this->varref($m[1]) . " = create_function(<<<'EOF'\n";
         return "\$stack[] = \$t;\n\$t = '';\n";
+    }
+    function compile_code_fragment_function($st, $kw, $t)
+    {
+        return $this->compile_code_fragment_set($st, $kw, $t);
     }
 
     // INCLUDE template.tpl
@@ -578,7 +585,7 @@ $iset";
         {
             $f = strtolower($m[1]);
             if ($m[2] || !method_exists($this, "function_$f"))
-                $varref = $self->varref($m[1]);
+                $varref = $this->varref($m[1]);
             $a = $m[3];
             $args = array();
             while (!is_null($e = $this->compile_expression($a, array(&$a))))
@@ -901,6 +908,10 @@ $iset";
     function function_pop($a)           { return "array_pop($a)"; }
     function function_unshift($a, $v)   { return "array_unshift($a, $v)"; }
     function function_push($a, $v)      { return "array_push($a, $v)"; }
+
+    // игнорирование результата (а-ля js)
+    function function_void($a)          { return "self::void($a)"; }
+    function void($a)                   { return ''; }
 
     /* map() */
     function function_map($f)
