@@ -787,14 +787,14 @@ $iset";
     function function_le($a,$b) { return "(($a) <= ($b))"; }
 
     /* нижний регистр */
-    function function_lc($e)         { return "strtolower($e)"; }
-    function function_lower($e)      { return "strtolower($e)"; }
-    function function_lowercase($e)  { return "strtolower($e)"; }
+    function function_lc($e)         { return "mb_strtolower($e)"; }
+    function function_lower($e)      { return "mb_strtolower($e)"; }
+    function function_lowercase($e)  { return "mb_strtolower($e)"; }
 
     /* верхний регистр */
-    function function_uc($e)         { return "strtoupper($e)"; }
-    function function_upper($e)      { return "strtoupper($e)"; }
-    function function_uppercase($e)  { return "strtoupper($e)"; }
+    function function_uc($e)         { return "mb_strtoupper($e)"; }
+    function function_upper($e)      { return "mb_strtoupper($e)"; }
+    function function_uppercase($e)  { return "mb_strtoupper($e)"; }
     function function_strlimit($s,$l){ return "self::strlimit($s,$l)"; }
 
     /* экранирование символов, специльных для регулярок */
@@ -812,14 +812,17 @@ $iset";
         return "str_replace($s, $sub, $v)";
     }
 
+    /* длина строки */
+    function function_strlen($s) { return "mb_strlen($s)"; }
+
     /* подстрока */
     function function_substr($s, $start, $length = NULL)
     {
-        return "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+        return "mb_substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
     function function_substring($s, $start, $length = NULL)
     {
-        return "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+        return "mb_substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
 
     /* разбиение строки по регулярному выражению */
@@ -879,6 +882,11 @@ $iset";
         $s .= ")";
         return $s;
     }
+
+    /* ключи хеша или массива */
+    function function_keys($a) { return "array_keys($a)"; }
+    function function_hash_keys($a) { return "array_keys($a)"; }
+    function function_array_keys($a) { return "array_keys($a)"; }
 
     // создание массива
     function function_array()
@@ -994,14 +1002,14 @@ $iset";
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
     static function strlimit($str, $maxlen)
     {
-        if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
+        if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
             return $str;
-        $str = substr($str, 0, $maxlen);
-        $p = strrpos($str, ' ');
-        if (!$p || ($pt = strrpos($str, "\t")) > $p)
+        $str = mb_substr($str, 0, $maxlen);
+        $p = mb_strrpos($str, ' ');
+        if (!$p || ($pt = mb_strrpos($str, "\t")) > $p)
             $p = $pt;
         if ($p)
-            $str = substr($str, 0, $p);
+            $str = mb_substr($str, 0, $p);
         return $str . '...';
     }
 
