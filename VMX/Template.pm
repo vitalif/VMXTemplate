@@ -698,6 +698,7 @@ sub function_lc      { "lc($_[1])" }                    *function_lower = *funct
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
+sub function_strlen  { "strlen($_[1])" }
 sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
@@ -738,7 +739,11 @@ sub function_pop     { "pop(\@{$_[1]})"; }
 sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
 sub function_push    { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
 
-sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }
+# дамп переменной
+sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }          *function_var_dump = *function_dump;
+
+# включение другого файла
+sub function_include { shift; "\$self->parse($_[0])"; }                     *function_parse = *function_include;
 
 # map()
 sub function_map
