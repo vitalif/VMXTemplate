@@ -631,11 +631,21 @@ sub callif
     return wantarray ? () : undef;
 }
 
-# чтение N байт из urandom или rand() в случае его отсутствия
+# чтение N байт из Crypt::Random, urandom или rand() в случае его отсутствия
+my $no_crypt_random;
 sub urandom
 {
     my ($bs) = @_;
     return undef unless $bs && $bs > 0;
+    if (!$no_crypt_random && !$INC{'Crypt/Random.pm'})
+    {
+        eval { require Crypt::Random; };
+        $no_crypt_random = 1 if $@;
+    }
+    if (!$no_crypt_random)
+    {
+        return Crypt::Random::makerandom_octet(Length => $bs, Strength => 1);
+    }
     my ($fd, $data);
     if (open $fd, "</dev/urandom")
     {
