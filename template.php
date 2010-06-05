@@ -785,6 +785,7 @@ $iset";
     function function_lt($a,$b) { return "(($a) < ($b))"; }
     function function_ge($a,$b) { return "(($a) >= ($b))"; }
     function function_le($a,$b) { return "(($a) <= ($b))"; }
+    function function_yesno($a,$b,$c) { return "(($a) ? ($b) : ($c))"; }
 
     /* нижний регистр */
     function function_lc($e)         { return "mb_strtolower($e)"; }
