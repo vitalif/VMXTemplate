@@ -702,7 +702,7 @@ sub function_strlen  { "strlen($_[1])" }
 sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
-sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html;
+sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
 sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
