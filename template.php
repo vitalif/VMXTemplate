@@ -842,6 +842,8 @@ $iset";
     function function_html($e)                  { return "htmlspecialchars($e,ENT_QUOTES)"; }
     function function_s($e)                     { return "htmlspecialchars($e,ENT_QUOTES)"; }
 
+    function function_nl2br($s)                 { return "nl2br($s)"; }
+
     /* экранирование в стиле URI */
     function function_uriquote($e)              { return "urlencode($e)"; }
     function function_uri_escape($e)            { return "urlencode($e)"; }
