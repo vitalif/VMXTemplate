@@ -694,6 +694,7 @@ sub function_sgt     { "(($_[1]) gt ($_[2]))" }
 sub function_slt     { "(($_[1]) lt ($_[2]))" }
 sub function_sge     { "(($_[1]) ge ($_[2]))" }
 sub function_sle     { "(($_[1]) le ($_[2]))" }
+sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
 sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
