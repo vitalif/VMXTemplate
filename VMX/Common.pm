@@ -30,7 +30,7 @@ our @EXPORT_OK = qw(
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref updateall_hashref
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit strip_tagspace timestamp strlimit
+    hashmrg litsplit strip_tagspace timestamp strlimit daemonize
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -883,6 +883,33 @@ sub strlimit
         $str = substr($str, 0, $p);
     }
     return $str . '...';
+}
+
+# уход в подполье
+sub daemonize
+{
+    require POSIX;
+    my $logger;
+    if ($INC{'Log/Log4perl.pm'})
+    {
+        $logger = Log::Log4perl::get_logger();
+    }
+    $logger and $logger->info("[$$] Backgrounding");
+    my $pid = fork();
+    if (!defined $pid)
+    {
+        $logger and $logger->fatal("[$$] Bad Fork");
+        die "bad fork";
+    }
+    elsif ($pid)
+    {
+        $logger and $logger->info("[$$] Parent Exiting");
+        exit;
+    }
+    open STDIN, "/dev/null";
+    open STDOUT, ">/dev/null";
+    POSIX::setsid();
+    $logger and $logger->info("[$$] Child Running");
 }
 
 1;
