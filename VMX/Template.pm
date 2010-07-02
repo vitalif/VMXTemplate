@@ -153,10 +153,13 @@ sub compile
     return $compiled_code->{$coderef} if $compiled_code->{$coderef};
 
     # кэширование на диске
+    my $code = $$coderef;
+    Encode::_utf8_off($code);
+
     my $h;
     if ($self->{cache_dir})
     {
-        $h = $self->{cache_dir}.md5_hex($$coderef).'.pl';
+        $h = $self->{cache_dir}.md5_hex($code).'.pl';
         if (-e $h)
         {
             $compiled_code->{$coderef} = do $h;
@@ -172,7 +175,6 @@ sub compile
         }
     }
 
-    my $code = $$coderef;
     Encode::_utf8_on($code) if $self->{use_utf8};
 
     # начала/концы спецстрок
