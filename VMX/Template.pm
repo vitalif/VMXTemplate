@@ -661,10 +661,12 @@ sub array_items { ref($_[0]) && $_[0] =~ /ARRAY/ ? @{$_[0]} : ($_[0]) }
 sub fearr
 {
     my $f = shift;
+    my $n = shift;
     my $self = shift;
-    my $e = shift;
-    $e = "$f($e";
-    $e .= ", array_items($_)" for @_;
+    my $e = "$f(";
+    $e .= join(", ", splice(@_, 0, $n)) if $n;
+    $e .= ", " if $n && @_;
+    $e .= join(", ", map { "array_items($_)" } @_);
     $e .= ")";
     return $e;
 }
@@ -711,17 +713,19 @@ sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }     
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
 # объединяет не просто скаляры, а также все элементы массивов
-sub function_join    { fearr('join', @_) }              *function_implode = *function_join;
+sub function_join    { fearr('join', 1, @_) }           *function_implode = *function_join;
 # подставляет на места $1, $2 и т.п. в строке аргументы
-sub function_subst   { fearr('exec_subst', @_) }
+sub function_subst   { fearr('exec_subst', 1, @_) }
 # sprintf
-sub function_sprintf { fearr('sprintf', @_) }
+sub function_sprintf { fearr('sprintf', 1, @_) }
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
 sub function_strlimit{ "strlimit($_[1], $_[2])" }
 # создание хеша
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 # ключи хеша
-sub function_keys    { 'keys(%{'.$_[1].'})'; }           *function_hash_keys = *function_keys;
+sub function_keys    { '[ keys(%{'.$_[1].'}) ]'; }      *function_hash_keys = *function_keys;
+# сортировка массива
+sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
 # подмассив по номерам элементов
@@ -756,7 +760,7 @@ sub function_map
     $f = "function_$f";
     $self->can($f) || return undef;
     $f = $self->$f('$_');
-    return fearr("map{$f}", $self, @_);
+    return fearr("map{$f}", 0, $self, @_);
 }
 
 # подмассив
