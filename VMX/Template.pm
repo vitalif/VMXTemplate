@@ -757,10 +757,10 @@ sub function_map
 {
     my $self = shift;
     my $f = shift;
-    $f = "function_$f";
-    $self->can($f) || return undef;
-    $f = $self->$f('$_');
-    return fearr("map{$f}", 0, $self, @_);
+    my $def = $self->varref('_');
+    $def = "\Q$def\E";
+    $f =~ s/$def/\$_/giso;
+    return '[ '.fearr('map { '.$f.' }', 0, $self, @_).' ]';
 }
 
 # подмассив
