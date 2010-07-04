@@ -42,7 +42,7 @@ our $allowed_html = [qw/
 
 our @DATE_INIT = ("Language=Russian", "DateFormat=non-US");
 
-my $uri_escape_original;
+our $uri_escape_original;
 
 # Exporter-ский импорт + подмена функций в DBI и URI::Escape
 sub import
@@ -80,7 +80,7 @@ sub import
     if ($uri_escape_hacks)
     {
         require URI::Escape;
-        $uri_escape_original = \&URI::Escape::uri_escape;
+        $VMX::Common::uri_escape_original = \&URI::Escape::uri_escape;
         *URI::Escape::uri_escape = *VMX::Common::uri_escape;
     }
     $Exporter::ExportLevel = 1;
@@ -402,11 +402,12 @@ sub deleteall_hashref
 # `ji` INT DEFAULT NULL и `jin` INT DEFAULT NULL, и индекс по ним.
 sub insertall_hashref
 {
-    my ($dbh, $table, $rows, $reselect, $replace) = @_;
+    my ($dbh, $table, $rows, $reselect, $replace, $update) = @_;
     return 0 unless
         $dbh && $table &&
         $rows && ref($rows) eq 'ARRAY' && @$rows;
     my $conn_id = undef;
+    $reselect = undef if $update;
     if ($reselect)
     {
         my $i = 0;
@@ -417,6 +418,7 @@ sub insertall_hashref
     my $sql = ($replace ? 'REPLACE' : 'INSERT').
         ' INTO `'.$table.'` (`'.join('`,`',@f).'`) VALUES '.
         join(',',('('.(join(',', ('?') x scalar(@f))).')') x scalar(@$rows));
+    $sql .= ' ON DUPLICATE KEY UPDATE '.join(', ', map { "`$_`=VALUES(`$_`)" } @f) if $update;
     my @bind = map { @$_{@f} } @$rows;
     my $st = $dbh->do($sql, undef, @bind);
     return $st if !$st || !$reselect;
@@ -548,7 +550,8 @@ sub timestamp
         # TS_UNIX or Epoch
         $ts = time if !$ts;
     }
-    elsif ($ts =~ /^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/so)
+
+    elsif ($ts =~ /^\D*(\d{4,}?)\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/so)
     {
         # TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
         $ts = POSIX::mktime($6||0, $5||0, $4||0, $3, $2-1, $1-1900);
