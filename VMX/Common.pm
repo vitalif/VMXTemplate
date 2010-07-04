@@ -30,7 +30,7 @@ our @EXPORT_OK = qw(
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref updateall_hashref
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit strip_tagspace timestamp strlimit daemonize
+    hashmrg litsplit strip_tagspace timestamp strlimit daemonize estrftime
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -608,6 +608,20 @@ sub timestamp
         return POSIX::strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", @l);
     }
     return $ts;
+}
+
+# strftime с поддержкой %EB (месяц в родительном падеже)
+my @month_gen = qw/Января Февраля Марта Апреля Мая Июня Июля Августа Сентября Октября Ноября Декабря/;
+sub estrftime
+{
+    my $format = shift;
+    my $u;
+    my $m = $month_gen[$_[4]];
+    Encode::_utf8_on($m) if $u = Encode::is_utf8($format);
+    $format =~ s/\%EB/$m/gse;
+    my $r = POSIX::strftime($format, @_);
+    Encode::_utf8_on($r) if $u;
+    return $r;
 }
 
 sub date_init_russian

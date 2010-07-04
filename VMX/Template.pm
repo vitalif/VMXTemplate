@@ -803,7 +803,7 @@ sub function_strftime
     my $self = shift;
     my $e = $_[1];
     $e = "($e).' '.($_[2])" if $_[2];
-    $e = "POSIX::strftime($_[0], localtime(timestamp($e)))";
+    $e = "VMX::Common::estrftime($_[0], localtime(timestamp($e)))";
     $e = "utf8on($e)" if $self->{use_utf8};
     return $e;
 }
