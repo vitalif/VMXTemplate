@@ -705,6 +705,7 @@ sub function_requote { "requote($_[1])" }               *function_re_quote = *fu
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
 sub function_strlen  { "strlen($_[1])" }
 sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
+sub function_trim    { shift; "trim($_[0])" }
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
