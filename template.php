@@ -480,7 +480,7 @@ $iset";
     // тоже legacy, но пока оставлю...
     function compile_code_fragment_begin($st, $kw, $t)
     {
-        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?/is', $t, $m))
+        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?\s*$/is', $t, $m))
         {
             $st->blocks[] = $m[1];
             $t = implode('.', $st->blocks);
