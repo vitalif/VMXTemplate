@@ -43,6 +43,7 @@ class Template
     var $strict_end    = false;   // жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
     var $raise_error   = false;   // говорить die() при ошибках в шаблонах
     var $print_error   = false;   // печатать фатальные ошибки
+    var $compiletime_functions = array();   // дополнительные функции времени компиляции
 
     function __construct($args)
     {
@@ -480,7 +481,7 @@ $iset";
     // тоже legacy, но пока оставлю...
     function compile_code_fragment_begin($st, $kw, $t)
     {
-        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?\s*$/is', $t, $m))
+        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?/is', $t, $m))
         {
             $st->blocks[] = $m[1];
             $t = implode('.', $st->blocks);
@@ -584,7 +585,10 @@ $iset";
         else if (preg_match('/^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/is', $e, $m))
         {
             $f = strtolower($m[1]);
-            if ($m[2] || !method_exists($this, "function_$f"))
+            $ct_callable = array($this, "function_$f");
+            if ($this->compiletime_functions[$f])
+                $ct_callable = $this->compiletime_functions[$f];
+            if ($m[2] || !is_callable($ct_callable))
                 $varref = $this->varref($m[1]);
             $a = $m[3];
             $args = array();
@@ -614,7 +618,7 @@ $iset";
             }
             if ($varref)
                 return "\$this->exec_call('$f', $varref, array(".implode(",", $args)."))";
-            return call_user_func_array(array($this, "function_$f"), $args);
+            return call_user_func_array($ct_callable, $args);
         }
         // функция одного аргумента
         else if (preg_match('/^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/is', $e, $m))
@@ -866,6 +870,9 @@ $iset";
     /* sprintf */
     function function_sprintf() { $a = func_get_args(); return self::fearr("'sprintf'", $a); }
 
+    /* JSON-кодирование */
+    function function_json($v)  { return "json_encode($v)"; }
+
     /* создание хеша */
     function function_hash()
     {
@@ -887,9 +894,9 @@ $iset";
     }
 
     /* ключи хеша или массива */
-    function function_keys($a) { return "array_keys($a)"; }
-    function function_hash_keys($a) { return "array_keys($a)"; }
-    function function_array_keys($a) { return "array_keys($a)"; }
+    function function_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
+    function function_hash_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
+    function function_array_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
 
     // создание массива
     function function_array()
@@ -910,9 +917,9 @@ $iset";
 
     // получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
     // по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
-    function function_get($a, $k)       { return $a."[$k]"; }
-    function function_hget($a, $k)      { return $a."[$k]"; }
-    function function_aget($a, $k)      { return $a."[$k]"; }
+    function function_get($a, $k=NULL)  { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
+    function function_hget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
+    function function_aget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
 
     // shift, unshift, pop, push
     function function_shift($a)         { return "array_shift($a)"; }
@@ -1017,7 +1024,7 @@ $iset";
     }
 
     // ограниченная распознавалка дат
-    function timestamp($ts = 0, $format = 0)
+    static function timestamp($ts = 0, $format = 0)
     {
         if (!self::$Mon)
         {
