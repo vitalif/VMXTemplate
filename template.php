@@ -481,7 +481,7 @@ $iset";
     // тоже legacy, но пока оставлю...
     function compile_code_fragment_begin($st, $kw, $t)
     {
-        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?/is', $t, $m))
+        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?\s*$/is', $t, $m))
         {
             $st->blocks[] = $m[1];
             $t = implode('.', $st->blocks);
@@ -897,6 +897,9 @@ $iset";
     function function_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
     function function_hash_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
     function function_array_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
+
+    /* пары id => ключ, name => значение для ассоциативного массива */
+    function function_each($a) { return "array_id_name(is_array($a) ? $a : array())"; }
 
     // создание массива
     function function_array()
