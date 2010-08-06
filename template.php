@@ -837,9 +837,9 @@ $iset";
     }
 
     /* экранирование кавычек */
-    function function_quote($e)                 { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
-    function function_addslashes($e)            { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
-    function function_q($e)                     { return "str_replace(\"\\n\",\"\\\\n\",addslashes($e))"; }
+    function function_quote($e)                 { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
+    function function_addslashes($e)            { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
+    function function_q($e)                     { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
 
     /* преобразование символов <>&'" в HTML-сущности &lt; &gt; &amp; &apos; &quot; */
     function function_htmlspecialchars($e)      { return "htmlspecialchars($e,ENT_QUOTES)"; }
