@@ -395,7 +395,7 @@ $v = array_pop(\$stack);
     {
         if (!preg_match('/^((?:\w+\.)*\w+)(\s*=\s*(.*))?/is', $t, $m))
             return NULL;
-        if ($m[3])
+        if (strlen($m[3]))
         {
             if ($kw != 'set')
             {
@@ -907,6 +907,12 @@ $iset";
         $a = func_get_args();
         return "array(" . join(",", $a) . ")";
     }
+
+    // проверка, массив это или нет?
+    function function_is_array($a)      { return "is_array($a)"; }
+
+    // диапазон от $a до $b
+    function function_range($a, $b)     { return "range($a,$b)"; }
 
     // подмассив по номерам элементов
     function function_subarray()        { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
