@@ -30,7 +30,7 @@ our @EXPORT_OK = qw(
     file_get_contents dbi_hacks ar1el filemd5 mysql_quote updaterow_hashref updateall_hashref
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
-    hashmrg litsplit strip_tagspace timestamp strlimit daemonize estrftime
+    hashmrg litsplit strip_tagspace timestamp strlimit daemonize estrftime csv_read_record
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -927,6 +927,43 @@ sub daemonize
     open STDOUT, ">/dev/null";
     POSIX::setsid();
     $logger and $logger->info("[$$] Child Running");
+}
+
+# функция чтения CSV-файлов
+# Multiline CSV compatible!
+sub csv_read_record
+{
+    my ($fh, $enc, $s, $q) = @_;
+    $q ||= '"';
+    $s ||= ',';
+    my $re_field = qr/^\s*(?:$q((?:[^$q]|$q$q)*)$q|([^$q$s]*))\s*($s)?/s;
+    my @parts = ();
+    my $line = "";
+    my $num_lines = 0;
+    my $l;
+    my $i;
+    while (<$fh>)
+    {
+        trick_taint($_);
+        $l = $_;
+        if ($enc && $enc ne 'utf-8')
+        {
+            Encode::from_to($l, $enc, 'utf-8');
+        }
+        Encode::_utf8_on($l);
+        $line .= $l;
+        while ($line =~ s/$re_field//)
+        {
+            push @parts, $1 || $2;
+            return \@parts if !$3;
+        }
+    }
+    if (length $line)
+    {
+        warn "eol before last field end\n";
+        warn "-->$line<--\n";
+    }
+    return @parts ? \@parts : undef;
 }
 
 1;
