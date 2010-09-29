@@ -954,7 +954,9 @@ sub csv_read_record
         $line .= $l;
         while ($line =~ s/$re_field//)
         {
-            push @parts, $1 || $2;
+            $l = $1 || $2;
+            $l =~ s/$q$q/$q/gs;
+            push @parts, $l;
             return \@parts if !$3;
         }
     }
