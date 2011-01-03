@@ -685,7 +685,7 @@ sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) :
 sub function_not     { "!($_[1])" }
 sub function_even    { "!(($_[1]) & 1)" }
 sub function_odd     { "(($_[1]) & 1)" }
-sub function_int     { "int($_[1])" }
+sub function_int     { "int($_[1])" }                   *function_i = *function_int;
 sub function_eq      { "(($_[1]) eq ($_[2]))" }         *function_seq = *function_eq;
 sub function_ne      { "(($_[1]) ne ($_[2]))" }         *function_sne = *function_ne;
 sub function_gt      { "(($_[1]) gt ($_[2]))" }         *function_sgt = *function_gt;
@@ -703,11 +703,12 @@ sub function_lc      { "lc($_[1])" }                    *function_lower = *funct
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
+sub function_str_replace { "exec_str_replace($_[1], $_[2], $_[3])" }
 sub function_strlen  { "strlen($_[1])" }
 sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
 sub function_trim    { shift; "trim($_[0])" }
 sub function_split   { "split($_[1], $_[2], $_[3])" }
-sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
+sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote; *function_addslashes = *function_q;
 sub function_sq      { "sql_quote($_[1])" }             *function_sql_quote = *function_sq;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
@@ -727,7 +728,7 @@ sub function_strlimit{ "strlimit($_[1], $_[2])" }
 # создание хеша
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 # ключи хеша
-sub function_keys    { '[ keys(%{'.$_[1].'}) ]'; }      *function_hash_keys = *function_keys;
+sub function_keys    { '[ keys(%{'.$_[1].'}) ]'; }      *function_hash_keys = *function_keys; *function_array_keys = *function_keys;
 # сортировка массива
 sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
 # пары { id => ключ, name => значение } для хеша
@@ -839,6 +840,14 @@ sub exec_each
 sub exec_is_array
 {
     return ref $_[1] && $_[1] =~ /ARRAY/;
+}
+
+# замена _подстрок_ (а не регэкспов)
+sub exec_str_replace
+{
+    my ($s, $sub, $v) = @_;
+    $v =~ s/\Q$s\E/$sub/gso;
+    return $v;
 }
 
 # Data::Dumper
