@@ -31,6 +31,7 @@ our @EXPORT_OK = qw(
     insertall_arrayref insertall_hashref deleteall_hashref dumper_no_lf str2time callif urandom
     normalize_url utf8on utf8off rfrom_to mysql2time mysqllocaltime resub requote
     hashmrg litsplit strip_tagspace timestamp strlimit daemonize estrftime csv_read_record
+    sql_quote encode_json
 ), @EXPORT;
 our %EXPORT_TAGS = (all => [ @EXPORT_OK ]);
 
@@ -966,6 +967,22 @@ sub csv_read_record
         warn "-->$line<--\n";
     }
     return @parts ? \@parts : undef;
+}
+
+# Экранирование кавычек в SQL/CSV-стиле (" -> "")
+sub sql_quote
+{
+    my ($a) = @_;
+    $a =~ s/\"/\"\"/gso;
+    return $a;
+}
+
+# JSON-кодирование, автоматически подключает модуль JSON
+sub encode_json
+{
+    require JSON;
+    *encode_json = *JSON::encode_json;
+    goto &JSON::encode_json;
 }
 
 1;

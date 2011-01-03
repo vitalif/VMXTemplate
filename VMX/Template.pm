@@ -686,18 +686,18 @@ sub function_not     { "!($_[1])" }
 sub function_even    { "!(($_[1]) & 1)" }
 sub function_odd     { "(($_[1]) & 1)" }
 sub function_int     { "int($_[1])" }
-sub function_eq      { "(($_[1]) == ($_[2]))" }
-sub function_ne      { "(($_[1]) != ($_[2]))" }
-sub function_gt      { "(($_[1]) > ($_[2]))" }
-sub function_lt      { "(($_[1]) < ($_[2]))" }
-sub function_ge      { "(($_[1]) >= ($_[2]))" }
-sub function_le      { "(($_[1]) <= ($_[2]))" }
-sub function_seq     { "(($_[1]) eq ($_[2]))" }
-sub function_sne     { "(($_[1]) ne ($_[2]))" }
-sub function_sgt     { "(($_[1]) gt ($_[2]))" }
-sub function_slt     { "(($_[1]) lt ($_[2]))" }
-sub function_sge     { "(($_[1]) ge ($_[2]))" }
-sub function_sle     { "(($_[1]) le ($_[2]))" }
+sub function_eq      { "(($_[1]) eq ($_[2]))" }         *function_seq = *function_eq;
+sub function_ne      { "(($_[1]) ne ($_[2]))" }         *function_sne = *function_ne;
+sub function_gt      { "(($_[1]) gt ($_[2]))" }         *function_sgt = *function_gt;
+sub function_lt      { "(($_[1]) lt ($_[2]))" }         *function_slt = *function_lt;
+sub function_ge      { "(($_[1]) ge ($_[2]))" }         *function_sge = *function_ge;
+sub function_le      { "(($_[1]) le ($_[2]))" }         *function_sle = *function_le;
+sub function_neq     { "(($_[1]) == ($_[2]))" }
+sub function_nne     { "(($_[1]) != ($_[2]))" }
+sub function_ngt     { "(($_[1]) >  ($_[2]))" }
+sub function_nlt     { "(($_[1]) <  ($_[2]))" }
+sub function_nge     { "(($_[1]) >= ($_[2]))" }
+sub function_nle     { "(($_[1]) <= ($_[2]))" }
 sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
 sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
@@ -708,6 +708,7 @@ sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substri
 sub function_trim    { shift; "trim($_[0])" }
 sub function_split   { "split($_[1], $_[2], $_[3])" }
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote;
+sub function_sq      { "sql_quote($_[1])" }             *function_sql_quote = *function_sq;
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
 sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
@@ -719,6 +720,8 @@ sub function_join    { fearr('join', 1, @_) }           *function_implode = *fun
 sub function_subst   { fearr('exec_subst', 1, @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', 1, @_) }
+# json-кодирование
+sub function_json    { "encode_json($_[1])" }
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
 sub function_strlimit{ "strlimit($_[1], $_[2])" }
 # создание хеша
@@ -727,8 +730,14 @@ sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 sub function_keys    { '[ keys(%{'.$_[1].'}) ]'; }      *function_hash_keys = *function_keys;
 # сортировка массива
 sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
+# пары { id => ключ, name => значение } для хеша
+sub function_each    { "exec_each($_[1])" }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
+# диапазон значений
+sub function_range   { "($_[1] .. $_[2])" }
+# проверка, аргумент - массив или не массив?
+sub function_is_array{ "exec_is_array($_[1])" }
 # подмассив по номерам элементов
 sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }    *function_array_slice = *function_subarray;
 # подмассив по кратности номеров элементов
@@ -746,6 +755,9 @@ sub function_shift   { "shift(\@{$_[1]})"; }
 sub function_pop     { "pop(\@{$_[1]})"; }
 sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
 sub function_push    { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
+
+# вычисление выражения и игнорирование результата, как в JS
+sub function_void    { "scalar(($_[1]), '')" }
 
 # дамп переменной
 sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }          *function_var_dump = *function_dump;
@@ -814,6 +826,19 @@ sub exec_subst
     my $str = shift;
     $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/$_[($2||$3)-1]/gisoe;
     return $str;
+}
+
+# пары { id => ключ, name => значение } для хеша
+sub exec_each
+{
+    my $hash = shift;
+    return [ map { { id => $_, name => $hash->{$_} } } sort keys %{ $hash || {} } ];
+}
+
+# проверка, массив или нет?
+sub exec_is_array
+{
+    return ref $_[1] && $_[1] =~ /ARRAY/;
 }
 
 # Data::Dumper
