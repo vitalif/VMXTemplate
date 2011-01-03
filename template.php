@@ -841,6 +841,10 @@ $iset";
     function function_addslashes($e)            { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
     function function_q($e)                     { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
 
+    /* экранирование кавычек в SQL- или CSV- стиле (кавычка " превращается в двойную кавычку "") */
+    function function_sq($e)                    { return "str_replace('\"','\"\"',$e)"; }
+    function function_sql_quote($e)             { return "str_replace('\"','\"\"',$e)"; }
+
     /* преобразование символов <>&'" в HTML-сущности &lt; &gt; &amp; &apos; &quot; */
     function function_htmlspecialchars($e)      { return "htmlspecialchars($e,ENT_QUOTES)"; }
     function function_html($e)                  { return "htmlspecialchars($e,ENT_QUOTES)"; }
