@@ -789,6 +789,18 @@ $iset";
     function function_lt($a,$b) { return "(($a) < ($b))"; }
     function function_ge($a,$b) { return "(($a) >= ($b))"; }
     function function_le($a,$b) { return "(($a) <= ($b))"; }
+    function function_seq($a,$b) { return "((\"$a\") == (\"$b\"))"; }
+    function function_sne($a,$b) { return "((\"$a\") != (\"$b\"))"; }
+    function function_sgt($a,$b) { return "((\"$a\") >  (\"$b\"))"; }
+    function function_slt($a,$b) { return "((\"$a\") <  (\"$b\"))"; }
+    function function_sge($a,$b) { return "((\"$a\") >= (\"$b\"))"; }
+    function function_sle($a,$b) { return "((\"$a\") <= (\"$b\"))"; }
+    function function_neq($a,$b) { return "((0+$a) == ($b))"; }
+    function function_nne($a,$b) { return "((0+$a) != ($b))"; }
+    function function_ngt($a,$b) { return "((0+$a) > ($b))"; }
+    function function_nlt($a,$b) { return "((0+$a) < ($b))"; }
+    function function_nge($a,$b) { return "((0+$a) >= ($b))"; }
+    function function_nle($a,$b) { return "((0+$a) <= ($b))"; }
     function function_yesno($a,$b,$c) { return "(($a) ? ($b) : ($c))"; }
 
     /* нижний регистр */
@@ -819,6 +831,9 @@ $iset";
 
     /* длина строки */
     function function_strlen($s) { return "mb_strlen($s)"; }
+
+    /* убиение пробелов в начале и конце */
+    function function_trim($s) { return "trim($s)"; }
 
     /* подстрока */
     function function_substr($s, $start, $length = NULL)
@@ -867,6 +882,9 @@ $iset";
     /* объединение всех скаляров и всех элементов аргументов-массивов */
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
     function function_implode() { $a = func_get_args(); return self::fearr("'join'", $a); }
+
+    /* сортировка массива */
+    function function_sort()    { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
 
     /* подставляет на места $1, $2 и т.п. в строке аргументы */
     function function_subst()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_subst'", $a); }
@@ -1020,6 +1038,13 @@ $iset";
         $args = func_get_args();
         $str = preg_replace_callback('/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is', create_function('$m', 'return $args[$m[2]?$m[2]:$m[3]];'), $str);
         return $str;
+    }
+
+    // выполняет сортировку и возвращает сортированный массив
+    static function exec_sort($array)
+    {
+        sort($array);
+        return $array;
     }
 
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
