@@ -5,7 +5,7 @@
 # А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
-# Author: Vitaliy Filippov, 2006-2010
+# Author: Vitaliy Filippov, 2006-2011
 
 package VMX::Template;
 
@@ -16,6 +16,7 @@ use Hash::Merge;
 use POSIX;
 
 my $mtimes = {};            # время изменения файлов
+my $ltimes = {};            # время загрузки файлов
 my $uncompiled_code = {};   # нескомпилированный код
 my $compiled_code = {};     # скомпилированный код (sub'ы)
 
@@ -28,9 +29,10 @@ sub new
     my $self =
     {
         root            => '.',    # каталог с шаблонами
-        reload          => 1,      # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
-        wrapper         => undef,  # фильтр, вызываемый перед выдачей результата parse
-        tpldata         => {},     # сюда будут сохранены: данные
+        reload          => 2,      # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
+                                   # если >0, то шаблоны будут перечитываться с диска не чаще чем раз в reload секунд
+        wrapper         => undef,  # глобальный фильтр, вызываемый перед выдачей результата parse
+        tpldata         => {},     # сюда будут сохранены данные
         cache_dir       => undef,  # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
         use_utf8        => undef,  # шаблоны в UTF-8 и с флагом UTF-8
         begin_code      => '<!--', # начало кода
@@ -61,6 +63,7 @@ sub clear_memory_cache
     %$compiled_code = ();
     %$uncompiled_code = ();
     %$mtimes = ();
+    %$ltimes = ();
     return $self;
 }
 
@@ -74,34 +77,43 @@ sub vars
     return $t;
 }
 
-# Функция загружает, компилирует и возвращает результат для хэндла
-# $page = $obj->parse( 'file/name.tpl' );
-# Если имя файла - ссылка на скаляр, значит, это ссылка на код шаблона
-# $page = $obj->parse( \ 'inlined template {CODE}' );
+# Функция загружает, компилирует и возвращает результат
+# обработки шаблона или функции шаблона.
+# $page = $obj->parse(
+#     'file/name.tpl' или (FALSE, 'template {CODE}')
+#     [, 'function']
+#     [, { tpldata => 'values' } ]
+# );
+# FALSE, 'код' - передача не имени файла, а кода.
+# Менее рекомендовано, но возможно.
 sub parse
 {
     my $self = shift;
-    my ($fn) = @_;
+    my $fn = shift || undef;
     my $textref;
-    unless (ref $fn)
+    if (!$fn)
     {
-        die __PACKAGE__.": empty filename '$fn'" unless length $fn;
+        $textref = \( shift );
+        die __PACKAGE__.": empty filename and no inline code" if !length $$textref;
+    }
+    my $function = shift if $_[0] && !ref $_[0];
+    my $vars = shift if ref $_[0];
+    if ($fn)
+    {
         $fn = $self->{root}.$fn if $fn !~ m!^/!so;
         die __PACKAGE__.": couldn't load template file '$fn'"
             unless $textref = $self->loadfile($fn);
     }
-    else
-    {
-        length $$fn || return $$fn;
-        $textref = $fn;
-        $fn = undef;
-    }
     my $str = $self->compile($textref, $fn);
-    if (ref $str)
+    $function ||= '_main';
+    # FIXME если в следующей строке возникает ошибка, нужно сбросить файловый кэш
+    $str = $str->{$function};
+    # иначе (если не coderef), то шаблон - не шаблон, а тупо константа
+    if (ref $str eq 'CODE')
     {
-        # если не coderef, то шаблон - не шаблон, а тупо константа
+        local $self->{tpldata} = $vars if $vars;
         $str = eval { &$str($self) };
-        die __PACKAGE__.": error running '$fn': $@" if $@;
+        die __PACKAGE__.": error running '$fn".'::'."$function': $@" if $@;
     }
     &{$self->{wrapper}}($str) if $self->{wrapper};
     return $str;
@@ -115,7 +127,8 @@ sub loadfile
     my ($fn) = @_;
     my $load = 0;
     my $mtime;
-    if (!$uncompiled_code->{$fn} || $self->{reload})
+    if (!$uncompiled_code->{$fn} || $self->{reload} &&
+        $ltimes->{$fn}+$self->{reload} > time)
     {
         $mtime = [ stat($fn) ] -> [ 9 ];
         $load = 1 if !$uncompiled_code->{$fn} || $mtime > $mtimes->{$fn};
@@ -139,6 +152,7 @@ sub loadfile
             if $uncompiled_code->{$fn};
         $uncompiled_code->{$fn} = \$text;
         $mtimes->{$fn} = $mtime;
+        $ltimes->{$fn} = time;
     }
     return $uncompiled_code->{$fn};
 }
@@ -192,13 +206,17 @@ sub compile
         $_->[5] = length $_->[1];
     }
 
+    # FIXME в PHP-версии используется отдельный объект $st
+    # вероятно, это более корректно, однако конкретных претензий
+    # к тому, чтобы хранить текущее состояние компиляции прямо
+    # в полях объекта себя тоже не заметно.
     $self->{blocks} = [];
     $self->{in} = [];
-    $self->{included} = {};
-    $self->{in_set} = 0;
+    $self->{functions} = [];
+    $self->{output_position} = 0;
 
     # ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
-    my ($r, $pp, $line, $b, $i, $e, $f, $frag, @p) = ('', 0, 0);
+    my ($r, $pp, $line, $b, $i, $e, $f, $frag, $x_pp, $l, $nl, @p) = ('', 0, 0);
     while ($code && $pp < length $code)
     {
         @p = map { index $code, $_->[0], $pp } @blk;
@@ -219,19 +237,39 @@ sub compile
             {
                 $frag = substr $code, $p[$b]+$blk[$b][4], $e-$p[$b]-$blk[$b][4];
                 $f = $blk[$b][2];
-                $frag = $self->$f($frag);
+                if ($frag =~ /\S/so)
+                {
+                    # Некоторые инструкции хотят видеть позицию в выходном потоке.
+                    # Например, FUNCTION и END. Поэтому преобразуем текст
+                    # до вызова обработчика.
+                    $x_pp = $pp - $blk[$b][4];
+                    $l = 0;
+                    if ($x_pp > 0)
+                    {
+                        $x_pp = substr($code, 0, $x_pp);
+                        $nl = $x_pp =~ tr/\n/\n/;
+                        $x_pp =~ s/([\\\'])/\\$1/gso;
+                        # съедаем перевод строки, если надо
+                        $blk[$b][5] and $x_pp =~ s/\r?\n\r?[ \t]*$//so;
+                        $l += 8 if $l = length $x_pp;
+                    }
+                    # записываем позицию
+                    $self->{output_position} = $l + length $r;
+                    $frag = $self->$f($frag);
+                }
+                else
+                {
+                    $frag = undef;
+                }
                 if (defined $frag)
                 {
                     # есть инструкция
                     $pp -= $blk[$b][4];
                     if ($pp > 0)
                     {
-                        $pp = substr $code, 0, $pp, '';
-                        $line += $pp =~ tr/\n/\n/;
-                        $pp =~ s/([\\\'])/\\$1/gso;
-                        # съедаем перевод строки, если надо
-                        $blk[$b][5] && $pp =~ s/\r?\n\r?[ \t]*$//so;
-                        $r .= "\$t.='$pp';\n" if length $pp;
+                        substr $code, 0, $pp, '';
+                        $line += $nl;
+                        $r .= "\$t.='$x_pp';\n" if length $x_pp;
                         $pp = 0;
                     }
                     $r .= "#line $line \"$fn\"\n";
@@ -258,14 +296,35 @@ sub compile
         }
     }
 
-    # дописываем начало и конец кода
-    $code = ($self->{use_utf8} ? "\nuse utf8;\n" : "") . ($pp < 0 ? $r :
-'sub {
-my $self = shift;
-my $t = "";
-' . $r . '
-return $t;
-}');
+    # перемещаем функции в конец кода
+    $code = '';
+    while ($f = pop @{$self->{functions}})
+    {
+        $f = substr($r, $f->[0], $f->[1]-$f->[0], '');
+        # проверяем, а не константу ли она возвращает?
+        $e = $f;
+        $e =~ s/^.*?sub {\nmy \$self = shift;\n/my \$self = 0;\n/so;
+        $e =~ s/},\n$//so;
+        $e = eval $e;
+        if (!$@)
+        {
+            # константа, от $self никак не зависит
+            $e =~ s/([\\\'])/\\$1/gso;
+            $f =~ s/^([^=]*=>).*$/$1 $e,/so;
+        }
+        $code .= $f;
+    }
+
+    # основной результат заворачиваем в функцию
+    # (если $pp = 0, это просто текстовая константа)
+    $r = ($pp < 0 ? $r : "sub {
+my \$self = shift;
+my \$t = '';
+$r
+return \$t;
+}\n");
+    # и заворачиваем всё это в хеш функций шаблона
+    $code = ($self->{use_utf8} ? "use utf8;\n" : "") . "{ _main => $r, $code }\n";
     undef $r;
 
     # кэшируем код на диск
@@ -340,10 +399,9 @@ sub compile_code_fragment_end
         warn uc($kw)." $t after ".uc($w)." $id";
         return undef;
     }
-    pop @{$self->{in}};
+    my $in = pop @{$self->{in}};
     if ($w eq 'set')
     {
-        $self->{in_set}--;
         return "return \$t;\n};\n";
     }
     elsif ($w eq 'begin' || $w eq 'for')
@@ -351,11 +409,17 @@ sub compile_code_fragment_end
         $w eq 'begin' && pop @{$self->{blocks}};
         return "}}\n";
     }
+    elsif ($w eq 'function')
+    {
+        my $s = "return \$t;\n},\n";
+        $self->{$_} = $in->[2]->[$_] for 'blocks', 'in';
+        push @{$self->{functions}->[$#{$self->{functions}}]}, $self->{output_position} + length $s;
+        return $s;
+    }
     return "}\n";
 }
 
 # SET varref ... END
-# FUNCTION varref ... END
 # SET varref = expression
 sub compile_code_fragment_set
 {
@@ -374,12 +438,61 @@ sub compile_code_fragment_set
     else
     {
         push @{$self->{in}}, [ 'set', $1 ];
-        $self->{in_set}++;
     }
     my $ekw = lc($kw) eq 'function' ? 'sub { my $self = shift; local $self->{tpldata}->{args} = [ @_ ];' : 'eval {';
     return $self->varref($1) . ' = ' . ($e || $ekw . ' my $t = ""') . ";\n";
 }
-*compile_code_fragment_function = *compile_code_fragment_set;
+
+# FUNCTION|BLOCK|MACRO name ... END
+# FUNCTION|BLOCK|MACRO name = expression
+sub compile_code_fragment_function
+{
+    my ($self, $kw, $t) = @_;
+    return undef if $t !~ /^([^=]*)(=\s*(.*))?/is;
+    my $n = $1;
+    my $e = $3;
+    if ($n !~ /^[^\W\d]\w*$/ || $n eq '_main')
+    {
+        $self->error("Template function names:
+* must start with a letter
+* must consist of alphanumeric characters
+* must not be equal to '_main'
+I see 'FUNCTION $n' instead.");
+        return undef;
+    }
+    if ($self->{functions} && @{$self->{functions}->{$#{$self->{functions}}}} == 1)
+    {
+        $self->error("Template functions cannot be nested");
+        return undef;
+    }
+    my $s = "$n => sub {\nmy \$self = shift;\n";
+    if (length $e)
+    {
+        my $r = $self->compile_expression($e);
+        if (!defined $r)
+        {
+            $self->error("Invalid expression in $kw: ($e)");
+            return undef;
+        }
+        $s .= "return $r;\n},\n";
+        push @{$self->{functions}}, [
+            $self->{output_position},
+            $self->{output_position} + length $s
+        ];
+        return $s;
+    }
+    # блоки сохраняются и сбрасываются
+    $self->{in} = [ [
+        'function', $n, { in => $self->{in}, blocks => $self->{blocks} }
+    ] ];
+    $self->{blocks} = [];
+    # запоминаем положение в выходном потоке
+    # для последующего разбиения его на функции
+    push @{$self->{functions}}, [ $self->{output_position} ];
+    return $s . "my \$t = '';\n";
+}
+*compile_code_fragment_block = *compile_code_fragment_function;
+*compile_code_fragment_macro = *compile_code_fragment_function;
 
 # INCLUDE template.tpl
 # legacy, в новом варианте можно использовать с кавычками, и это уже идёт как функция
@@ -672,49 +785,80 @@ sub fearr
     return $e;
 }
 
-# функции
+#############
+## ФУНКЦИИ ##
+#############
+
+## Числа / логические значения
+
+# логические операции
 sub function_or      { fmop('||', @_) }
 sub function_and     { fmop('&&', @_) }
+sub function_not     { "!($_[1])" }
+# арифметические операции
 sub function_add     { fmop('+', @_) }
 sub function_sub     { fmop('-', @_) }
 sub function_mul     { fmop('*', @_) }
 sub function_div     { fmop('/', @_) }
 sub function_mod     { fmop('%', @_) }
-sub function_concat  { fmop('.', @_) }
+# логарифм
 sub function_log     { "log($_[1])" }
-sub function_count   { "ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0" }
-sub function_not     { "!($_[1])" }
+# чётный, нечётный
 sub function_even    { "!(($_[1]) & 1)" }
 sub function_odd     { "(($_[1]) & 1)" }
-sub function_int     { "int($_[1])" }                   *function_i = *function_int;
+# приведение к целому числу
+sub function_int     { "int($_[1])" }                   *function_i = *function_int;    *function_intval = *function_int;
+# сравнения: = != > < >= <= (аргументов как строк)
 sub function_eq      { "(($_[1]) eq ($_[2]))" }         *function_seq = *function_eq;
 sub function_ne      { "(($_[1]) ne ($_[2]))" }         *function_sne = *function_ne;
 sub function_gt      { "(($_[1]) gt ($_[2]))" }         *function_sgt = *function_gt;
 sub function_lt      { "(($_[1]) lt ($_[2]))" }         *function_slt = *function_lt;
 sub function_ge      { "(($_[1]) ge ($_[2]))" }         *function_sge = *function_ge;
 sub function_le      { "(($_[1]) le ($_[2]))" }         *function_sle = *function_le;
+# сравнения: = != > < >= <= (аргументов как чисел)
 sub function_neq     { "(($_[1]) == ($_[2]))" }
 sub function_nne     { "(($_[1]) != ($_[2]))" }
 sub function_ngt     { "(($_[1]) >  ($_[2]))" }
 sub function_nlt     { "(($_[1]) <  ($_[2]))" }
 sub function_nge     { "(($_[1]) >= ($_[2]))" }
 sub function_nle     { "(($_[1]) <= ($_[2]))" }
+# тернарный оператор $1 ? $2 : $3
 sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
+
+## Строки
+
+# конкатенация строк
+sub function_concat  { fmop('.', @_) }
+# нижний и верхний регистр
 sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
+# экранирование символов, специальных в регулярном выражении
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
+# замена регэкспов
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
+# замена подстрок (а не регэкспов)
 sub function_str_replace { "exec_str_replace($_[1], $_[2], $_[3])" }
+# длина строки в символах
 sub function_strlen  { "strlen($_[1])" }
+# подстрока
 sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substring = *function_substr;
+# обрезать пробелы из начала и конца строки
 sub function_trim    { shift; "trim($_[0])" }
-sub function_split   { "split($_[1], $_[2], $_[3])" }
+# разделить строку $2 по регулярному выражению $1 опционально с лимитом $3
+sub function_split   { shift; "split(".join(",", @_).")" }
+# экранировать двойные и одинарные кавычки в стиле C (добавить \)
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote; *function_addslashes = *function_q;
+# экранировать двойные кавычки в стиле SQL/CSV (удвоением)
 sub function_sq      { "sql_quote($_[1])" }             *function_sql_quote = *function_sq;
+# заменить символы & < > " ' на HTML-сущности
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
+# заменить \n на <br />
 sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
+# кодировать символы в стиле URL
 sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
+# удалить все HTML-теги
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
+# оставить только "безопасные" HTML-теги
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
 # объединяет не просто скаляры, а также все элементы массивов
 sub function_join    { fearr('join', 1, @_) }           *function_implode = *function_join;
@@ -722,10 +866,11 @@ sub function_join    { fearr('join', 1, @_) }           *function_implode = *fun
 sub function_subst   { fearr('exec_subst', 1, @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', 1, @_) }
-# json-кодирование
-sub function_json    { "encode_json($_[1])" }
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
 sub function_strlimit{ "strlimit($_[1], $_[2])" }
+
+## Массивы и хеши
+
 # создание хеша
 sub function_hash    { shift; "{" . join(",", @_) . "}"; }
 # ключи хеша
@@ -736,6 +881,8 @@ sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
 sub function_each    { "exec_each($_[1])" }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
+# количество элементов _массива_ (не хеша)
+sub function_count   { "(ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0)" }
 # диапазон значений
 sub function_range   { "($_[1] .. $_[2])" }
 # проверка, аргумент - массив или не массив?
@@ -751,21 +898,26 @@ sub function_get     { shift; "exec_get(" . join(",", @_) . ")"; }
 sub function_hget    { "($_[1])->\{$_[2]}" }
 # для массива
 sub function_aget    { "($_[1])->\[$_[2]]" }
-
+# слияние массивов в один большой массив
 sub function_array_merge { shift; '[@{'.join('},@{',@_).'}]' }
+# вынуть первый элемент массива
 sub function_shift   { "shift(\@{$_[1]})"; }
+# вынуть последний элемент массива
 sub function_pop     { "pop(\@{$_[1]})"; }
+# вставить как первый элемент массива
 sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
+# вставить как последний элемент массива
 sub function_push    { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
 
 # вычисление выражения и игнорирование результата, как в JS
 sub function_void    { "scalar(($_[1]), '')" }
-
 # дамп переменной
 sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }          *function_var_dump = *function_dump;
+# json-кодирование
+sub function_json    { "encode_json($_[1])" }
 
 # включение другого файла
-sub function_include { shift; "\$self->parse($_[0])"; }                     *function_parse = *function_include;
+sub function_include { shift; "\$self->parse(" . join(",", @_) . ")"; }     *function_process = *function_include;    *function_parse = *function_include;
 
 # map()
 sub function_map
@@ -776,6 +928,17 @@ sub function_map
     $def = "\Q$def\E";
     $f =~ s/$def/\$_/giso;
     return '[ '.fearr('map { '.$f.' }', 0, $self, @_).' ]';
+}
+
+# strftime
+sub function_strftime
+{
+    my $self = shift;
+    my $e = $_[1];
+    $e = "($e).' '.($_[2])" if $_[2];
+    $e = "VMX::Common::estrftime($_[0], localtime(timestamp($e)))";
+    $e = "utf8on($e)" if $self->{use_utf8};
+    return $e;
 }
 
 # подмассив
@@ -809,17 +972,6 @@ sub exec_get
     defined $_[1] && ref $_[0] || return $_[0];
     $_[0] =~ /ARRAY/ && return $_[0]->[$_[1]];
     return $_[0]->{$_[1]};
-}
-
-# strftime
-sub function_strftime
-{
-    my $self = shift;
-    my $e = $_[1];
-    $e = "($e).' '.($_[2])" if $_[2];
-    $e = "VMX::Common::estrftime($_[0], localtime(timestamp($e)))";
-    $e = "utf8on($e)" if $self->{use_utf8};
-    return $e;
 }
 
 # выполняет подстановку function_subst
@@ -973,10 +1125,6 @@ __END__
 =head2 LC=LOWER=LOWERCASE, UC=UPPER=UPPERCASE
 
 Нижний и верхний регистр.
-
-=head2 L=TRANSLATE, LZ=TRANSLATE_NULL
-
-Контекстный перевод и он же либо пустое значение.
 
 =head2 S=HTML, T=STRIP, H=STRIP_UNSAFE
 
