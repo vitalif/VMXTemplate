@@ -382,6 +382,7 @@ sub compile_code_fragment_set
 *compile_code_fragment_function = *compile_code_fragment_set;
 
 # INCLUDE template.tpl
+# legacy, в новом варианте можно использовать с кавычками, и это уже идёт как функция
 sub compile_code_fragment_include
 {
     my ($self, $kw, $t) = @_;
