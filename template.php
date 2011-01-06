@@ -8,8 +8,9 @@ class TemplateState
 {
     var $blocks = array();
     var $in = array();
-    var $included = array();
-    var $in_set = 0;
+    var $functions = array();
+    var $output_position = 0;
+    var $func_ns = ''; // = md5(имя файла шаблона или текст шаблона)
 }
 
 define('TS_UNIX',     0);
@@ -34,7 +35,6 @@ class Template
     var $wrapper       = false;   // фильтр, вызываемый перед выдачей результата parse
     var $tpldata       = array(); // сюда будут сохранены: данные
     var $cache_dir     = false;   // необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
-    var $use_utf8      = true;    // шаблоны в UTF-8 и с флагом UTF-8
     var $begin_code    = '<!--';  // начало кода
     var $end_code      = '-->';   // конец кода
     var $eat_code_line = true;    // съедать "лишний" перевод строки, если в строке только инструкция?
@@ -44,6 +44,11 @@ class Template
     var $raise_error   = false;   // говорить die() при ошибках в шаблонах
     var $print_error   = false;   // печатать фатальные ошибки
     var $compiletime_functions = array();   // дополнительные функции времени компиляции
+    var $parent        = NULL;    // сюда сохраняется объект, от которого отпочкован объект класса конкретного шаблона
+                                  // компилятор всегда дёргается в рамках объекта Template, а не объекта конкретного шаблона
+
+    var $failed        = array(); // сюда сохраняются имена файлов, загрузка которых не удалась,
+                                  // чтобы не долбиться в один и тот же кривой шаблон много раз за запрос
 
     function __construct($args)
     {
@@ -127,21 +132,45 @@ class Template
             eaccelerator_put($key, $value);
     }
 
-    // Функция загружает, компилирует и возвращает результат для хэндла
-    // $page = $obj->parse( 'file/name.tpl' );
-    // $page = $obj->parse( 'template {CODE}', true );
-    function parse($fn, $inline = false)
+    // Функция загружает, компилирует и возвращает результат
+    // обработки шаблона или функции шаблона.
+    // $page = $obj->parse(
+    //     'file/name.tpl' или NULL, 'template {CODE}'
+    //     [, 'function']
+    //     [, array(vars => $values) ]
+    // );
+    // NULL, 'код' - передача не имени файла, а кода.
+    // Менее рекомендовано, но возможно.
+    function parse($fn, $inline = NULL, $func = NULL, $vars = NULL)
     {
-        $this->errors = array();
-        if ($inline)
+        if ($this->parent)
         {
-            $text = $fn;
+            // вызван из шаблона
+            // разрешаем синтаксис <!-- process '::function' -->
+            if (substr($fn, 0, 2) == '::')
+            {
+                $vars = $inline;
+                $inline = substr($fn, 2);
+                $fn = self::$template_filename;
+            }
+            return $this->parent->parse($fn, $inline, $func, $vars);
+        }
+        $this->errors = array();
+        if (!strlen($fn))
+        {
+            $text = $inline;
             $fn = '';
             if (!$text)
                 return '';
+            $class = 'Template_X'.md5($text);
+            if (!($file = $this->compile($text, $fn)))
+                return NULL;
+            include $file;
         }
         else
         {
+            $vars = $func;
+            $func = $inline;
             if (!strlen($fn))
             {
                 $this->error("Template: empty filename '$fn'", true);
@@ -149,19 +178,49 @@ class Template
             }
             if (substr($fn, 0, 1) != '/')
                 $fn = $this->root.$fn;
-            if (!($text = $this->loadfile($fn)))
+            /* Пока что, если класс существует - просто используем его.
+               Однако если внезапно потребуется перезагружать шаблоны
+               в рамках ОДНОГО запроса - надо будет добавить stat()... FIXME?
+               Зато можно не бояться многократно вызывать какой-нибудь блок. */
+            $class = 'Template_'.md5($fn);
+            if (!class_exists($class))
             {
-                $this->error("Template: couldn't load template file '$fn'", true);
-                return NULL;
+                if ($this->failed[$fn])
+                {
+                    /* Если один раз за запрос загрузить не смогли,
+                       то больше не пытаемся */
+                    return NULL;
+                }
+                if (!($text = $this->loadfile($fn)))
+                {
+                    $this->error("Template: couldn't load template file '$fn'", true);
+                    $this->failed[$fn] = true;
+                    return NULL;
+                }
+                if (!($file = $this->compile($text, $fn)))
+                {
+                    $this->failed[$fn] = true;
+                    return NULL;
+                }
+                include $file;
             }
         }
-        if (!($file = $this->compile($text, $fn)))
-            return NULL;
-        $stack = array();
-        include $file;
-        $w = $this->wrapper;
-        if (is_callable($w))
-            $w(&$t);
+        if (!$func)
+            $func = '_main';
+        elseif (is_array($func))
+            $vars = $func;
+        $func = "__$func";
+        $tpl = new $class();
+        if ($vars)
+            $tpl->tpldata = &$vars;
+        $t = $tpl->$func();
+        /* FIXME Кусочек legacy, но тоже пока оставлен */
+        if ($this->wrapper)
+        {
+            $w = $this->wrapper;
+            if (is_callable($w))
+                $w(&$t);
+        }
         return $t;
     }
 
@@ -232,6 +291,7 @@ class Template
         }
 
         $st = new TemplateState();
+        $st->func_ns = $fn ? md5($fn) : 'X' . $md5;
 
         // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
         $r = '';
@@ -259,23 +319,38 @@ class Template
                     $f = $blk[$b][2];
                     $t = $frag;
                     if (!preg_match('/^\s*\n/s', $frag))
+                    {
+                        /* Некоторые инструкции хотят видеть позицию в выходном потоке.
+                           Например, FUNCTION и END. Поэтому преобразуем текст
+                           до вызова обработчика. */
+                        $x_pp = $pp - $blk[$b][4];
+                        $l = 0;
+                        if ($x_pp > 0)
+                        {
+                            $text = substr($code, 0, $x_pp);
+                            $text = addcslashes($text, '\\\'');
+                            // съедаем перевод строки, если надо
+                            if ($blk[$b][5])
+                                $text = preg_replace('/\r?\n\r?[ \t]*$/s', '', $text);
+                            if ($l = strlen($text))
+                                $l += 8;
+                        }
+                        // записываем позицию
+                        $st->output_position = $l + strlen($r);
+                        // вызываем обработчик
                         $frag = $this->$f($st, $frag);
+                    }
                     else
                         $frag = NULL;
                     if (!is_null($frag))
                     {
                         // есть инструкция
-                        $pp -= $blk[$b][4];
+                        $pp = $x_pp;
                         if ($pp > 0)
                         {
-                            $text = substr($code, 0, $pp);
-                            $code = substr($code, $pp);
-                            $text = addcslashes($text, '\\\'');
-                            // съедаем перевод строки, если надо
-                            if ($blk[$b][5])
-                                $text = preg_replace('/\r?\n\r?[ \t]*$/s', '', $text);
                             if (strlen($text))
-                                $r .= "\$t.='$text';\n";
+                                $r .= "\$t.='$text';\n"; // длина как раз этого = $l+8
+                            $code = substr($code, $pp);
                             $pp = 0;
                         }
                         $r .= $frag;
@@ -292,14 +367,39 @@ class Template
             }
         }
 
-        // дописываем начало и конец кода
+        // перемещаем функции в конец кода
+        $code = '';
+        for ($i = count($st->functions)-1; $i >= 0; $i--)
+        {
+            $f = $st->functions[$i];
+            $f = substr_replace($r, '', $f[0], $f[1]-$f[0]);
+            $code .= $f;
+        }
+
+        // заворачиваем основной код в _main()
+        $rfn = addcslashes($fn, '\\\'');
         if (!$fn)
         {
             $c = debug_backtrace();
             $c = $c[2];
             $fn = 'inline code in '.$c['class'].$c['type'].$c['function'].'() at '.$c['file'].':'.$c['line'];
         }
-        $code = "<?php // $fn\n\$t = '';\n$r\n";
+        $code = "<?php // $fn
+class Template_{$st->func_ns} extends ".__CLASS__." {
+static \$template_filename = '$rfn';
+function __construct(\$t) {
+\$this->tpldata = &\$t->tpldata;
+\$this->parent = &\$t;
+}
+function ___main() {
+\$stack = array();
+\$t = '';
+$r
+return \$t;
+}
+$code
+}
+";
         $r = '';
 
         // записываем в файл
@@ -350,7 +450,7 @@ class Template
     {
         if (!count($st->in))
         {
-            $this->error("END $t without BEGIN, IF or SET");
+            $this->error("END $t without begin directive");
             return NULL;
         }
         $in = array_pop($st->in);
@@ -365,13 +465,15 @@ class Template
         }
         if ($w == 'set')
         {
-            $st->in_set--;
             return $this->varref($in[1]) . " = \$t;\n\$t = array_pop(\$stack);\n";
         }
         elseif ($w == 'function')
         {
-            $st->in_set--;
-            return "EOF);\n";
+            $s = "return \$t;\n}\n";
+            foreach (array('blocks', 'in') as $k))
+                $st->$k = $in[2][$k];
+            $st->functions[count($st->functions)-1][] = $st->output_position+strlen($s);
+            return $s;
         }
         elseif ($w == 'begin' || $w == 'for')
         {
@@ -389,7 +491,6 @@ $v = array_pop(\$stack);
     }
 
     // SET varref ... END
-    // FUNCTION varref ... END
     // SET varref = expression
     function compile_code_fragment_set($st, $kw, $t)
     {
@@ -397,11 +498,6 @@ $v = array_pop(\$stack);
             return NULL;
         if (strlen($m[3]))
         {
-            if ($kw != 'set')
-            {
-                $this->error("Only SET is allowed for inline expressions, but '".strtoupper($kw)."' given (expression = $m[3])");
-                return NULL;
-            }
             $e = $this->compile_expression($m[3]);
             if ($e === NULL)
             {
@@ -411,24 +507,75 @@ $v = array_pop(\$stack);
             return $this->varref($m[1]) . ' = ' . $e . ";\n";
         }
         $st->in[] = array($kw, $m[1]);
-        $st->in_set++;
-        /* FIXME не работает в PHP < 5.3
-           да и вообще-то не очень хорош механизм функций,
-           ибо не кэшируется */
-        if ($kw == 'function')
-            return $this->varref($m[1]) . " = create_function(<<<'EOF'\n";
         return "\$stack[] = \$t;\n\$t = '';\n";
     }
+
+    // FUNCTION|BLOCK|MACRO name ... END
+    // FUNCTION|BLOCK|MACRO name = expression
     function compile_code_fragment_function($st, $kw, $t)
     {
-        return $this->compile_code_fragment_set($st, $kw, $t);
+        if (!preg_match('/^([^=]*)(=\s*(.*))?/is', $t, $m))
+            return NULL;
+        if (!preg_match('/^[^\W\d]\w*$/', $m[1]))
+        {
+            $this->error("Template function names:
+* must start with a letter
+* must consist of alphanumeric characters
+* must not be equal to '_main'
+I see 'FUNCTION $m[1]' instead.");
+            return NULL;
+        }
+        if ($st->functions && count($st->functions[count($st->functions)-1]) == 1)
+        {
+            $this->error("Template functions cannot be nested");
+            return NULL;
+        }
+        /* при первом обращении к шаблону все его функции,
+           включая "основную" _main, становятся членами класса шаблона.
+           при последующих они просто вызываются без дополнительных затрат.
+           слишком много функций в классе не появится, т.к. PHP всё равно
+           сбрасывается при каждом запросе. */
+        $s = "function __$m[1] () {\n";
+        if (strlen($m[3]))
+        {
+            $e = $this->compile_expression($m[3]);
+            if ($e === NULL)
+            {
+                $this->error("Invalid expression in $kw: ($m[3])");
+                return NULL;
+            }
+            $s .= "return $e;\n";
+            $st->functions[] = array(
+                $st->output_position,
+                $st->output_position+strlen($s)
+            );
+            return $s;
+        }
+        /* блоки сохраняются и сбрасываются */
+        $st->in = array(array($kw, $m[1], array('in' => $st->in, 'blocks' => $st->blocks)));
+        $st->blocks = array();
+        /* запоминаем положение в выходном потоке
+           для последующего разбиения его на функции */
+        $st->functions[] = array($st->output_position);
+        return $s . "\$stack = array();\n\$t = '';\n";
+    }
+    function compile_code_fragment_block($st, $kw, $t)
+    {
+        return $this->compile_code_fragment_function($st, $kw, $t);
+    }
+    function compile_code_fragment_macro($st, $kw, $t)
+    {
+        return $this->compile_code_fragment_function($st, $kw, $t);
     }
 
     // INCLUDE template.tpl
+    // legacy, в новом варианте можно использовать с кавычками, и это уже идёт как функция
     function compile_code_fragment_include($st, $kw, $t)
     {
-        $t = addcslashes($t, '\\\'');
-        return "\$t.=\$this->parse('$t');\n";
+        $t = preg_replace('/^[a-z0-9_\.]+$/', '\'\1\'', $t);
+        if (!is_null($t = $this->compile_expression("include $t")))
+            return "\$t.=$t;\n";
+        return NULL;
     }
 
     static function array1($a)
@@ -537,7 +684,7 @@ $iset";
             method_exists($this, $sub = "compile_code_fragment_$kw") &&
             !is_null($r = $this->$sub($st, $kw, $t)))
             return $r;
-        else if (!is_null($t = $this->compile_expression($e)))
+        elseif (!is_null($t = $this->compile_expression($e)))
             return "\$t.=$t;\n";
         return NULL;
     }
@@ -581,15 +728,29 @@ $iset";
                 $e = str_replace('$', '\\$', $e);
             return $e;
         }
-        // функция нескольких аргументов или вызов замыкания
-        else if (preg_match('/^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/is', $e, $m))
+        // функция нескольких аргументов или вызов метода объекта
+        elseif (preg_match('/^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/is', $e, $m))
         {
+            /* вызов методов по цепочке типа obj.method().other_method()
+               не поддерживаем, потому что к таким цепочкам без сохранения звеньев
+               нервно относится сам PHP */
             $f = strtolower($m[1]);
             $ct_callable = array($this, "function_$f");
-            if ($this->compiletime_functions[$f])
+            if ($m[2])
+            {
+                /* вызов метода объекта obj.method() */
+                $p = strrpos($m[1], '.');
+                $method = substr(substr_replace($m[1], '', $p+1), 1);
+                if (preg_match('/^[^a-z_]/is', $method))
+                {
+                    $this->error("Object method name cannot start with a number: '$method' of '$m[1]'");
+                    return NULL;
+                }
+                $varref = $this->varref($m[1]).'->'.$method;
+            }
+            elseif ($this->compiletime_functions[$f])
                 $ct_callable = $this->compiletime_functions[$f];
-            if ($m[2] || !is_callable($ct_callable))
-                $varref = $this->varref($m[1]);
+            /* разбираем выражения аргументов */
             $a = $m[3];
             $args = array();
             while (!is_null($e = $this->compile_expression($a, array(&$a))))
@@ -610,18 +771,20 @@ $iset";
                 return NULL;
             }
             $a = $b;
+            /* записываем остатки в $after */
             if ($a)
             {
                 if (!$after)
                     return NULL;
                 $after[0] = $a;
             }
+            /* вызов метода объекта или компиляция вызова функции */
             if ($varref)
-                return "\$this->exec_call('$f', $varref, array(".implode(",", $args)."))";
+                return "$varref(".implode(",", $args).")";
             return call_user_func_array($ct_callable, $args);
         }
         // функция одного аргумента
-        else if (preg_match('/^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/is', $e, $m))
+        elseif (preg_match('/^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/is', $e, $m))
         {
             $f = strtolower($m[1]);
             if (!method_exists($this, "function_$f"))
@@ -647,7 +810,7 @@ $iset";
             return $this->$f($arg);
         }
         // переменная плюс legacy-mode переменная/функция
-        else if (preg_match('/^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/is', $e, $m))
+        elseif (preg_match('/^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/is', $e, $m))
         {
             if ($m[3])
             {
@@ -962,6 +1125,14 @@ $iset";
     function function_void($a)          { return "self::void($a)"; }
     function void($a)                   { return ''; }
 
+    // вызов функции объекта по вычисляемому имени
+    function function_call($o, $m, $args = NULL)
+    {
+        if (!$args)
+            $args = array();
+        return "call_user_func_array(array($o, $m), $args)";
+    }
+
     /* map() */
     function function_map($f)
     {
@@ -988,15 +1159,18 @@ $iset";
         return "self::exec_dump($var)";
     }
 
-    /* включение другого файла */
-    function function_include($file)
-    {
-        return "\$this->parse($file)";
-    }
-    function function_parse($file)
-    {
-        return "\$this->parse($file)";
-    }
+    /* включение другого файла или блока:
+       process('файл')
+       process('файл', 'функция')
+       process('файл', 'функция', hash(аргументы))
+       process('::функция', hash(аргументы))
+       не рекомендуется, но возможно:
+       process('', 'код', hash(аргументы))
+       process('', 'код', 'функция', hash(аргументы))
+    */
+    function function_include() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    function function_parse()   { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    function function_process() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
 
     // дамп переменной
     static function exec_dump($var)
