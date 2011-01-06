@@ -4,13 +4,15 @@
 # Компилятор переписан уже 2 раза - сначала на regexы, потом на index() :-)
 # А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
 
+# Homepage: http://yourcmc.ru/wiki/VMX::Template
+# Author: Vitaliy Filippov, 2006-2011
+
 class TemplateState
 {
     var $blocks = array();
     var $in = array();
     var $functions = array();
     var $output_position = 0;
-    var $func_ns = ''; // = md5(имя файла шаблона или текст шаблона)
 }
 
 define('TS_UNIX',     0);
@@ -35,6 +37,7 @@ class Template
     var $wrapper       = false;   // фильтр, вызываемый перед выдачей результата parse
     var $tpldata       = array(); // сюда будут сохранены: данные
     var $cache_dir     = false;   // необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
+    var $use_utf8      = true;    // использовать кодировку UTF-8 для операций со строками
     var $begin_code    = '<!--';  // начало кода
     var $end_code      = '-->';   // конец кода
     var $eat_code_line = true;    // съедать "лишний" перевод строки, если в строке только инструкция?
@@ -291,7 +294,6 @@ class Template
         }
 
         $st = new TemplateState();
-        $st->func_ns = $fn ? md5($fn) : 'X' . $md5;
 
         // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
         $r = '';
@@ -317,7 +319,6 @@ class Template
                 {
                     $frag = substr($code, $p[$b]+$blk[$b][4], $e-$p[$b]-$blk[$b][4]);
                     $f = $blk[$b][2];
-                    $t = $frag;
                     if (!preg_match('/^\s*\n/s', $frag))
                     {
                         /* Некоторые инструкции хотят видеть позицию в выходном потоке.
@@ -384,8 +385,9 @@ class Template
             $c = $c[2];
             $fn = 'inline code in '.$c['class'].$c['type'].$c['function'].'() at '.$c['file'].':'.$c['line'];
         }
+        $func_ns = $fn ? md5($fn) : 'X' . $md5;
         $code = "<?php // $fn
-class Template_{$st->func_ns} extends ".__CLASS__." {
+class Template_$func_ns extends ".__CLASS__." {
 static \$template_filename = '$rfn';
 function __construct(\$t) {
 \$this->tpldata = &\$t->tpldata;
@@ -516,7 +518,7 @@ $v = array_pop(\$stack);
     {
         if (!preg_match('/^([^=]*)(=\s*(.*))?/is', $t, $m))
             return NULL;
-        if (!preg_match('/^[^\W\d]\w*$/', $m[1]))
+        if (!preg_match('/^[^\W\d]\w*$/', $m[1]) || $m[1] == '_main')
         {
             $this->error("Template function names:
 * must start with a letter
@@ -544,7 +546,7 @@ I see 'FUNCTION $m[1]' instead.");
                 $this->error("Invalid expression in $kw: ($m[3])");
                 return NULL;
             }
-            $s .= "return $e;\n";
+            $s .= "return $e;\n}\n";
             $st->functions[] = array(
                 $st->output_position,
                 $st->output_position+strlen($s)
@@ -552,7 +554,7 @@ I see 'FUNCTION $m[1]' instead.");
             return $s;
         }
         /* блоки сохраняются и сбрасываются */
-        $st->in = array(array($kw, $m[1], array('in' => $st->in, 'blocks' => $st->blocks)));
+        $st->in = array(array('function', $m[1], array('in' => $st->in, 'blocks' => $st->blocks)));
         $st->blocks = array();
         /* запоминаем положение в выходном потоке
            для последующего разбиения его на функции */
@@ -936,14 +938,17 @@ $iset";
     function function_mod($a,$b) { return "(($a) % ($b))"; }
     function function_concat()   { $a = func_get_args(); return $this->fmop('.', $a); }
 
-    /* логарифм, количество элементов, "не", "чётное?", "нечётное?", приведение к целому */
-    function function_log($e)   { return "log($e)"; }
-    function function_count($e) { return "self::array_count($e)"; }
-    function function_not($e)   { return "!($e)"; }
-    function function_even($e)  { return "!(($e) & 1)"; }
-    function function_odd($e)   { return "(($e) & 1)"; }
-    function function_int($e)   { return "intval($e)"; }
-    function function_i($e)     { return "intval($e)"; }
+    /* логарифм, количество элементов, "не", "чётное?", "нечётное?" */
+    function function_log($e)    { return "log($e)"; }
+    function function_count($e)  { return "self::array_count($e)"; }
+    function function_not($e)    { return "!($e)"; }
+    function function_even($e)   { return "!(($e) & 1)"; }
+    function function_odd($e)    { return "(($e) & 1)"; }
+
+    /* приведение к целому */
+    function function_int($e)    { return "intval($e)"; }
+    function function_i($e)      { return "intval($e)"; }
+    function function_intval($e) { return "intval($e)"; }
 
     /* сравнения: == != > < >= <= */
     function function_eq($a,$b) { return "(($a) == ($b))"; }
@@ -967,15 +972,15 @@ $iset";
     function function_yesno($a,$b,$c) { return "(($a) ? ($b) : ($c))"; }
 
     /* нижний регистр */
-    function function_lc($e)         { return "mb_strtolower($e)"; }
-    function function_lower($e)      { return "mb_strtolower($e)"; }
-    function function_lowercase($e)  { return "mb_strtolower($e)"; }
+    function function_lc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
+    function function_lower($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
+    function function_lowercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
 
     /* верхний регистр */
-    function function_uc($e)         { return "mb_strtoupper($e)"; }
-    function function_upper($e)      { return "mb_strtoupper($e)"; }
-    function function_uppercase($e)  { return "mb_strtoupper($e)"; }
-    function function_strlimit($s,$l){ return "self::strlimit($s,$l)"; }
+    function function_uc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
+    function function_upper($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
+    function function_uppercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
+    function function_strlimit($s,$l){ return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit($s,$l)"; }
 
     /* экранирование символов, специльных для регулярок */
     function function_requote($e)    { return "preg_quote($e)"; }
@@ -993,7 +998,7 @@ $iset";
     }
 
     /* длина строки */
-    function function_strlen($s) { return "mb_strlen($s)"; }
+    function function_strlen($s) { return ($this->use_utf8 ? "mb_" : "") . "strlen($s)"; }
 
     /* убиение пробелов в начале и конце */
     function function_trim($s) { return "trim($s)"; }
@@ -1001,11 +1006,11 @@ $iset";
     /* подстрока */
     function function_substr($s, $start, $length = NULL)
     {
-        return "mb_substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+        return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
     function function_substring($s, $start, $length = NULL)
     {
-        return "mb_substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+        return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
 
     /* разбиение строки по регулярному выражению */
@@ -1223,6 +1228,20 @@ $iset";
 
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
     static function strlimit($str, $maxlen)
+    {
+        if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
+            return $str;
+        $str = substr($str, 0, $maxlen);
+        $p = strrpos($str, ' ');
+        if (!$p || ($pt = strrpos($str, "\t")) > $p)
+            $p = $pt;
+        if ($p)
+            $str = substr($str, 0, $p);
+        return $str . '...';
+    }
+
+    // то же, но UTF-8
+    static function mb_strlimit($str, $maxlen)
     {
         if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
             return $str;
