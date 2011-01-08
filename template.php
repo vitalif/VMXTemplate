@@ -13,6 +13,7 @@ class TemplateState
     var $in = array();
     var $functions = array();
     var $output_position = 0;
+    var $input_filename = '';
 }
 
 define('TS_UNIX',     0);
@@ -267,13 +268,24 @@ class Template
     // Функция компилирует код.
     // $file = $this->compile($code, $fn);
     // require $file;
-    // print $t;
+    // --> class Template_...
     function compile($code, $fn)
     {
         $md5 = md5($code);
         $file = $this->cache_dir . 'tpl' . $md5 . '.php';
         if (file_exists($file))
             return $file;
+
+        // "имя" файла для кода не из файла
+        if (!$fn)
+        {
+            $func_ns = 'X' . $md5;
+            $c = debug_backtrace();
+            $c = $c[2];
+            $fn = '(inline template at '.$c['file'].':'.$c['line'].')';
+        }
+        else
+            $func_ns = md5($fn);
 
         // начала/концы спецстрок
         $bc = $this->begin_code;
@@ -294,6 +306,7 @@ class Template
         }
 
         $st = new TemplateState();
+        $st->input_filename = $fn;
 
         // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
         $r = '';
@@ -379,13 +392,6 @@ class Template
 
         // заворачиваем основной код в _main()
         $rfn = addcslashes($fn, '\\\'');
-        if (!$fn)
-        {
-            $c = debug_backtrace();
-            $c = $c[2];
-            $fn = 'inline code in '.$c['class'].$c['type'].$c['function'].'() at '.$c['file'].':'.$c['line'];
-        }
-        $func_ns = $fn ? md5($fn) : 'X' . $md5;
         $code = "<?php // $fn
 class Template_$func_ns extends ".__CLASS__." {
 static \$template_filename = '$rfn';
