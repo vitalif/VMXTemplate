@@ -28,24 +28,66 @@ sub new
     $class = ref ($class) || $class;
     my $self =
     {
-        root            => '.',    # каталог с шаблонами
-        reload          => 2,      # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
-                                   # если >0, то шаблоны будут перечитываться с диска не чаще чем раз в reload секунд
-        wrapper         => undef,  # глобальный фильтр, вызываемый перед выдачей результата parse
-        tpldata         => {},     # сюда будут сохранены данные
-        cache_dir       => undef,  # необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
-        use_utf8        => undef,  # шаблоны в UTF-8 и с флагом UTF-8
-        begin_code      => '<!--', # начало кода
-        end_code        => '-->',  # конец кода
-        eat_code_line   => 1,      # съедать "лишний" перевод строки, если в строке только инструкция?
-        begin_subst     => '{',    # начало подстановки (необязательно)
-        end_subst       => '}',    # конец подстановки (необязательно)
-        strict_end      => 0,      # жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
+        root            => '.',      # каталог с шаблонами
+        cache_dir       => undef,    # каталог файлового кэша, ускоряющий работу в случае частых инициализаций интерпретатора
+        reload          => 2,        # если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
+                                     # если >0, то шаблоны будут перечитываться с диска не чаще чем раз в reload секунд
+        wrapper         => undef,    # глобальный фильтр, вызываемый перед выдачей результата parse
+        use_utf8        => undef,    # шаблоны в UTF-8 и с флагом UTF-8
+        begin_code      => '<!--',   # начало кода
+        end_code        => '-->',    # конец кода
+        eat_code_line   => 1,        # съедать "лишний" перевод строки, если в строке только инструкция?
+        begin_subst     => '{',      # начало подстановки (необязательно)
+        end_subst       => '}',      # конец подстановки (необязательно)
+        strict_end      => 0,        # жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
+        raise_error     => 0,        # умирать от фатальных ошибок
+        print_error     => 1,        # включать ошибки в вывод шаблонов
+        compiletime_functions => {}, # дополнительные компилируемые функции
+
+        tpldata         => {},       # сюда будут сохранены данные
+        errors          => [],       # сюда будут сохранены ошибки компиляции
+
         @_,
     };
     $self->{cache_dir} =~ s!/*$!/!so if $self->{cache_dir};
     $self->{root} =~ s!/*$!/!so;
     bless $self, $class;
+}
+
+# Сохранить и/или напечатать потом ошибку, сдохнуть в случае raise_error
+sub error
+{
+    my $self = shift;
+    my ($e) = @_;
+    if ($self->{input_filename})
+    {
+        $e = $e." at ".$self->{input_filename}.":".$self->{input_line};
+    }
+    $e = __PACKAGE__ . "::error: $e\n";
+    push @{$self->{errors}}, $e;
+    die $e if $self->{raise_error};
+    return $self->{print_error} ? join('', @{$self->{errors}}) : undef;
+}
+
+# Текст ошибок, ещё не включённый в вывод
+sub errors
+{
+    my $self = shift;
+    return @{$self->{errors}} ? join('', @{$self->{errors}}) : undef;
+}
+
+# Сохранить и/или напечатать потом предупреждение
+sub warning
+{
+    my $self = shift;
+    my ($w) = @_;
+    if ($self->{input_filename})
+    {
+        $w = $w." at ".$self->{input_filename}.":".$self->{input_line};
+    }
+    $w = __PACKAGE__ . "::warning: $w\n";
+    push @{$self->{errors}}, $w;
+    return undef;
 }
 
 # Функция уничтожает данные шаблона
@@ -94,14 +136,14 @@ sub parse
     if (!$fn)
     {
         $textref = \( shift );
-        die __PACKAGE__.": empty filename and no inline code" if !length $$textref;
+        return $self->error("empty filename and no inline code") if !length $$textref;
     }
     my $function = shift if $_[0] && !ref $_[0];
     my $vars = shift if ref $_[0];
     if ($fn)
     {
         $fn = $self->{root}.$fn if $fn !~ m!^/!so;
-        die __PACKAGE__.": couldn't load template file '$fn'"
+        return $self->error("couldn't load template file '$fn'")
             unless $textref = $self->loadfile($fn);
     }
     my $str = $self->compile($textref, $fn);
@@ -113,7 +155,15 @@ sub parse
     {
         local $self->{tpldata} = $vars if $vars;
         $str = eval { &$str($self) };
-        die __PACKAGE__.": error running '$fn".'::'."$function': $@" if $@;
+        return $self->error("error running '$fn".'::'."$function': $@") if $@;
+    }
+    # в Perl'е мы не можем просто выплюнуть ошибку на STDOUT
+    # (возможно, ещё не отправлены HTTP-заголовки, и сами они не отправятся),
+    # print_error все ошибки сливает в текст на выход.
+    if (($self->{print_error} || $self->{raise_error}) && @{$self->{errors}})
+    {
+        substr($str, 0, 0, join("\n", @{$self->{errors}}) . "\n");
+        $self->{errors} = [];
     }
     &{$self->{wrapper}}($str) if $self->{wrapper};
     return $str;
@@ -179,7 +229,7 @@ sub compile
             $compiled_code->{$coderef} = do $h;
             if ($@)
             {
-                warn __PACKAGE__.": error compiling '$fn': [$@] in FILE: $h";
+                $self->warning("error compiling '$fn': [$@] in FILE: $h");
                 unlink $h;
             }
             else
@@ -214,9 +264,11 @@ sub compile
     $self->{in} = [];
     $self->{functions} = [];
     $self->{output_position} = 0;
+    $self->{input_line} = 0;
+    local $self->{input_filename} = $fn;
 
     # ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
-    my ($r, $pp, $line, $b, $i, $e, $f, $frag, $x_pp, $l, $nl, @p) = ('', 0, 0);
+    my ($r, $pp, $b, $i, $e, $f, $frag, $x_pp, $l, $nl, @p) = ('', 0);
     while ($code && $pp < length $code)
     {
         @p = map { index $code, $_->[0], $pp } @blk;
@@ -268,13 +320,13 @@ sub compile
                     if ($pp > 0)
                     {
                         substr $code, 0, $pp, '';
-                        $line += $nl;
+                        $self->{input_line} += $nl;
                         $r .= "\$t.='$x_pp';\n" if length $x_pp;
                         $pp = 0;
                     }
-                    $r .= "#line $line \"$fn\"\n";
+                    $r .= "#line $self->{input_line} \"$fn\"\n";
                     $r .= $frag;
-                    $line += substr($code, 0, $e+$blk[$b][5]-$p[$b], '') =~ tr/\n/\n/;
+                    $self->{input_line} += substr($code, 0, $e+$blk[$b][5]-$p[$b], '') =~ tr/\n/\n/;
                 }
             }
         }
@@ -339,13 +391,13 @@ return \$t;
         }
         else
         {
-            warn __PACKAGE__.": error caching '$fn': $! while opening $h";
+            $self->warning("error caching '$fn': $! while opening $h");
         }
     }
 
     # компилируем код
     $compiled_code->{$coderef} = eval $code;
-    die __PACKAGE__.": error compiling '$fn': [$@] in CODE:\n$code" if $@;
+    return $self->error("error compiling '$fn': [$@] in CODE:\n$code") if $@;
 
     # возвращаем ссылку на процедуру
     return $compiled_code->{$coderef};
@@ -372,7 +424,7 @@ sub compile_code_fragment_if
     my $t = $self->compile_expression($e);
     unless (defined $t)
     {
-        warn "Invalid expression in $kw: ($e)";
+        $self->warning("Invalid expression in $kw: ($e)");
         return undef;
     }
     $kw = $cf_if{$kw};
@@ -388,7 +440,7 @@ sub compile_code_fragment_end
     my ($self, $kw, $t) = @_;
     unless (@{$self->{in}})
     {
-        warn "END $t without BEGIN, IF or SET";
+        $self->warning("END $t without BEGIN, IF or SET");
         return undef;
     }
     my ($w, $id) = @{$self->{in}->[$#{$self->{in}}]};
@@ -396,7 +448,7 @@ sub compile_code_fragment_end
         ($t && ($w ne 'begin' || !$id || $id ne $t) ||
         !$t && $w eq 'begin' && $id))
     {
-        warn uc($kw)." $t after ".uc($w)." $id";
+        $self->warning(uc($kw)." $t after ".uc($w)." $id");
         return undef;
     }
     my $in = pop @{$self->{in}};
@@ -431,7 +483,7 @@ sub compile_code_fragment_set
         $e = $self->compile_expression($3);
         unless (defined $e)
         {
-            warn "Invalid expression in $kw: ($3)";
+            $self->warning("Invalid expression in $kw: ($3)");
             return undef;
         }
     }
@@ -453,7 +505,7 @@ sub compile_code_fragment_function
     my $e = $3;
     if ($n !~ /^[^\W\d]\w*$/ || $n eq '_main')
     {
-        $self->error("Template function names:
+        $self->warning("Template function names:
 * must start with a letter
 * must consist of alphanumeric characters
 * must not be equal to '_main'
@@ -462,7 +514,7 @@ I see 'FUNCTION $n' instead.");
     }
     if ($self->{functions} && @{$self->{functions}->{$#{$self->{functions}}}} == 1)
     {
-        $self->error("Template functions cannot be nested");
+        $self->warning("Template functions cannot be nested");
         return undef;
     }
     my $s = "$n => sub {\nmy \$self = shift;\n";
@@ -471,7 +523,7 @@ I see 'FUNCTION $n' instead.");
         my $r = $self->compile_expression($e);
         if (!defined $r)
         {
-            $self->error("Invalid expression in $kw: ($e)");
+            $self->warning("Invalid expression in $kw: ($e)");
             return undef;
         }
         $s .= "return $r;\n},\n";
@@ -588,7 +640,7 @@ sub compile_code_fragment
     {
         # обратная совместимость... нафига она нужна?...
         # но пока пусть останется...
-        warn "Legacy IF! used, consider changing it to IF NOT";
+        $self->warning("Legacy IF! used, consider changing it to IF NOT");
     }
     my ($kw, $t) = split /\s+/, $e, 2;
     $kw = lc $kw;
@@ -643,16 +695,43 @@ sub compile_expression
         $e =~ s/[\$\@\%]/\\$&/gso if $2;
         return $e;
     }
-    # функция нескольких аргументов или вызов замыкания из tpldata
+    # функция нескольких аргументов или вызов метода объекта
     elsif ($e =~ /^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/iso)
     {
-        my $f = lc $1;
+        # вызов методов по цепочке типа obj.method().key.other_method() не поддерживаем
+        # (в PHP-версии за просто так не сделаешь, а мы хотим быть совместимыми)
+        my $f = $1;
         my $varref;
-        if ($2 || !$self->can("function_$f"))
-        {
-            $varref = $self->varref($1);
-        }
         my $a = $3;
+        if ($2)
+        {
+            # вызов метода объекта obj.method()
+            $varref = $f;
+            $varref =~ s/^(.*)\.([^\.]*)$/$1/so;
+            $f = $2;
+            if ($f =~ /^[^a-z_]/is)
+            {
+                $self->warning("Object method name cannot start with a number: '$f' of '$varref'");
+                return undef;
+            }
+            $varref = $self->varref($varref) . '->' . $f;
+        }
+        else
+        {
+            $f = lc $f;
+            my $s;
+            unless ($s = $self->{compiletime_functions}->{$f})
+            {
+                # встроенная функция
+                unless ($s = $self->can("function_$f"))
+                {
+                    $self->warning("Unknown function: $f");
+                    return undef;
+                }
+            }
+            $f = $s;
+        }
+        # разбираем аргументы
         my @a;
         while (defined($e = $self->compile_expression($a, \$a)))
         {
@@ -663,13 +742,13 @@ sub compile_expression
             }
             elsif ($a !~ s/^\s*,//so)
             {
-                warn "Unexpected token: '$a' in $f() parameter list";
+                $self->warning("Unexpected token: '$a' in $f() parameter list");
                 return undef;
             }
         }
         if ($a !~ s/^\s*\)\s*//so)
         {
-            warn "Unexpected token: '$a' in the end of $f() parameter list";
+            $self->warning("Unexpected token: '$a' in the end of $f() parameter list");
             return undef;
         }
         if ($a)
@@ -679,12 +758,11 @@ sub compile_expression
         }
         if ($varref)
         {
-            # вызов переменной-замыкания
-            return '&{'.$varref.'}($self,'.join(',',@a).')';
+            # вызов метода объекта
+            return "$varref(".join(',', @a).")";
         }
         # встроенная функция
-        $f = "function_$f";
-        return $self->$f(@a);
+        return &$f($self, @a);
     }
     # функция одного аргумента
     elsif ($e =~ /^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/iso)
@@ -692,14 +770,14 @@ sub compile_expression
         my $f = lc $1;
         unless ($self->can("function_$f"))
         {
-            warn "Unknown function: '$f' in '$e'";
+            $self->warning("Unknown function: '$f' in '$e'");
             return undef;
         }
         my $a = $2;
         my $arg = $self->compile_expression($a, \$a);
         unless (defined $arg)
         {
-            warn "Invalid expression: ($e)";
+            $self->warning("Invalid expression: ($e)");
             return undef;
         }
         $a =~ s/^\s*//so;
@@ -713,7 +791,6 @@ sub compile_expression
     }
     # переменная плюс legacy-mode переменная/функция
     elsif ($e =~ /^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/iso)
-        #/^([a-z_][a-z0-9_]*(?:\.*[a-z0-9_]+)*\#?)(?:\/([a-z]+))?\s*(.*)$/iso)
     {
         if ($3)
         {
@@ -726,7 +803,7 @@ sub compile_expression
             my $f = lc $2;
             unless ($self->can("function_$f"))
             {
-                warn "Unknown function: '$f' called in legacy mode ($&)";
+                $self->warning("Unknown function: '$f' called in legacy mode ($&)");
                 return undef;
             }
             $f = "function_$f";
@@ -827,13 +904,17 @@ sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
 
 ## Строки
 
-# конкатенация строк
-sub function_concat  { fmop('.', @_) }
 # нижний и верхний регистр
 sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
-# экранирование символов, специальных в регулярном выражении
+# экранировать двойные и одинарные кавычки в стиле C (добавить \)
+sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote; *function_addslashes = *function_q;
+# экранировать двойные кавычки в стиле SQL/CSV (удвоением)
+sub function_sq      { "sql_quote($_[1])" }             *function_sql_quote = *function_sq;
+# экранирование символов, специальных для регулярного выражения
 sub function_requote { "requote($_[1])" }               *function_re_quote = *function_preg_quote = *function_requote;
+# кодировать символы в стиле URL
+sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
 # замена регэкспов
 sub function_replace { "resub($_[1], $_[2], $_[3])" }
 # замена подстрок (а не регэкспов)
@@ -846,26 +927,32 @@ sub function_substr  { shift; "substr(".join(",", @_).")" }    *function_substri
 sub function_trim    { shift; "trim($_[0])" }
 # разделить строку $2 по регулярному выражению $1 опционально с лимитом $3
 sub function_split   { shift; "split(".join(",", @_).")" }
-# экранировать двойные и одинарные кавычки в стиле C (добавить \)
-sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote; *function_addslashes = *function_q;
-# экранировать двойные кавычки в стиле SQL/CSV (удвоением)
-sub function_sq      { "sql_quote($_[1])" }             *function_sql_quote = *function_sq;
 # заменить символы & < > " ' на HTML-сущности
 sub function_html    { "htmlspecialchars($_[1])" }      *function_s = *function_html; *function_htmlspecialchars = *function_html;
-# заменить \n на <br />
-sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
-# кодировать символы в стиле URL
-sub function_uriquote{ shift; "URI::Escape::uri_escape(".join(",",@_).")" }            *function_uri_escape = *function_urlencode = *function_uriquote;
 # удалить все HTML-теги
 sub function_strip   { "strip_tags($_[1])" }            *function_t = *function_strip; *function_strip_tags = *function_strip;
 # оставить только "безопасные" HTML-теги
 sub function_h       { "strip_unsafe_tags($_[1])" }     *function_strip_unsafe = *function_h;
+# заменить \n на <br />
+sub function_nl2br   { "resub(qr/\\n/so, '<br />', $_[1])" }
+# конкатенация строк
+sub function_concat  { fmop('.', @_) }
 # объединяет не просто скаляры, а также все элементы массивов
 sub function_join    { fearr('join', 1, @_) }           *function_implode = *function_join;
 # подставляет на места $1, $2 и т.п. в строке аргументы
 sub function_subst   { fearr('exec_subst', 1, @_) }
 # sprintf
 sub function_sprintf { fearr('sprintf', 1, @_) }
+# strftime
+sub function_strftime
+{
+    my $self = shift;
+    my $e = $_[1];
+    $e = "($e).' '.($_[2])" if $_[2];
+    $e = "VMX::Common::estrftime($_[0], localtime(timestamp($e)))";
+    $e = "utf8on($e)" if $self->{use_utf8};
+    return $e;
+}
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
 sub function_strlimit{ "strlimit($_[1], $_[2])" }
 
@@ -881,12 +968,12 @@ sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
 sub function_each    { "exec_each($_[1])" }
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
-# количество элементов _массива_ (не хеша)
-sub function_count   { "(ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0)" }
 # диапазон значений
 sub function_range   { "($_[1] .. $_[2])" }
 # проверка, аргумент - массив или не массив?
 sub function_is_array{ "exec_is_array($_[1])" }
+# количество элементов _массива_ (не хеша)
+sub function_count   { "(ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0)" }
 # подмассив по номерам элементов
 sub function_subarray { shift; "exec_subarray(" . join(",", @_) . ")"; }    *function_array_slice = *function_subarray;
 # подмассив по кратности номеров элементов
@@ -909,15 +996,19 @@ sub function_unshift { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
 # вставить как последний элемент массива
 sub function_push    { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
 
+## Прочее
+
 # вычисление выражения и игнорирование результата, как в JS
 sub function_void    { "scalar(($_[1]), '')" }
 # дамп переменной
 sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }          *function_var_dump = *function_dump;
-# json-кодирование
+# JSON-кодирование
 sub function_json    { "encode_json($_[1])" }
 
 # включение другого файла
 sub function_include { shift; "\$self->parse(" . join(",", @_) . ")"; }     *function_process = *function_include;    *function_parse = *function_include;
+# вызов функции объекта по вычисляемому имени
+sub function_call    { shift; "exec_call(" . join(",", @_) . ")"; }
 
 # map()
 sub function_map
@@ -930,16 +1021,9 @@ sub function_map
     return '[ '.fearr('map { '.$f.' }', 0, $self, @_).' ]';
 }
 
-# strftime
-sub function_strftime
-{
-    my $self = shift;
-    my $e = $_[1];
-    $e = "($e).' '.($_[2])" if $_[2];
-    $e = "VMX::Common::estrftime($_[0], localtime(timestamp($e)))";
-    $e = "utf8on($e)" if $self->{use_utf8};
-    return $e;
-}
+########################
+## Реализации функций ##
+########################
 
 # подмассив
 # exec_subarray([], 0, 10)
@@ -1001,6 +1085,14 @@ sub exec_str_replace
     my ($s, $sub, $v) = @_;
     $v =~ s/\Q$s\E/$sub/gso;
     return $v;
+}
+
+# вызов функции $2 объекта $1 с параметрами $3 и далее
+sub exec_call
+{
+    my $o = shift;
+    my $m = shift;
+    return $o->$m(@_);
 }
 
 # Data::Dumper
