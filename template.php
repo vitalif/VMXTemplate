@@ -472,7 +472,7 @@ $code
         elseif ($w == 'function')
         {
             $s = "return \$t;\n}\n";
-            foreach (array('blocks', 'in') as $k))
+            foreach (array('blocks', 'in') as $k)
                 $st->$k = $in[2][$k];
             $st->functions[count($st->functions)-1][] = $st->output_position+strlen($s);
             return $s;
@@ -752,7 +752,7 @@ $iset";
             }
             elseif ($this->compiletime_functions[$f])
                 $ct_callable = $this->compiletime_functions[$f];
-            /* разбираем выражения аргументов */
+            /* разбираем аргументы */
             $a = $m[3];
             $args = array();
             while (!is_null($e = $this->compile_expression($a, array(&$a))))
@@ -926,50 +926,62 @@ $iset";
         return NULL;
     }
 
-    /* функции */
+    /*** Функции ***/
 
-    /* "или", "и", +, -, *, /, конкатенация */
+    /** Числа, логические операции **/
+
+    /* логические операции */
     function function_or()       { $a = func_get_args(); return "self::perlish_or(".join(",", $a).")"; }
     function function_and()      { $a = func_get_args(); return $this->fmop('&&', $a); }
+    function function_not($e)    { return "!($e)"; }
+
+    /* арифметические операции */
     function function_add()      { $a = func_get_args(); return $this->fmop('+', $a); }
     function function_sub()      { $a = func_get_args(); return $this->fmop('-', $a); }
     function function_mul()      { $a = func_get_args(); return $this->fmop('*', $a); }
     function function_div()      { $a = func_get_args(); return $this->fmop('/', $a); }
     function function_mod($a,$b) { return "(($a) % ($b))"; }
-    function function_concat()   { $a = func_get_args(); return $this->fmop('.', $a); }
 
-    /* логарифм, количество элементов, "не", "чётное?", "нечётное?" */
+    /* логарифм */
     function function_log($e)    { return "log($e)"; }
-    function function_count($e)  { return "self::array_count($e)"; }
-    function function_not($e)    { return "!($e)"; }
+
+    /* чётный, нечётный */
     function function_even($e)   { return "!(($e) & 1)"; }
     function function_odd($e)    { return "(($e) & 1)"; }
 
-    /* приведение к целому */
+    /* приведение к целому числу */
     function function_int($e)    { return "intval($e)"; }
     function function_i($e)      { return "intval($e)"; }
     function function_intval($e) { return "intval($e)"; }
 
-    /* сравнения: == != > < >= <= */
+    /* сравнения: == != > < >= <= (аргументов как строк если оба строки, иначе как чисел) */
     function function_eq($a,$b) { return "(($a) == ($b))"; }
     function function_ne($a,$b) { return "(($a) != ($b))"; }
     function function_gt($a,$b) { return "(($a) > ($b))"; }
     function function_lt($a,$b) { return "(($a) < ($b))"; }
     function function_ge($a,$b) { return "(($a) >= ($b))"; }
     function function_le($a,$b) { return "(($a) <= ($b))"; }
+
+    /* сравнения: == != > < >= <= (аргументов как строк) */
     function function_seq($a,$b) { return "((\"$a\") == (\"$b\"))"; }
     function function_sne($a,$b) { return "((\"$a\") != (\"$b\"))"; }
     function function_sgt($a,$b) { return "((\"$a\") >  (\"$b\"))"; }
     function function_slt($a,$b) { return "((\"$a\") <  (\"$b\"))"; }
     function function_sge($a,$b) { return "((\"$a\") >= (\"$b\"))"; }
     function function_sle($a,$b) { return "((\"$a\") <= (\"$b\"))"; }
+
+    /* сравнения: == != > < >= <= (аргументов как чисел) */
     function function_neq($a,$b) { return "((0+$a) == ($b))"; }
     function function_nne($a,$b) { return "((0+$a) != ($b))"; }
     function function_ngt($a,$b) { return "((0+$a) > ($b))"; }
     function function_nlt($a,$b) { return "((0+$a) < ($b))"; }
     function function_nge($a,$b) { return "((0+$a) >= ($b))"; }
     function function_nle($a,$b) { return "((0+$a) <= ($b))"; }
+
+    /* тернарный оператор $1 ? $2 : $3 */
     function function_yesno($a,$b,$c) { return "(($a) ? ($b) : ($c))"; }
+
+    /** Строки **/
 
     /* нижний регистр */
     function function_lc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
@@ -980,12 +992,25 @@ $iset";
     function function_uc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
     function function_upper($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
     function function_uppercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
-    function function_strlimit($s,$l){ return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit($s,$l)"; }
 
-    /* экранирование символов, специльных для регулярок */
+    /* экранирование кавычек */
+    function function_quote($e)      { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
+    function function_addslashes($e) { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
+    function function_q($e)          { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
+
+    /* экранирование кавычек в SQL- или CSV- стиле (кавычка " превращается в двойную кавычку "") */
+    function function_sq($e)         { return "str_replace('\"','\"\"',$e)"; }
+    function function_sql_quote($e)  { return "str_replace('\"','\"\"',$e)"; }
+
+    /* экранирование символов, специальных для регулярного выражения */
     function function_requote($e)    { return "preg_quote($e)"; }
     function function_re_quote($e)   { return "preg_quote($e)"; }
     function function_preg_quote($e) { return "preg_quote($e)"; }
+
+    /* экранирование в стиле URL */
+    function function_uriquote($e)   { return "urlencode($e)"; }
+    function function_uri_escape($e) { return "urlencode($e)"; }
+    function function_urlencode($e)  { return "urlencode($e)"; }
 
     /* замены - по регулярке и по подстроке */
     function function_replace($re, $sub, $v)
@@ -1000,9 +1025,6 @@ $iset";
     /* длина строки */
     function function_strlen($s) { return ($this->use_utf8 ? "mb_" : "") . "strlen($s)"; }
 
-    /* убиение пробелов в начале и конце */
-    function function_trim($s) { return "trim($s)"; }
-
     /* подстрока */
     function function_substr($s, $start, $length = NULL)
     {
@@ -1013,46 +1035,38 @@ $iset";
         return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
 
+    /* убиение пробелов в начале и конце */
+    function function_trim($s) { return "trim($s)"; }
+
     /* разбиение строки по регулярному выражению */
     function function_split($re, $v, $limit = -1)
     {
         return "preg_split('#'.str_replace('#','\\\\#',$re).'#s', $v, $limit)";
     }
 
-    /* экранирование кавычек */
-    function function_quote($e)                 { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
-    function function_addslashes($e)            { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
-    function function_q($e)                     { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
-
-    /* экранирование кавычек в SQL- или CSV- стиле (кавычка " превращается в двойную кавычку "") */
-    function function_sq($e)                    { return "str_replace('\"','\"\"',$e)"; }
-    function function_sql_quote($e)             { return "str_replace('\"','\"\"',$e)"; }
-
     /* преобразование символов <>&'" в HTML-сущности &lt; &gt; &amp; &apos; &quot; */
     function function_htmlspecialchars($e)      { return "htmlspecialchars($e,ENT_QUOTES)"; }
     function function_html($e)                  { return "htmlspecialchars($e,ENT_QUOTES)"; }
     function function_s($e)                     { return "htmlspecialchars($e,ENT_QUOTES)"; }
 
-    function function_nl2br($s)                 { return "nl2br($s)"; }
-
-    /* экранирование в стиле URI */
-    function function_uriquote($e)              { return "urlencode($e)"; }
-    function function_uri_escape($e)            { return "urlencode($e)"; }
-    function function_urlencode($e)             { return "urlencode($e)"; }
-
-    /* удаление всех, заданных или "небезопасных" HTML-тегов */
+    /* удаление всех или заданных тегов */
     function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
     function function_strip_tags($e, $t='')     { return "strip_tags($e".($t?",$t":"").")"; }
     function function_t($e, $t='')              { return "strip_tags($e".($t?",$t":"").")"; }
+
+    /* удаление "небезопасных" HTML-тегов */
     function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
     function function_h($e)                     { return "strip_tags($e, self::\$safe_tags)"; }
+
+    /* заменить \n на <br /> */
+    function function_nl2br($s)                 { return "nl2br($s)"; }
+
+    /* конкатенация строк */
+    function function_concat()   { $a = func_get_args(); return $this->fmop('.', $a); }
 
     /* объединение всех скаляров и всех элементов аргументов-массивов */
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
     function function_implode() { $a = func_get_args(); return self::fearr("'join'", $a); }
-
-    /* сортировка массива */
-    function function_sort()    { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
 
     /* подставляет на места $1, $2 и т.п. в строке аргументы */
     function function_subst()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_subst'", $a); }
@@ -1060,8 +1074,17 @@ $iset";
     /* sprintf */
     function function_sprintf() { $a = func_get_args(); return self::fearr("'sprintf'", $a); }
 
-    /* JSON-кодирование */
-    function function_json($v)  { return "json_encode($v)"; }
+    /* strftime */
+    function function_strftime($fmt, $date, $time = '')
+    {
+        $e = $time ? "($date).' '.($time)" : $date;
+        return "strftime($fmt, self::timestamp($e))";
+    }
+
+    /* ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что. */
+    function function_strlimit($s,$l){ return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit($s,$l)"; }
+
+    /** Массивы и хеши **/
 
     /* создание хеша */
     function function_hash()
@@ -1088,54 +1111,90 @@ $iset";
     function function_hash_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
     function function_array_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
 
+    /* сортировка массива */
+    function function_sort()    { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
+
     /* пары id => ключ, name => значение для ассоциативного массива */
     function function_each($a) { return "array_id_name(is_array($a) ? $a : array())"; }
 
-    // создание массива
+    /* создание массива */
     function function_array()
     {
         $a = func_get_args();
         return "array(" . join(",", $a) . ")";
     }
 
-    // проверка, массив это или нет?
-    function function_is_array($a)      { return "is_array($a)"; }
-
-    // диапазон от $a до $b
+    /* диапазон от $1 до $2 */
     function function_range($a, $b)     { return "range($a,$b)"; }
 
-    // подмассив по номерам элементов
+    /* проверка, массив это или нет? */
+    function function_is_array($a)      { return "is_array($a)"; }
+
+    /* число элементов в массиве */
+    function function_count($e)  { return "self::array_count($e)"; }
+
+    /* подмассив по номерам элементов */
     function function_subarray()        { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
     function function_array_slice()     { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
 
-    // подмассив по кратности номеров элементов
+    /* подмассив по кратности номеров элементов */
     function function_subarray_divmod() { $a = func_get_args(); return "self::exec_subarray_divmod(" . join(",", $a) . ")"; }
 
-    // объединение массивов
-    function function_array_merge()     { $a = func_get_args(); return "array_merge(" . join(",", $a) . ")"; }
-
-    // получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
-    // по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
+    /* получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
+       по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п. */
     function function_get($a, $k=NULL)  { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
     function function_hget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
     function function_aget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
 
-    // shift, unshift, pop, push
+    /* объединение массивов */
+    function function_array_merge()     { $a = func_get_args(); return "array_merge(" . join(",", $a) . ")"; }
+
+    /* shift, unshift, pop, push */
     function function_shift($a)         { return "array_shift($a)"; }
     function function_pop($a)           { return "array_pop($a)"; }
     function function_unshift($a, $v)   { return "array_unshift($a, $v)"; }
     function function_push($a, $v)      { return "array_push($a, $v)"; }
 
-    // игнорирование результата (а-ля js)
+    /** Прочее **/
+
+    /* игнорирование результата (а-ля js) */
     function function_void($a)          { return "self::void($a)"; }
     function void($a)                   { return ''; }
 
-    // вызов функции объекта по вычисляемому имени
-    function function_call($o, $m, $args = NULL)
+    /* дамп переменной */
+    function function_var_dump($var)
     {
-        if (!$args)
-            $args = array();
-        return "call_user_func_array(array($o, $m), $args)";
+        return "self::exec_dump($var)";
+    }
+    function function_dump($var)
+    {
+        return "self::exec_dump($var)";
+    }
+
+    /* JSON-кодирование */
+    function function_json($v)  { return "json_encode($v)"; }
+
+    /* включение другого файла или блока:
+       process('файл')
+       process('файл', 'функция')
+       process('файл', 'функция', hash(аргументы))
+       process('::функция', hash(аргументы))
+       не рекомендуется, но возможно:
+       process('', 'код', hash(аргументы))
+       process('', 'код', 'функция', hash(аргументы))
+    */
+    function function_include() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    function function_parse()   { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    function function_process() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+
+    /* вызов функции объекта по вычисляемому имени */
+    function function_call()
+    {
+        $a = func_get_args();
+        $o = array_shift($a);
+        $m = array_shift($a);
+        array_unshift($a, "array($o, $m)");
+        return "call_user_func_array(".implode(", ", $a).")";
     }
 
     /* map() */
@@ -1154,28 +1213,7 @@ $iset";
         return self::fearr("array_map", $args);
     }
 
-    /* дамп переменной */
-    function function_var_dump($var)
-    {
-        return "self::exec_dump($var)";
-    }
-    function function_dump($var)
-    {
-        return "self::exec_dump($var)";
-    }
-
-    /* включение другого файла или блока:
-       process('файл')
-       process('файл', 'функция')
-       process('файл', 'функция', hash(аргументы))
-       process('::функция', hash(аргументы))
-       не рекомендуется, но возможно:
-       process('', 'код', hash(аргументы))
-       process('', 'код', 'функция', hash(аргументы))
-    */
-    function function_include() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
-    function function_parse()   { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
-    function function_process() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    /*** Реализации функций ***/
 
     // дамп переменной
     static function exec_dump($var)
@@ -1202,13 +1240,6 @@ $iset";
             if (($i % $div) == $mod)
                 $r[$k] = $v;
         return $r;
-    }
-
-    // strftime
-    function function_strftime($fmt, $date, $time = '')
-    {
-        $e = $time ? "($date).' '.($time)" : $date;
-        return "strftime($fmt, self::timestamp($e))";
     }
 
     // выполняет подстановку function_subst
@@ -1240,7 +1271,7 @@ $iset";
         return $str . '...';
     }
 
-    // то же, но UTF-8
+    // то же, но в UTF-8 (точнее, в текущей mb_internal_encoding())
     static function mb_strlimit($str, $maxlen)
     {
         if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
