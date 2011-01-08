@@ -216,6 +216,13 @@ sub compile
     my ($coderef, $fn) = @_;
     return $compiled_code->{$coderef} if $compiled_code->{$coderef};
 
+    # код не из файла
+    if (!$fn)
+    {
+        my (undef, $f, $l) = caller(1);
+        $fn = "(inline template at $f:$l)";
+    }
+
     # кэширование на диске
     my $code = $$coderef;
     Encode::_utf8_off($code);
@@ -265,7 +272,7 @@ sub compile
     $self->{functions} = [];
     $self->{output_position} = 0;
     $self->{input_line} = 0;
-    local $self->{input_filename} = $fn;
+    $self->{input_filename} = $fn;
 
     # ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
     my ($r, $pp, $b, $i, $e, $f, $frag, $x_pp, $l, $nl, @p) = ('', 0);
