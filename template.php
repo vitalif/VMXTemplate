@@ -1137,7 +1137,7 @@ $iset";
     function function_is_array($a)      { return "is_array($a)"; }
 
     /* число элементов в массиве */
-    function function_count($e)  { return "self::array_count($e)"; }
+    function function_count($e)         { return "self::array_count($e)"; }
 
     /* подмассив по номерам элементов */
     function function_subarray()        { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
@@ -1146,11 +1146,27 @@ $iset";
     /* подмассив по кратности номеров элементов */
     function function_subarray_divmod() { $a = func_get_args(); return "self::exec_subarray_divmod(" . join(",", $a) . ")"; }
 
-    /* получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
-       по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п. */
-    function function_get($a, $k=NULL)  { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
-    function function_hget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
-    function function_aget($a, $k=NULL) { if ($k !== NULL) return $a."[$k]"; return "\$this->tpldata[$a]"; }
+    /* 0) получить "корневую" переменную по неконстантному ключу
+       1) получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
+          по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
+       2) получить элемент выражения-массива - ибо в PHP не работает (...expression...)['key'],
+          к примеру не работает range(1,10)[0]
+          но у нас-то можно написать get(range(1,10), 0), поэтому мы должны это поддерживать
+          хотя это и не будет lvalue */
+    function function_get($a, $k=NULL)
+    {
+        if ($k === NULL)
+            return "\$this->tpldata[$a]";
+        /* проверяем синтаксис выражения */
+        if (@eval('return true; '.$a.'[0];'))
+            return $a."[$k]";
+        return "self::exec_get($a, $k)";
+    }
+    function function_hget($a, $k=NULL) { return $this->function_get($a, $k); }
+    function function_aget($a, $k=NULL) { return $this->function_get($a, $k); }
+
+    /* присваивание (только lvalue) */
+    function function_set($l, $r)       { return "($l = $r)"; }
 
     /* объединение массивов */
     function function_array_merge()     { $a = func_get_args(); return "array_merge(" . join(",", $a) . ")"; }
@@ -1261,6 +1277,12 @@ $iset";
     {
         sort($array);
         return $array;
+    }
+
+    // возвращает элемент массива
+    static function exec_get($array, $key)
+    {
+        return $array[$key];
     }
 
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
