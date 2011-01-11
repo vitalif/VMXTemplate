@@ -992,6 +992,8 @@ sub function_get     { shift; "exec_get(" . join(",", @_) . ")"; }
 sub function_hget    { "($_[1])->\{$_[2]}" }
 # для массива
 sub function_aget    { "($_[1])->\[$_[2]]" }
+# присваивание (только lvalue)
+sub function_set     { "($_[1] = $_[2])" }
 # слияние массивов в один большой массив
 sub function_array_merge { shift; '[@{'.join('},@{',@_).'}]' }
 # вынуть первый элемент массива
