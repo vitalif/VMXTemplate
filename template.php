@@ -71,7 +71,7 @@ class Template
         if ($this->raise_error && $fatal)
             die(__CLASS__."::error: $e");
         elseif ($this->print_error)
-            print __CLASS__."::error: $e\n";
+            print __CLASS__."::error: $e<br />";
     }
 
     // Функция уничтожает данные шаблона
@@ -177,7 +177,7 @@ class Template
             $func = $inline;
             if (!strlen($fn))
             {
-                $this->error("Template: empty filename '$fn'", true);
+                $this->error("empty filename '$fn'", true);
                 return NULL;
             }
             if (substr($fn, 0, 1) != '/')
@@ -197,7 +197,7 @@ class Template
                 }
                 if (!($text = $this->loadfile($fn)))
                 {
-                    $this->error("Template: couldn't load template file '$fn'", true);
+                    $this->error("couldn't load template file '$fn'", true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
@@ -206,7 +206,21 @@ class Template
                     $this->failed[$fn] = true;
                     return NULL;
                 }
-                include $file;
+                $r = include($file);
+                if ($r !== 1)
+                {
+                    $this->error("error including compiled template for '$fn'", true);
+                    $this->failed[$fn] = true;
+                    return NULL;
+                }
+                if (!class_exists($class))
+                {
+                    /* кэш от старой версии, нужно сбросить
+                       FIXME в будущем совместимость со старым кэшем будет убрана */
+                    $this->error("Please, clear template cache path after upgrading VMX::Template", true);
+                    $this->failed[$fn] = true;
+                    return NULL;
+                }
             }
         }
         if (!$func)
@@ -214,7 +228,7 @@ class Template
         elseif (is_array($func))
             $vars = $func;
         $func = "__$func";
-        $tpl = new $class();
+        $tpl = new $class($this);
         if ($vars)
             $tpl->tpldata = &$vars;
         $t = $tpl->$func();
@@ -269,11 +283,11 @@ class Template
     // $file = $this->compile($code, $fn);
     // require $file;
     // --> class Template_...
-    function compile($code, $fn)
+    function compile($code, $fn, $reload = false)
     {
         $md5 = md5($code);
         $file = $this->cache_dir . 'tpl' . $md5 . '.php';
-        if (file_exists($file))
+        if (file_exists($file) && !$reload)
             return $file;
 
         // "имя" файла для кода не из файла
@@ -296,9 +310,9 @@ class Template
             $ec = '-->';
 
         // маркер начала, маркер конца, обработчик, съедать ли начало и конец строки
-        $blk = array(array($bc, $ec, 'compile_code_fragment', $this->{eat_code_line}));
+        $blk = array(array($bc, $ec, 'compile_code_fragment', $this->eat_code_line));
         if ($this->begin_subst && $this->end_subst)
-            $blk[] = array($this->{begin_subst}, $this->{end_subst}, 'compile_substitution');
+            $blk[] = array($this->begin_subst, $this->end_subst, 'compile_substitution');
         foreach ($blk as &$v)
         {
             $v[4] = strlen($v[0]);
@@ -311,8 +325,7 @@ class Template
         // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
         $r = '';
         $pp = 0;
-        $l = strlen($code);
-        while ($code && $pp < $l)
+        while ($code)
         {
             $p = array();
             $b = NULL;
@@ -580,7 +593,7 @@ I see 'FUNCTION $m[1]' instead.");
     // legacy, в новом варианте можно использовать с кавычками, и это уже идёт как функция
     function compile_code_fragment_include($st, $kw, $t)
     {
-        $t = preg_replace('/^[a-z0-9_\.]+$/', '\'\1\'', $t);
+        $t = preg_replace('/^[a-z0-9_\.]+$/', '\'\0\'', $t);
         if (!is_null($t = $this->compile_expression("include $t")))
             return "\$t.=$t;\n";
         return NULL;
