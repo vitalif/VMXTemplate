@@ -697,7 +697,8 @@ $iset";
             // если заданы маркеры подстановок (по умолчанию { ... }),
             // то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
             // не подставляются в результат
-            if ($this->begin_subst && $this->end_subst)
+            if ($this->begin_subst && $this->end_subst &&
+                !preg_match('/^(include|process|parse)/is', $e))
                 return "$t;\n";
             return "\$t.=$t;\n";
         }
