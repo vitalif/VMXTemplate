@@ -660,7 +660,14 @@ sub compile_code_fragment
     else
     {
         $t = $self->compile_expression($e);
-        return "\$t.=$t;\n" if $t;
+        if (defined $t)
+        {
+            # если заданы маркеры подстановок (по умолчанию { ... }),
+            # то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
+            # не подставляются в результат
+            return "$t;\n" if $self->{begin_subst} && $self->{end_subst};
+            return "\$t.=$t;\n";
+        }
     }
     return undef;
 }
@@ -914,6 +921,9 @@ sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
 # нижний и верхний регистр
 sub function_lc      { "lc($_[1])" }                    *function_lower = *function_lowercase = *function_lc;
 sub function_uc      { "uc($_[1])" }                    *function_upper = *function_uppercase = *function_uc;
+# нижний и верхний регистр первого символа
+sub function_lcfirst { "lcfirst($_[1])" }
+sub function_ucfirst { "ucfirst($_[1])" }
 # экранировать двойные и одинарные кавычки в стиле C (добавить \)
 sub function_quote   { "quotequote($_[1])" }            *function_q = *function_quote; *function_addslashes = *function_q;
 # экранировать двойные кавычки в стиле SQL/CSV (удвоением)
@@ -961,7 +971,7 @@ sub function_strftime
     return $e;
 }
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
-sub function_strlimit{ "strlimit($_[1], $_[2])" }
+sub function_strlimit{ shift; "strlimit(".join(",", @_).")" }   *function_truncate = *function_strlimit;
 
 ## Массивы и хеши
 

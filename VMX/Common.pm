@@ -884,7 +884,7 @@ sub litsplit
 # ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
 sub strlimit
 {
-    my ($str, $maxlen) = @_;
+    my ($str, $maxlen, $dots) = @_;
     if (!$maxlen || $maxlen < 1 || length($str) <= $maxlen)
     {
         return $str;
@@ -900,7 +900,7 @@ sub strlimit
         # обрезаем
         $str = substr($str, 0, $p);
     }
-    return $str . '...';
+    return $str . (defined $dots ? $dots : '...');
 }
 
 # уход в подполье
