@@ -148,7 +148,11 @@ sub parse
     }
     my $str = $self->compile($textref, $fn);
     $function ||= '_main';
-    # FIXME если в следующей строке возникает ошибка, нужно сбросить файловый кэш
+    if (ref $str eq 'CODE')
+    {
+        # кэш от старой версии, которая кэширует coderef'ы, а не хеши
+        $str = $self->compile($textref, $fn, 1);
+    }
     $str = $str->{$function};
     # иначе (если не coderef), то шаблон - не шаблон, а тупо константа
     if (ref $str eq 'CODE')
@@ -213,8 +217,8 @@ sub loadfile
 sub compile
 {
     my $self = shift;
-    my ($coderef, $fn) = @_;
-    return $compiled_code->{$coderef} if $compiled_code->{$coderef};
+    my ($coderef, $fn, $force_reload) = @_;
+    return $compiled_code->{$coderef} if $compiled_code->{$coderef} && !$force_reload;
 
     # код не из файла
     if (!$fn)
@@ -231,7 +235,7 @@ sub compile
     if ($self->{cache_dir})
     {
         $h = $self->{cache_dir}.md5_hex($code).'.pl';
-        if (-e $h)
+        if (-e $h && !$force_reload)
         {
             $compiled_code->{$coderef} = do $h;
             if ($@)
@@ -558,8 +562,12 @@ I see 'FUNCTION $n' instead.");
 sub compile_code_fragment_include
 {
     my ($self, $kw, $t) = @_;
-    $t =~ s/\'|\\/\\$&/gso;
-    return "\$t.=\$self->parse('$t');\n";
+    $t =~ s/^([a-z0-9_\.]+)$/\'$1\'/so;
+    if (defined($t = $self->compile_expression("include $t")))
+    {
+        return "\$t.=$t\n";
+    }
+    return undef;
 }
 
 # FOR[EACH] varref = array
