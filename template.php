@@ -693,7 +693,14 @@ $iset";
             !is_null($r = $this->$sub($st, $kw, $t)))
             return $r;
         elseif (!is_null($t = $this->compile_expression($e)))
+        {
+            // если заданы маркеры подстановок (по умолчанию { ... }),
+            // то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
+            // не подставляются в результат
+            if ($this->begin_subst && $this->end_subst)
+                return "$t;\n";
             return "\$t.=$t;\n";
+        }
         return NULL;
     }
 
@@ -999,6 +1006,12 @@ $iset";
     function function_upper($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
     function function_uppercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
 
+    /* нижний регистр первого символа */
+    function function_lcfirst($e)    { return ($this->use_utf8 ? "self::mb_" : "") . "lcfirst($e)"; }
+
+    /* верхний регистр первого символа */
+    function function_ucfirst($e)    { return ($this->use_utf8 ? "self::mb_" : "") . "ucfirst($e)"; }
+
     /* экранирование кавычек */
     function function_quote($e)      { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
     function function_addslashes($e) { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
@@ -1088,7 +1101,17 @@ $iset";
     }
 
     /* ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что. */
-    function function_strlimit($s,$l){ return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit($s,$l)"; }
+    /* strlimit(string, length, dots = '...') */
+    function function_strlimit($a)
+    {
+        $a = func_get_args();
+        return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
+    }
+    function function_truncate($a)
+    {
+        $a = func_get_args();
+        return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
+    }
 
     /** Массивы и хеши **/
 
@@ -1286,7 +1309,7 @@ $iset";
     }
 
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
-    static function strlimit($str, $maxlen)
+    static function strlimit($str, $maxlen, $dots = '...')
     {
         if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
             return $str;
@@ -1296,11 +1319,11 @@ $iset";
             $p = $pt;
         if ($p)
             $str = substr($str, 0, $p);
-        return $str . '...';
+        return $str . $dots;
     }
 
     // то же, но в UTF-8 (точнее, в текущей mb_internal_encoding())
-    static function mb_strlimit($str, $maxlen)
+    static function mb_strlimit($str, $maxlen, $dots = '...')
     {
         if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
             return $str;
@@ -1310,7 +1333,19 @@ $iset";
             $p = $pt;
         if ($p)
             $str = mb_substr($str, 0, $p);
-        return $str . '...';
+        return $str . $dots;
+    }
+
+    // lcfirst() и ucfirst() для UTF-8
+    static function mb_lcfirst($str)
+    {
+        return mb_strtolower(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+    }
+
+    // lcfirst() и ucfirst() для UTF-8
+    static function mb_ucfirst($str)
+    {
+        return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
     }
 
     // ограниченная распознавалка дат
