@@ -665,7 +665,8 @@ sub compile_code_fragment
             # если заданы маркеры подстановок (по умолчанию { ... }),
             # то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
             # не подставляются в результат
-            return "$t;\n" if $self->{begin_subst} && $self->{end_subst};
+            return "$t;\n" if $self->{begin_subst} && $self->{end_subst} &&
+                $e !~ /^(include|process|parse)/iso;
             return "\$t.=$t;\n";
         }
     }
