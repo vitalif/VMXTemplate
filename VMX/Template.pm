@@ -275,6 +275,7 @@ sub compile
     $self->{in} = [];
     $self->{functions} = [];
     $self->{output_position} = 0;
+    $self->{output_plus_len} = 0;
     $self->{input_line} = 0;
     $self->{input_filename} = $fn;
 
@@ -306,7 +307,7 @@ sub compile
                     # Например, FUNCTION и END. Поэтому преобразуем текст
                     # до вызова обработчика.
                     $x_pp = $pp - $blk[$b][4];
-                    $l = 0;
+                    $nl = $l = 0;
                     if ($x_pp > 0)
                     {
                         $x_pp = substr($code, 0, $x_pp);
@@ -318,6 +319,9 @@ sub compile
                     }
                     # записываем позицию
                     $self->{output_position} = $l + length $r;
+                    # блин, они же ещё хотят знать и точку конца директивы!
+                    # а в неё входит коммент "#line $self->{input_line} \"$fn\"\n"
+                    $self->{output_plus_len} = 10 + length($fn) + length($self->{input_line}+$nl);
                     $frag = $self->$f($frag);
                 }
                 else
@@ -349,7 +353,7 @@ sub compile
             {
                 # шаблон - тупо константа!
                 $pp = -1;
-                $r = "'$code';";
+                $r = "'$code'";
             }
             else
             {
@@ -475,8 +479,9 @@ sub compile_code_fragment_end
     elsif ($w eq 'function')
     {
         my $s = "return \$t;\n},\n";
-        $self->{$_} = $in->[2]->[$_] for 'blocks', 'in';
-        push @{$self->{functions}->[$#{$self->{functions}}]}, $self->{output_position} + length $s;
+        $self->{$_} = $in->[2]->{$_} for 'blocks', 'in';
+        push @{$self->{functions}->[$#{$self->{functions}}]},
+            $self->{output_position} + $self->{output_plus_len} + length $s;
         return $s;
     }
     return "}\n";
@@ -523,7 +528,7 @@ sub compile_code_fragment_function
 I see 'FUNCTION $n' instead.");
         return undef;
     }
-    if ($self->{functions} && @{$self->{functions}->{$#{$self->{functions}}}} == 1)
+    if (@{$self->{functions}} && @{$self->{functions}->[$#{$self->{functions}}]} == 1)
     {
         $self->warning("Template functions cannot be nested");
         return undef;
@@ -565,7 +570,7 @@ sub compile_code_fragment_include
     $t =~ s/^([a-z0-9_\.]+)$/\'$1\'/so;
     if (defined($t = $self->compile_expression("include $t")))
     {
-        return "\$t.=$t\n";
+        return "\$t.=$t;\n";
     }
     return undef;
 }
