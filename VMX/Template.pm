@@ -119,32 +119,55 @@ sub vars
     return $t;
 }
 
-# Функция загружает, компилирует и возвращает результат
-# обработки шаблона или функции шаблона.
-# $page = $obj->parse(
-#     'file/name.tpl' или (FALSE, 'template {CODE}')
-#     [, 'function']
-#     [, { tpldata => 'values' } ]
-# );
-# FALSE, 'код' - передача не имени файла, а кода.
-# Менее рекомендовано, но возможно.
+# Вызов функции из шаблона
+sub exec_from
+{
+    my ($self, $filename, $function, $vars) = @_;
+    return $self->parse_real($filename, undef, $function, $vars);
+}
+
+# Вызов функции из кода шаблона
+# Совсем не рекомендовано, но возможно
+sub exec_from_inline
+{
+    my ($self, $code, $function, $vars) = @_;
+    return $self->parse_real(undef, $code, $function, $vars);
+}
+
+# Обработка главного блока шаблона
+# $page = $obj->parse($filename);
+# $page = $obj->parse($filename, $tpldata);
 sub parse
 {
+    my ($self, $fn, $vars) = @_;
+    return $self->parse_real($fn, undef, '_main', $vars);
+}
+
+# Обработка явно переданного кода шаблона
+# Менее рекомендовано, но возможно
+sub parse_inline
+{
+    my ($self, $code, $vars) = @_;
+    return $self->parse_real(undef, $code, '_main', $vars);
+}
+
+# "Реальная" функция, обрабатывающая все вызовы типа parse
+# $page = $obj->parse_real(filename, inline code, function, vars)
+# inline code - передача не имени файла, а кода. Менее рекомендовано, но возможно.
+sub parse_real
+{
     my $self = shift;
-    my $fn = shift || undef;
-    my $textref;
-    if (!$fn)
-    {
-        $textref = \( shift );
-        return $self->error("empty filename and no inline code") if !length $$textref;
-    }
-    my $function = shift if $_[0] && !ref $_[0];
-    my $vars = shift if ref $_[0];
+    my ($fn, $textref, $function, $vars) = @_;
+    # Загрузка кода
     if ($fn)
     {
         $fn = $self->{root}.$fn if $fn !~ m!^/!so;
         return $self->error("couldn't load template file '$fn'")
             unless $textref = $self->loadfile($fn);
+    }
+    else
+    {
+        $textref = \( $textref );
     }
     my $str = $self->compile($textref, $fn);
     $function ||= '_main';
@@ -679,7 +702,7 @@ sub compile_code_fragment
             # то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
             # не подставляются в результат
             return "$t;\n" if $self->{begin_subst} && $self->{end_subst} &&
-                $e !~ /^(include|process|parse)/iso;
+                $e !~ /^(parse|process|include|exec)/iso;
             return "\$t.=$t;\n";
         }
     }
@@ -1038,8 +1061,56 @@ sub function_dump    { shift; "exec_dump(" . join(",", @_) . ")" }          *fun
 # JSON-кодирование
 sub function_json    { "encode_json($_[1])" }
 
-# включение другого файла
-sub function_include { shift; "\$self->parse(" . join(",", @_) . ")"; }     *function_process = *function_include;    *function_parse = *function_include;
+# включение другого файла: parse('файл'[, аргументы]) */
+sub function_parse
+{
+    shift;
+    my $fn = shift;
+    return "\$self->parse_real($fn, undef, '_main'".auto_hash(@_).")";
+}
+*function_process = *function_parse;
+*function_include = *function_parse;
+
+# включение блока из текущего файла: exec('блок'[, аргументы])
+sub function_exec
+{
+    my $self = shift;
+    my $block = shift;
+    my $fn = $self->{input_filename};
+    $fn =~ s/([\'\\])/\\$1/gso;
+    return "\$self->parse_real('$fn', undef, $block".auto_hash(@_).")";
+}
+
+# включение блока из другого файла: exec_from('файл', 'блок'[, аргументы])
+sub function_exec_from
+{
+    shift;
+    my $fn = shift;
+    my $block = shift;
+    return "\$self->parse_real($fn, undef, $block".auto_hash(@_).")";
+}
+
+# parse не из файла, хотя и не рекомендуется
+sub function_parse_inline
+{
+    shift;
+    my $code = shift;
+    return "\$self->parse_real(undef, $code, '_main'".auto_hash(@_).")";
+}
+*function_process_inline = *function_parse_inline;
+*function_include_inline = *function_parse_inline;
+
+# сильно не рекомендуется, но возможно:
+# включение блока не из файла:
+# exec_from_inline('код', 'блок'[, аргументы])
+sub function_exec_from_inline
+{
+    shift;
+    my $code = shift;
+    my $block = shift;
+    return "\$self->parse_real(undef, $code, $block".auto_hash(@_).")";
+}
+
 # вызов функции объекта по вычисляемому имени
 sub function_call    { shift; "exec_call(" . join(",", @_) . ")"; }
 
@@ -1136,6 +1207,23 @@ sub exec_dump
     local $Data::Dumper::Varname = '';
     local $Data::Dumper::Sortkeys = 1;
     return scalar Data::Dumper::Dumper(@_);
+}
+
+# автоматическое создание хеша из хешрефа или списка
+sub auto_hash
+{
+    if (!@_)
+    {
+        return "";
+    }
+    elsif (@_ == 1)
+    {
+        return ', ' . $_[0];
+    }
+    else
+    {
+        return ', {'.join(',', @_).'}';
+    }
 }
 
 1;
