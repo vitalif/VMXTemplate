@@ -136,50 +136,49 @@ class Template
             eaccelerator_put($key, $value);
     }
 
-    // Функция загружает, компилирует и возвращает результат
-    // обработки шаблона или функции шаблона.
-    // $page = $obj->parse(
-    //     'file/name.tpl' или NULL, 'template {CODE}'
-    //     [, 'function']
-    //     [, array(vars => $values) ]
-    // );
-    // NULL, 'код' - передача не имени файла, а кода.
-    // Менее рекомендовано, но возможно.
-    function parse($fn, $inline = NULL, $func = NULL, $vars = NULL)
+    // Вызов функции из шаблона
+    function exec_from($filename, $function, $vars = NULL)
     {
-        if ($this->parent)
-        {
-            // вызван из шаблона
-            // разрешаем синтаксис <!-- process '::function' -->
-            if (substr($fn, 0, 2) == '::')
-            {
-                $vars = $inline;
-                $inline = substr($fn, 2);
-                $fn = self::$template_filename;
-            }
-            return $this->parent->parse($fn, $inline, $func, $vars);
-        }
+        return $this->parse_real($filename, NULL, $function, $vars);
+    }
+
+    // Вызов функции из кода шаблона
+    // Совсем не рекомендовано, но возможно
+    function exec_from_inline($code, $function, $vars = NULL)
+    {
+        return $this->parse_real(NULL, $code, $function, $vars);
+    }
+
+    // Обработка главного блока шаблона
+    // $page = $obj->parse($filename);
+    // $page = $obj->parse($filename, $tpldata);
+    function parse($fn, $vars = NULL)
+    {
+        return $this->parse_real($fn, NULL, '_main', $vars);
+    }
+
+    // Обработка явно переданного кода шаблона
+    // Менее рекомендовано, но возможно
+    function parse_inline($code, $vars = NULL)
+    {
+        return $this->parse_real(NULL, $code, '_main', $vars);
+    }
+
+    // "Реальная" функция, обрабатывающая все вызовы типа parse
+    function parse_real($fn, $inline, $func, $vars = NULL)
+    {
         $this->errors = array();
-        if (!strlen($fn))
+        if (!$fn)
         {
-            $text = $inline;
-            $fn = '';
-            if (!$text)
+            if (!strlen($inline))
                 return '';
-            $class = 'Template_X'.md5($text);
-            if (!($file = $this->compile($text, $fn)))
+            $class = 'Template_X'.md5($inline);
+            if (!($file = $this->compile($inline, '')))
                 return NULL;
             include $file;
         }
         else
         {
-            $vars = $func;
-            $func = $inline;
-            if (!strlen($fn))
-            {
-                $this->error("empty filename '$fn'", true);
-                return NULL;
-            }
             if (substr($fn, 0, 1) != '/')
                 $fn = $this->root.$fn;
             /* Пока что, если класс существует - просто используем его.
@@ -223,10 +222,6 @@ class Template
                 }
             }
         }
-        if (!$func)
-            $func = '_main';
-        elseif (is_array($func))
-            $vars = $func;
         $func = "__$func";
         $tpl = new $class($this);
         if ($vars)
@@ -711,7 +706,7 @@ $iset";
             // то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
             // не подставляются в результат
             if ($this->begin_subst && $this->end_subst &&
-                !preg_match('/^(include|process|parse)/is', $e))
+                !preg_match('/^(parse|process|include|exec)/is', $e))
                 return "$t;\n";
             return "\$t.=$t;\n";
         }
@@ -764,7 +759,6 @@ $iset";
                не поддерживаем, потому что к таким цепочкам без сохранения звеньев
                нервно относится сам PHP */
             $f = strtolower($m[1]);
-            $ct_callable = array($this, "function_$f");
             if ($m[2])
             {
                 /* вызов метода объекта obj.method() */
@@ -779,22 +773,33 @@ $iset";
             }
             elseif ($this->compiletime_functions[$f])
                 $ct_callable = $this->compiletime_functions[$f];
+            else
+            {
+                if (!($a = self::$function_aliases[$f]))
+                    $a = $f;
+                if (!method_exists($this, "function_$a"))
+                {
+                    $this->error("Unknown function: '$f' in '$e'");
+                    return NULL;
+                }
+                $ct_callable = array($this, "function_$a");
+            }
             /* разбираем аргументы */
             $a = $m[3];
             $args = array();
             while (!is_null($e = $this->compile_expression($a, array(&$a))))
             {
                 $args[] = $e;
-                if (preg_match('/^\s*\)/s', $a))
+                if (preg_match('/^\s*((,|=>)\s*)?\)/s', $a))
                     break;
-                else if ($a == ($b = preg_replace('/^\s*,/s', '', $a)))
+                elseif ($a == ($b = preg_replace('/^\s*(,|=>)/s', '', $a)))
                 {
                     $this->error("Unexpected token: '$a' in $f($m[2] parameter list");
                     return NULL;
                 }
                 $a = $b;
             }
-            if ($a == ($b = preg_replace('/^\s*\)\s*/', '', $a)))
+            if ($a == ($b = preg_replace('/^\s*((,|=>)\s*)?\)\s*/', '', $a)))
             {
                 $this->error("Unexpected token: '$a' in the end of $f($m[2] parameter list");
                 return NULL;
@@ -816,11 +821,14 @@ $iset";
         elseif (preg_match('/^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/is', $e, $m))
         {
             $f = strtolower($m[1]);
-            if (!method_exists($this, "function_$f"))
+            if (!($a = self::$function_aliases[$f]))
+                $a = $f;
+            if (!method_exists($this, "function_$a"))
             {
                 $this->error("Unknown function: '$f' in '$e'");
                 return NULL;
             }
+            $function_name = "function_$a";
             $a = $m[2];
             $arg = $this->compile_expression($a, array(&$a));
             if ($arg === NULL)
@@ -835,8 +843,7 @@ $iset";
                     return NULL;
                 $after[0] = $a;
             }
-            $f = "function_$f";
-            return $this->$f($arg);
+            return $this->$function_name($arg);
         }
         // переменная плюс legacy-mode переменная/функция
         elseif (preg_match('/^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/is', $e, $m))
@@ -851,12 +858,14 @@ $iset";
             if ($m[2])
             {
                 $f = strtolower($m[2]);
-                if (!method_exists($this, "function_$f"))
+                if (!($a = self::$function_aliases[$f]))
+                    $a = $f;
+                if (!method_exists($this, "function_$a"))
                 {
                     $this->error("Unknown function: '$f' called in legacy mode ($m[0])");
                     return NULL;
                 }
-                $f = "function_$f";
+                $f = "function_$a";
                 $e = $this->$f($e);
             }
             return $e;
@@ -955,6 +964,41 @@ $iset";
 
     /*** Функции ***/
 
+    /** Алиасы */
+    static $aliases = array(
+        'i'             => 'int',
+        'intval'        => 'int',
+        'lower'         => 'lc',
+        'lowercase'     => 'lc',
+        'upper'         => 'uc',
+        'uppercase'     => 'uc',
+        'addslashes'    => 'quote',
+        'q'             => 'quote',
+        'sq'            => 'sql_quote',
+        're_quote'      => 'requote',
+        'preg_quote'    => 'requote',
+        'uri_escape'    => 'urlencode',
+        'uriquote'      => 'urlencode',
+        'substring'     => 'substr',
+        'htmlspecialchars' => 'html',
+        's'             => 'html',
+        'strip_tags'    => 'strip',
+        't'             => 'strip',
+        'h'             => 'strip_unsafe',
+        'implode'       => 'join',
+        'truncate'      => 'strlimit',
+        'hash_keys'     => 'keys',
+        'array_keys'    => 'keys',
+        'array_slice'   => 'subarray',
+        'hget'          => 'get',
+        'aget'          => 'get',
+        'var_dump'      => 'dump',
+        'process'       => 'parse',
+        'include'       => 'parse',
+        'process_inline' => 'parse_inline',
+        'include_inline' => 'parse_inline',
+    );
+
     /** Числа, логические операции **/
 
     /* логические операции */
@@ -978,8 +1022,6 @@ $iset";
 
     /* приведение к целому числу */
     function function_int($e)    { return "intval($e)"; }
-    function function_i($e)      { return "intval($e)"; }
-    function function_intval($e) { return "intval($e)"; }
 
     /* сравнения: == != > < >= <= (аргументов как строк если оба строки, иначе как чисел) */
     function function_eq($a,$b) { return "(($a) == ($b))"; }
@@ -1012,13 +1054,9 @@ $iset";
 
     /* нижний регистр */
     function function_lc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
-    function function_lower($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
-    function function_lowercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
 
     /* верхний регистр */
     function function_uc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
-    function function_upper($e)      { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
-    function function_uppercase($e)  { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
 
     /* нижний регистр первого символа */
     function function_lcfirst($e)    { return ($this->use_utf8 ? "self::mb_" : "") . "lcfirst($e)"; }
@@ -1028,21 +1066,14 @@ $iset";
 
     /* экранирование кавычек */
     function function_quote($e)      { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
-    function function_addslashes($e) { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
-    function function_q($e)          { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
 
     /* экранирование кавычек в SQL- или CSV- стиле (кавычка " превращается в двойную кавычку "") */
-    function function_sq($e)         { return "str_replace('\"','\"\"',$e)"; }
     function function_sql_quote($e)  { return "str_replace('\"','\"\"',$e)"; }
 
     /* экранирование символов, специальных для регулярного выражения */
     function function_requote($e)    { return "preg_quote($e)"; }
-    function function_re_quote($e)   { return "preg_quote($e)"; }
-    function function_preg_quote($e) { return "preg_quote($e)"; }
 
     /* экранирование в стиле URL */
-    function function_uriquote($e)   { return "urlencode($e)"; }
-    function function_uri_escape($e) { return "urlencode($e)"; }
     function function_urlencode($e)  { return "urlencode($e)"; }
 
     /* замены - по регулярке и по подстроке */
@@ -1063,10 +1094,6 @@ $iset";
     {
         return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
-    function function_substring($s, $start, $length = NULL)
-    {
-        return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
-    }
 
     /* убиение пробелов в начале и конце */
     function function_trim($s) { return "trim($s)"; }
@@ -1078,18 +1105,13 @@ $iset";
     }
 
     /* преобразование символов <>&'" в HTML-сущности &lt; &gt; &amp; &apos; &quot; */
-    function function_htmlspecialchars($e)      { return "htmlspecialchars($e,ENT_QUOTES)"; }
     function function_html($e)                  { return "htmlspecialchars($e,ENT_QUOTES)"; }
-    function function_s($e)                     { return "htmlspecialchars($e,ENT_QUOTES)"; }
 
     /* удаление всех или заданных тегов */
     function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
-    function function_strip_tags($e, $t='')     { return "strip_tags($e".($t?",$t":"").")"; }
-    function function_t($e, $t='')              { return "strip_tags($e".($t?",$t":"").")"; }
 
     /* удаление "небезопасных" HTML-тегов */
     function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
-    function function_h($e)                     { return "strip_tags($e, self::\$safe_tags)"; }
 
     /* заменить \n на <br /> */
     function function_nl2br($s)                 { return "nl2br($s)"; }
@@ -1099,7 +1121,6 @@ $iset";
 
     /* объединение всех скаляров и всех элементов аргументов-массивов */
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
-    function function_implode() { $a = func_get_args(); return self::fearr("'join'", $a); }
 
     /* подставляет на места $1, $2 и т.п. в строке аргументы */
     function function_subst()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_subst'", $a); }
@@ -1117,11 +1138,6 @@ $iset";
     /* ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что. */
     /* strlimit(string, length, dots = '...') */
     function function_strlimit($a)
-    {
-        $a = func_get_args();
-        return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
-    }
-    function function_truncate($a)
     {
         $a = func_get_args();
         return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
@@ -1151,11 +1167,9 @@ $iset";
 
     /* ключи хеша или массива */
     function function_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
-    function function_hash_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
-    function function_array_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
 
     /* сортировка массива */
-    function function_sort()    { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
+    function function_sort()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
 
     /* пары id => ключ, name => значение для ассоциативного массива */
     function function_each($a) { return "array_id_name(is_array($a) ? $a : array())"; }
@@ -1178,7 +1192,6 @@ $iset";
 
     /* подмассив по номерам элементов */
     function function_subarray()        { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
-    function function_array_slice()     { $a = func_get_args(); return "array_slice(" . join(",", $a) . ")"; }
 
     /* подмассив по кратности номеров элементов */
     function function_subarray_divmod() { $a = func_get_args(); return "self::exec_subarray_divmod(" . join(",", $a) . ")"; }
@@ -1199,8 +1212,6 @@ $iset";
             return $a."[$k]";
         return "self::exec_get($a, $k)";
     }
-    function function_hget($a, $k=NULL) { return $this->function_get($a, $k); }
-    function function_aget($a, $k=NULL) { return $this->function_get($a, $k); }
 
     /* присваивание (только lvalue) */
     function function_set($l, $r)       { return "($l = $r)"; }
@@ -1221,10 +1232,6 @@ $iset";
     function void($a)                   { return ''; }
 
     /* дамп переменной */
-    function function_var_dump($var)
-    {
-        return "self::exec_dump($var)";
-    }
     function function_dump($var)
     {
         return "self::exec_dump($var)";
@@ -1233,18 +1240,68 @@ $iset";
     /* JSON-кодирование */
     function function_json($v)  { return "json_encode($v)"; }
 
-    /* включение другого файла или блока:
-       process('файл')
-       process('файл', 'функция')
-       process('файл', 'функция', hash(аргументы))
-       process('::функция', hash(аргументы))
-       не рекомендуется, но возможно:
-       process('', 'код', hash(аргументы))
-       process('', 'код', 'функция', hash(аргументы))
+    /* Аргументы для функций включения
+       аргументы ::= hash(ключ => значение, ...) | ключ => значение, ...
     */
-    function function_include() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
-    function function_parse()   { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
-    function function_process() { $a = func_get_args(); return "\$this->parse(" . join(",", $a) . ")"; }
+    function auto_hash($args)
+    {
+        if (!($n = count($args)))
+            $args = NULL;
+        elseif ($n == 1)
+            $args = ", ".$args[0];
+        else
+            $args = ", ".call_user_func_array(array($this, 'function_hash'), $args);
+        return $args;
+    }
+
+    /* включение другого файла: parse('файл'[, аргументы]) */
+    function function_parse()
+    {
+        $args = func_get_args();
+        $file = array_shift($args);
+        $args = $this->auto_hash($args);
+        return "\$this->parent->parse_real($file, NULL, '_main'$args)";
+    }
+
+    /* включение блока из текущего файла: exec('блок'[, аргументы]) */
+    function function_exec()
+    {
+        $args = func_get_args();
+        $block = array_shift($args);
+        $args = $this->auto_hash($args);
+        return "\$this->parent->parse_real(self::\$template_filename, NULL, $block$args)";
+    }
+
+    /* включение блока из другого файла: exec_from('файл', 'блок'[, аргументы]) */
+    function function_exec_from()
+    {
+        $args = func_get_args();
+        $file = array_shift($args);
+        $block = array_shift($args);
+        $args = $this->auto_hash($args);
+        return "\$this->parent->parse_real($file, NULL, $block$args)";
+    }
+
+    /* parse не из файла, хотя и не рекомендуется */
+    function function_parse_inline()
+    {
+        $args = func_get_args();
+        $code = array_shift($args);
+        $args = $this->auto_hash($args);
+        return "\$this->parent->parse_real(NULL, $code, '_main'$args)";
+    }
+
+    /* сильно не рекомендуется, но возможно:
+       включение блока не из файла:
+       exec_from_inline('код', 'блок'[, аргументы]) */
+    function function_exec_from_inline()
+    {
+        $args = func_get_args();
+        $code = array_shift($args);
+        $block = array_shift($args);
+        $args = $this->auto_hash($args);
+        return "\$this->parent->parse_real(NULL, $code, $block$args)";
+    }
 
     /* вызов функции объекта по вычисляемому имени */
     function function_call()
