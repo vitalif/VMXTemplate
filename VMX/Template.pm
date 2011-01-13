@@ -787,17 +787,17 @@ sub compile_expression
         while (defined($e = $self->compile_expression($a, \$a)))
         {
             push @a, $e;
-            if ($a =~ /^\s*\)/so)
+            if ($a =~ /^\s*((,|=>)\s*)?\)/so)
             {
                 last;
             }
-            elsif ($a !~ s/^\s*,//so)
+            elsif ($a !~ s/^\s*(,|=>)//so)
             {
                 $self->warning("Unexpected token: '$a' in $f() parameter list");
                 return undef;
             }
         }
-        if ($a !~ s/^\s*\)\s*//so)
+        if ($a !~ s/^\s*((,|=>)\s*)?\)\s*//so)
         {
             $self->warning("Unexpected token: '$a' in the end of $f() parameter list");
             return undef;
