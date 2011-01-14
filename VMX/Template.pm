@@ -1111,8 +1111,11 @@ sub function_exec_from_inline
     return "\$self->parse_real(undef, $code, $block".auto_hash(@_).")";
 }
 
-# вызов функции объекта по вычисляемому имени
-sub function_call    { shift; "exec_call(" . join(",", @_) . ")"; }
+# вызов функции объекта по вычисляемому имени:
+# call(object, "method", arg1, arg2, ...) или
+# call_array(object, "method", array(arg1, arg2, ...))
+sub function_call       { shift; "exec_call(" . join(",", @_) . ")"; }
+sub function_call_array { "exec_call($_[1], $_[2], @{ $_[3] })"; }
 
 # map()
 sub function_map
