@@ -1303,14 +1303,19 @@ $iset";
         return "\$this->parent->parse_real(NULL, $code, $block$args)";
     }
 
-    /* вызов функции объекта по вычисляемому имени */
+    /* вызов функции объекта по вычисляемому имени:
+       call(object, "method", arg1, arg2, ...) или
+       call_array(object, "method", array(arg1, arg2, ...)) */
     function function_call()
     {
         $a = func_get_args();
         $o = array_shift($a);
         $m = array_shift($a);
-        array_unshift($a, "array($o, $m)");
-        return "call_user_func_array(".implode(", ", $a).")";
+        return "call_user_func_array(array($o, $m), array(".implode(", ", $a)."))";
+    }
+    function function_call_array($o, $m, $a = NULL)
+    {
+        return "call_user_func_array(array($o, $m), ".($a ? $a : "array()").")";
     }
 
     /* map() */
