@@ -1148,10 +1148,13 @@ $iset";
     /* создание хеша */
     function function_hash()
     {
+        $a = func_get_args();
+        if (count($a) == 1)
+            return "self::exec_hash(".$a[0].")";
         $s = "array(";
         $i = 0;
         $d = '';
-        foreach (func_get_args() as $v)
+        foreach ($a as $v)
         {
             $s .= $d;
             $s .= $v;
@@ -1172,7 +1175,7 @@ $iset";
     function function_sort()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
 
     /* пары id => ключ, name => значение для ассоциативного массива */
-    function function_each($a) { return "array_id_name(is_array($a) ? $a : array())"; }
+    function function_pairs($a) { return "self::exec_pairs(is_array($a) ? $a : array())"; }
 
     /* создание массива */
     function function_array()
@@ -1382,6 +1385,25 @@ $iset";
     static function exec_get($array, $key)
     {
         return $array[$key];
+    }
+
+    // делает хеш из массива
+    static function exec_hash($array)
+    {
+        $hash = array();
+        $l = count($array);
+        for ($i = 0; $i < $l; $i += 2)
+            $hash[$array[$i]] = $array[$i+1];
+        return $hash;
+    }
+
+    // возвращает пары вида { key => ключ, value => значение }
+    static function exec_pairs($array)
+    {
+        $r = array();
+        foreach ($array as $k => $v)
+            $r[] = array('key' => $k, 'value' => $v);
+        return $r;
     }
 
     // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
