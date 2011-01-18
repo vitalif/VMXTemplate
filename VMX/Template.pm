@@ -1,11 +1,12 @@
 #!/usr/bin/perl
-# Новая версия шаблонного движка VMX::Template!
+
 # "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
 # Компилятор переписан уже 2 раза - сначала на regexы, потом на index() :-)
 # А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # Author: Vitaliy Filippov, 2006-2011
+# $Id$
 
 package VMX::Template;
 
