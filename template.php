@@ -6,6 +6,7 @@
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # Author: Vitaliy Filippov, 2006-2011
+# $Id$
 
 class VMXTemplateState
 {
