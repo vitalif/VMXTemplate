@@ -1013,13 +1013,13 @@ sub function_strlimit{ shift; "strlimit(".join(",", @_).")" }   *function_trunca
 ## Массивы и хеши
 
 # создание хеша
-sub function_hash    { shift; "{" . join(",", @_) . "}"; }
+sub function_hash    { shift; @_ == 1 ? "{ \@{ $_[0] } }" : "{" . join(",", @_) . "}"; }
 # ключи хеша
 sub function_keys    { '[ keys(%{'.$_[1].'}) ]'; }      *function_hash_keys = *function_keys; *function_array_keys = *function_keys;
 # сортировка массива
 sub function_sort    { '[ '.fearr('sort', 0, @_).' ]'; }
 # пары { id => ключ, name => значение } для хеша
-sub function_each    { "exec_each($_[1])" }
+sub function_pairs   { "exec_pairs($_[1])" }            *function_each = *function_pairs;
 # создание массива
 sub function_array   { shift; "[" . join(",", @_) . "]"; }
 # диапазон значений
@@ -1173,11 +1173,11 @@ sub exec_subst
     return $str;
 }
 
-# пары { id => ключ, name => значение } для хеша
-sub exec_each
+# пары { key => ключ, value => значение } для хеша
+sub exec_pairs
 {
     my $hash = shift;
-    return [ map { { id => $_, name => $hash->{$_} } } sort keys %{ $hash || {} } ];
+    return [ map { { key => $_, value => $hash->{$_} } } sort keys %{ $hash || {} } ];
 }
 
 # проверка, массив или нет?
