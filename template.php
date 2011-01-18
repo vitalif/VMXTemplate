@@ -7,7 +7,7 @@
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # Author: Vitaliy Filippov, 2006-2011
 
-class TemplateState
+class VMXTemplateState
 {
     var $blocks = array();
     var $in = array();
@@ -16,21 +16,21 @@ class TemplateState
     var $input_filename = '';
 }
 
-define('TS_UNIX',     0);
-define('TS_DB',       1);
-define('TS_DB_DATE',  2);
-define('TS_MW',       3);
-define('TS_EXIF',     4);
-define('TS_ORACLE',   5);
-define('TS_ISO_8601', 6);
-define('TS_RFC822',   7);
-
-class Template
+class VMXTemplate
 {
     static $Mon, $mon, $Wday;
-    static $cache_type = NULL;
-    static $cache      = array();
-    static $safe_tags  = '<div> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
+    static $cache_type  = NULL;
+    static $cache       = array();
+    static $safe_tags   = '<div> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
+
+    const TS_UNIX       = 0;
+    const TS_DB         = 1;
+    const TS_DB_DATE    = 2;
+    const TS_MW         = 3;
+    const TS_EXIF       = 4;
+    const TS_ORACLE     = 5;
+    const TS_ISO_8601   = 6;
+    const TS_RFC822     = 7;
 
     var $errors        = array(); // содержит последние ошибки
     var $root          = '.';     // каталог с шаблонами
@@ -314,7 +314,7 @@ class Template
             $v[5] = strlen($v[1]);
         }
 
-        $st = new TemplateState();
+        $st = new VMXTemplateState();
         $st->input_filename = $fn;
 
         // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
@@ -1487,32 +1487,32 @@ $iset";
             // TS_UNIX
             return $ts;
         }
-        elseif ($format == TS_MW)
+        elseif ($format == self::TS_MW)
         {
             return strftime("%Y%m%d%H%M%S", $ts);
         }
-        elseif ($format == TS_DB)
+        elseif ($format == self::TS_DB)
         {
             return strftime("%Y-%m-%d %H:%M:%S", $ts);
         }
-        elseif ($format == TS_DB_DATE)
+        elseif ($format == self::TS_DB_DATE)
         {
             return strftime("%Y-%m-%d", $ts);
         }
-        elseif ($format == TS_ISO_8601)
+        elseif ($format == self::TS_ISO_8601)
         {
             return strftime("%Y-%m-%dT%H:%M:%SZ", $ts);
         }
-        elseif ($format == TS_EXIF)
+        elseif ($format == self::TS_EXIF)
         {
             return strftime("%Y:%m:%d %H:%M:%S", $ts);
         }
-        elseif ($format == TS_RFC822)
+        elseif ($format == self::TS_RFC822)
         {
             $l = localtime($ts);
             return strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", $ts);
         }
-        elseif ($format == TS_ORACLE)
+        elseif ($format == self::TS_ORACLE)
         {
             $l = localtime($ts);
             return strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", $ts);
