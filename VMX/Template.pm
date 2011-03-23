@@ -207,7 +207,7 @@ sub loadfile
     my $load = 0;
     my $mtime;
     if (!$uncompiled_code->{$fn} || $self->{reload} &&
-        $ltimes->{$fn}+$self->{reload} > time)
+        $ltimes->{$fn}+$self->{reload} < time)
     {
         $mtime = [ stat($fn) ] -> [ 9 ];
         $load = 1 if !$uncompiled_code->{$fn} || $mtime > $mtimes->{$fn};
