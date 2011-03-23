@@ -64,7 +64,8 @@ sub error
     {
         $e = $e." at ".$self->{input_filename}.":".$self->{input_line};
     }
-    $e = __PACKAGE__ . "::error: $e\n";
+    my $c = [caller 1];
+    $e = $c->[3].": $e\n";
     push @{$self->{errors}}, $e;
     die $e if $self->{raise_error};
     return $self->{print_error} ? join('', @{$self->{errors}}) : undef;
@@ -149,7 +150,7 @@ sub parse
 sub parse_inline
 {
     my ($self, $code, $vars) = @_;
-    return $self->parse_real(undef, $code, '_main', $vars);
+    return $self->parse_real(undef, $_[1], '_main', $vars);
 }
 
 # "Реальная" функция, обрабатывающая все вызовы типа parse
@@ -168,7 +169,7 @@ sub parse_real
     }
     else
     {
-        $textref = \( $textref );
+        $textref = \( $_[1] );
     }
     my $str = $self->compile($textref, $fn);
     $function ||= '_main';
