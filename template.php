@@ -966,7 +966,7 @@ $iset";
     /*** Функции ***/
 
     /** Алиасы */
-    static $aliases = array(
+    static $function_aliases = array(
         'i'             => 'int',
         'intval'        => 'int',
         'lower'         => 'lc',
@@ -1124,7 +1124,7 @@ $iset";
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
 
     /* подставляет на места $1, $2 и т.п. в строке аргументы */
-    function function_subst()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_subst'", $a); }
+    function function_subst()   { $a = func_get_args(); return self::fearr("'VMXTemplate::exec_subst'", $a); }
 
     /* sprintf */
     function function_sprintf() { $a = func_get_args(); return self::fearr("'sprintf'", $a); }
@@ -1173,7 +1173,7 @@ $iset";
     function function_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
 
     /* сортировка массива */
-    function function_sort()   { $a = func_get_args(); return self::fearr("'VMX_Template::exec_sort'", $a); }
+    function function_sort()   { $a = func_get_args(); return self::fearr("'VMXTemplate::exec_sort'", $a); }
 
     /* пары id => ключ, name => значение для ассоциативного массива */
     function function_pairs($a) { return "self::exec_pairs(is_array($a) ? $a : array())"; }
