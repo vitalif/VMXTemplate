@@ -17,6 +17,18 @@ class VMXTemplateState
     var $input_filename = '';
 }
 
+if (!defined('TS_UNIX'))
+{
+    define('TS_UNIX', 0);
+    define('TS_DB', 1);
+    define('TS_DB_DATE', 2);
+    define('TS_MW', 3);
+    define('TS_EXIF', 4);
+    define('TS_ORACLE', 5);
+    define('TS_ISO_8601', 6);
+    define('TS_RFC822', 7);
+}
+
 class VMXTemplate
 {
     static $Mon, $mon, $Wday;
@@ -1452,9 +1464,9 @@ $iset";
     {
         if (!self::$Mon)
         {
-            self::$Mon = split(' ', 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec');
-            self::$mon = array_reverse(split(' ', 'jan feb mar apr may jun jul aug sep oct nov dec'));
-            self::$Wday = split(' ', 'Sun Mon Tue Wed Thu Fri Sat');
+            self::$Mon = explode(' ', 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec');
+            self::$mon = array_reverse(explode(' ', 'jan feb mar apr may jun jul aug sep oct nov dec'));
+            self::$Wday = explode(' ', 'Sun Mon Tue Wed Thu Fri Sat');
         }
         if (!strcmp(intval($ts), $ts))
         {
