@@ -407,8 +407,9 @@ class VMXTemplate
         for ($i = count($st->functions)-1; $i >= 0; $i--)
         {
             $f = $st->functions[$i];
-            $f = substr_replace($r, '', $f[0], $f[1]-$f[0]);
-            $code .= $f;
+            // здесь использовался substr_replace, но чо-то на 5.3.10 с utf8 оно глючит
+            $code .= substr($r, $f[0], $f[1]-$f[0]);
+            $r = substr($r, 0, $f[0]) . substr($r, $f[1]);
         }
 
         // заворачиваем основной код в _main()
