@@ -245,7 +245,7 @@ class VMXTemplate
         {
             $w = $this->wrapper;
             if (is_callable($w))
-                $w(&$t);
+                call_user_func_array($w, array(&$t));
         }
         return $t;
     }
@@ -1532,5 +1532,388 @@ $iset";
             return strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", $ts);
         }
         return $ts;
+    }
+}
+
+// Parse exception
+class TemplateParseException extends Exception {}
+
+/* Parser grammatic:
+exp: ops_or | "NOT" exp
+ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
+ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
+ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
+ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
+ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
+ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
+exp_neg: exp_not | '-' exp_not
+exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
+nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
+func: name | varref varpart
+list: exp | exp ',' list
+hash: pair | pair ',' hash |
+pair: exp "=>" exp
+varref: name | varref varpart
+varpart: '.' name | '[' exp ']'
+*/
+
+// Lexical + syntactic analyzer + translator
+// of template expressions into PHP code.
+class TemplateExpressionParser
+{
+    var $expression, $tokens, $ptr = 0;
+    var $compiletime_functions = array();
+
+    // ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
+    // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
+    // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
+    // ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
+    // ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
+    // ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
+    static $ops = array(
+        'or'  => array(array('||', '$or', '$xor'), 'and', true),
+        'and' => array(array('&&', '$and'), 'eq', true),
+        'eq'  => array(array('==', '!='), 'cmp', false),
+        'cmp' => array(array('<', '>', '<=', '>='), 'add', false),
+        'add' => array(array('+', '-'), 'mul', true),
+        'mul' => array(array('*', '/', '%'), 'neg', true),
+    );
+
+    // Function aliases
+    static $functions = array(
+        'i'                 => 'int',
+        'intval'            => 'int',
+        'lower'             => 'lc',
+        'lowercase'         => 'lc',
+        'upper'             => 'uc',
+        'uppercase'         => 'uc',
+        'addslashes'        => 'quote',
+        'q'                 => 'quote',
+        'sq'                => 'sql_quote',
+        're_quote'          => 'requote',
+        'preg_quote'        => 'requote',
+        'uri_escape'        => 'urlencode',
+        'uriquote'          => 'urlencode',
+        'substring'         => 'substr',
+        'htmlspecialchars'  => 'html',
+        's'                 => 'html',
+        'strip_tags'        => 'strip',
+        't'                 => 'strip',
+        'h'                 => 'strip_unsafe',
+        'implode'           => 'join',
+        'truncate'          => 'strlimit',
+        'hash_keys'         => 'keys',
+        'array_keys'        => 'keys',
+        'array_slice'       => 'subarray',
+        'hget'              => 'get',
+        'aget'              => 'get',
+        'var_dump'          => 'dump',
+        'process'           => 'parse',
+        'include'           => 'parse',
+        'process_inline'    => 'parse_inline',
+        'include_inline'    => 'parse_inline',
+    );
+
+    // USAGE:
+    // $p = new TemplateExpressionParser($expression);
+    // try { $e = $p->parse(); } catch (Exception $e) { ... }
+    function __construct($expression)
+    {
+        $this->expression = $expression;
+    }
+
+    // Tokenize, parse and return parsed code
+    // @throws TemplateParseException
+    function parse()
+    {
+        $this->tokens = $this->tokenize($expression);
+        $this->ptr = 0;
+        return $this->parse_exp();
+    }
+
+    // Performs lexical analysis of $this->expression
+    // and writes the result into $this->tokens
+    // Possible tokens: name 123.01 0x123 0123 "string" 'string'
+    // and || && == != < > <= >= + - * / % ( ) ! { } , => . [ ]
+    function tokenize($expression)
+    {
+        $twochar = array_flip(explode(' ', '|| && == != <= >= =>'));
+        $onechar = array_flip(explode(' ', '+ - * / % ! , . < > ( ) { } [ ]'));
+        $e = ltrim($expression);
+        $r = array();
+        while (strlen($e))
+        {
+            if (isset($twochar[$t = substr($e, 0, 2)]))
+            {
+                // 2-char operators
+                $r[] = $t;
+                $e = substr($e, 2);
+            }
+            elseif (isset($onechar[$t = $e{0}]))
+            {
+                // 1-char operators
+                $r[] = $t;
+                $e = substr($e, 1);
+            }
+            elseif (preg_match('#^[^a-z_][a-z0-9_]*#is', $e, $m, PREG_OFFSET_CAPTURE))
+            {
+                // Identifier
+                $r[] = '$'.$m[0][0];
+                $e = substr($e, $m[0][1]);
+            }
+            elseif (preg_match('/^((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\'|0\d+|\d+(\.\d+)?|0x\d+)/is', $e, $m, PREG_OFFSET_CAPTURE))
+            {
+                // String or numeric non-negative literal
+                $t = $m[1][0];
+                if ($m[2])
+                    $t = str_replace('$', '\\$', $t);
+                $r[] = '#'.$t;
+                $e = substr($e, $m[0][1]);
+            }
+            else
+            {
+                // Unknown character
+                throw new TemplateParseException(
+                    "Unexpected character '".$e{0}."' marked by >>>HERE<<< in ".
+                    substr($expression, 0, -strlen($e)) . ' >>>HERE<<< ' . $e
+                );
+                break;
+            }
+            $e = ltrim($e);
+        }
+        return $r;
+    }
+
+    // exp: ops_or | "NOT" exp
+    function parse_exp()
+    {
+        if (strtolower($this->tokens[$this->ptr]) == '$not')
+        {
+            $this->ptr++;
+            return '(!'.$this->parse_exp().')';
+        }
+        return $this->parse_ops('or');
+    }
+
+    // Parse operator expression. See self::$ops
+    function parse_ops($name)
+    {
+        list($ops, $next, $repeat) = self::$ops[$name];
+        if (isset(self::$ops[$next]))
+            $next = array(array($this, 'parse_ops'), array($next));
+        else
+            $next = array(array($this, 'parse_'.$next), array());
+        $e = call_user_func_array($next[0], $next[1]);
+        $brace = false;
+        while (in_array(strtolower($this->tokens[$this->ptr]), $ops))
+        {
+            $e .= $this->tokens[$this->ptr++];
+            $e .= call_user_func_array($next[0], $next[1]);
+            $brace = true;
+            if (!$repeat)
+                break;
+        }
+        return $brace ? "($e)" : $e;
+    }
+
+    // exp_neg: exp_not | '-' exp_not
+    function parse_neg()
+    {
+        $neg = false;
+        if ($this->tokens[$this->ptr] == '-')
+        {
+            $neg = true;
+            $this->ptr++;
+        }
+        $e = $this->parse_not();
+        return $neg ? "-($e)" : $e;
+    }
+
+    // exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
+    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
+    // func: name | varref varpart
+    function parse_not()
+    {
+        if ($this->tokens[$this->ptr] == '!')
+        {
+            $this->ptr++;
+            $r = '(!'.$this->parse_not().')';
+        }
+        elseif ($this->tokens[$this->ptr] == '(')
+        {
+            $this->ptr++;
+            $r = $this->parse_exp();
+            $this->consume(')');
+        }
+        elseif ($this->tokens[$this->ptr] == '{')
+        {
+            $this->ptr++;
+            if ($this->tokens[$this->ptr] != '}')
+            {
+                $r = 'array(' . $this->parse_hash() . ')';
+                $this->consume('}');
+            }
+        }
+        elseif ($this->tokens[$this->ptr]{0} == '#')
+        {
+            // Literal
+            $r = substr($this->tokens[$this->ptr++], 1);
+        }
+        elseif ($this->tokens[$this->ptr]{0} == '$')
+        {
+            // Name -> varref or function call
+            $parts = $this->parse_varref();
+            if ($this->tokens[$this->ptr]{0} == '$')
+            {
+                // Single argument function call without braces
+                $r = $this->call_ref($parts, $this->parse_nonbrace());
+            }
+            elseif ($this->tokens[$this->ptr] == '(')
+            {
+                // Function call with braces
+                $this->ptr++;
+                $r = $this->call_ref($parts, $this->parse_list());
+                $this->consume(')');
+            }
+            else
+                $r = $this->gen_varref($parts);
+        }
+        else
+            $this->unexpected(array('!', '(', '{', '#', '$'));
+        return $r;
+    }
+
+    // list: exp | exp ',' list
+    function parse_list()
+    {
+        $r = $this->parse_exp();
+        while ($this->tokens[$this->ptr] == ',')
+        {
+            $this->ptr++;
+            $r .= ', '.$this->parse_exp();
+        }
+        return $r;
+    }
+
+    // hash: pair | pair ',' hash |
+    // pair: exp "=>" exp
+    function parse_hash()
+    {
+        $r = '';
+        $this->ptr--;
+        do
+        {
+            $this->ptr++;
+            if ($this->tokens[$this->ptr] == '}')
+                return $r;
+            $k = $this->parse_exp();
+            $this->consume('=>');
+            $v = $this->parse_exp();
+            $r .= "$k => $v, ";
+        } while ($this->tokens[$this->ptr] == ',');
+        return $r;
+    }
+
+    // varref: name | varref varpart
+    // varpart: '.' name | '[' exp ']'
+    // (always begins with name)
+    function parse_varref()
+    {
+        $r = $this->consume('$');
+        $a = array($r);
+        while ($this->tokens[$this->ptr] == '.' ||
+            $this->tokens[$this->ptr] == '[')
+        {
+            if ($this->tokens[$this->ptr++] == '.')
+            {
+                $a[] = $this->consume('$');
+            }
+            else
+            {
+                $a[] = '['.$this->parse_exp().']';
+                $this->consume(']');
+            }
+        }
+        return $r;
+    }
+
+    // Generate varref code from parse_varref output
+    function gen_varref($parts)
+    {
+        $r = '$this->tpldata[\''.$parts[0].'\']';
+        for ($i = 1; $i < count($parts); $i++)
+        {
+            if ($parts[$i]{0} == '[')
+                $r .= $parts[$i];
+            else
+                $r .= '[\''.$parts[$i].'\']';
+        }
+        return $r;
+    }
+
+    // Construct function call code from $parts (varref parts)
+    // and $args (compiled expressions for function arguments)
+    function call_ref($parts, $args)
+    {
+        $r = false;
+        if (count($parts) == 1)
+        {
+            $fn = $parts[0];
+            if (isset(self::$functions[$fn]))
+            {
+                $fn = 'function_'.self::$functions[$fn];
+                $r = $this->$fn($args);
+            }
+            elseif (method_exists($this, "function_$fn"))
+            {
+                $fn = "function_$fn";
+                $r = $this->$fn($args);
+            }
+            elseif (isset($this->compiletime_functions[$fn]))
+                $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
+            else
+                throw new TemplateParseException("Unknown function: '$fn' in '{$this->expression}'");
+        }
+        if ($r === false)
+            $r = 'call_user_func_array('.$this->gen_varref($r).', $args)';
+        return $r;
+    }
+
+    // Assume $token is next in the stream and move pointer forward
+    // $token may be '$' (assume name), '#' (assume literal),
+    // or an exact value of one of others. For names and literals,
+    // a value is returned, and the token itself for others.
+    function consume($token)
+    {
+        if ($token == '$' || $token == '#')
+        {
+            if ($this->tokens[$this->ptr]{0} == $token)
+                return substr($this->tokens[$this->ptr++], 1);
+            else
+                $this->unexpected($token, 1);
+        }
+        elseif ($this->tokens[$this->ptr] != $token)
+            $this->unexpected($token, 1);
+        return $this->tokens[$this->ptr++];
+    }
+
+    // Raise "unexpected token" error
+    function unexpected($expected, $skip_frames = 0)
+    {
+        if (!is_array($expected))
+            $expected = array($expected);
+        foreach ($tokens as &$e)
+        {
+            if ($e == '#')
+                $e = 'literal';
+            elseif ($e == '$')
+                $e = 'identifier';
+        }
+        $tok = $this->tokens[$this->ptr];
+        if ($tok{0} == '#' || $tok{0} == '$')
+            $tok = substr($tok, 1);
+        $text = "Unexpected '$tok', expected one of ".implode(', ', $expected);
+        // TODO report parse traces
+        throw new TemplateParseException($text);
     }
 }
