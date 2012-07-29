@@ -10,11 +10,22 @@
 
 class VMXTemplateState
 {
+    // Old-style blocks
     var $blocks = array();
+
+    // Stack of code fragments for END checking
+    // array(array($instruction, $subject))
+    // E.g. $instruction = FOR, $subject = varref
     var $in = array();
+
+    // Functions
     var $functions = array();
-    var $output_position = 0;
+
+    // Template filename
     var $input_filename = '';
+
+    // Stack of references to output strings
+    var $output = array();
 }
 
 if (!defined('TS_UNIX'))
@@ -95,7 +106,10 @@ class VMXTemplate
     }
 
     // Подлить в огонь переменных. Возвращает новый массив.
-    function assign_vars($new = NULL, $value = NULL) { return $this->vars($new, $value); }
+    function assign_vars($new = NULL, $value = NULL)
+    {
+        return $this->vars($new, $value);
+    }
     function vars($new = NULL, $value = NULL)
     {
         if (is_array($new))
@@ -308,304 +322,7 @@ class VMXTemplate
         }
         else
             $func_ns = md5($fn);
-
-        // начала/концы спецстрок
-        $bc = $this->begin_code;
-        if (!$bc)
-            $bc = '<!--';
-        $ec = $this->end_code;
-        if (!$ec)
-            $ec = '-->';
-
-        // маркер начала, маркер конца, обработчик, съедать ли начало и конец строки
-        $blk = array(array($bc, $ec, 'compile_code_fragment', $this->eat_code_line));
-        if ($this->begin_subst && $this->end_subst)
-            $blk[] = array($this->begin_subst, $this->end_subst, 'compile_substitution');
-        foreach ($blk as &$v)
-        {
-            $v[4] = strlen($v[0]);
-            $v[5] = strlen($v[1]);
-        }
-
-        $st = new VMXTemplateState();
-        $st->input_filename = $fn;
-
-        // ищем фрагменты кода - на регэкспах-то было не очень правильно, да и медленно!
-        $r = '';
-        $pp = 0;
-        while ($code)
-        {
-            $p = array();
-            $b = NULL;
-            // ищем ближайшее
-            foreach ($blk as $i => $bi)
-                if (($p[$i] = strpos($code, $bi[0], $pp)) !== false &&
-                    (is_null($b) || $p[$i] < $p[$b]))
-                    $b = $i;
-            if (!is_null($b))
-            {
-                /* это означает, что в случае отсутствия корректной инструкции
-                   в найденной позиции надо пропустить ТОЛЬКО её начало и попробовать
-                   найти что-нибудь снова! */
-                $pp = $p[$b]+$blk[$b][4];
-                $e = strpos($code, $blk[$b][1], $pp);
-                if ($e >= 0)
-                {
-                    $frag = substr($code, $p[$b]+$blk[$b][4], $e-$p[$b]-$blk[$b][4]);
-                    $f = $blk[$b][2];
-                    if (!preg_match('/^\s*\n/s', $frag))
-                    {
-                        /* Некоторые инструкции хотят видеть позицию в выходном потоке.
-                           Например, FUNCTION и END. Поэтому преобразуем текст
-                           до вызова обработчика. */
-                        $x_pp = $pp - $blk[$b][4];
-                        $l = 0;
-                        if ($x_pp > 0)
-                        {
-                            $text = substr($code, 0, $x_pp);
-                            $text = addcslashes($text, '\\\'');
-                            // съедаем перевод строки, если надо
-                            if ($blk[$b][5])
-                                $text = preg_replace('/\r?\n\r?[ \t]*$/s', '', $text);
-                            if ($l = strlen($text))
-                                $l += 8;
-                        }
-                        // записываем позицию
-                        $st->output_position = $l + strlen($r);
-                        // вызываем обработчик
-                        $frag = $this->$f($st, $frag);
-                    }
-                    else
-                        $frag = NULL;
-                    if (!is_null($frag))
-                    {
-                        // есть инструкция
-                        $pp = $x_pp;
-                        if ($pp > 0)
-                        {
-                            if (strlen($text))
-                                $r .= "\$t.='$text';\n"; // длина как раз этого = $l+8
-                            $code = substr($code, $pp);
-                            $pp = 0;
-                        }
-                        $r .= $frag;
-                        $code = substr($code, $e+$blk[$b][5]-$p[$b]);
-                    }
-                }
-            }
-            else
-            {
-                // финиш
-                $code = addcslashes($code, '\\\'');
-                $r .= "\$t.='$code';\n";
-                $code = '';
-            }
-        }
-
-        // перемещаем функции в конец кода
-        $code = '';
-        for ($i = count($st->functions)-1; $i >= 0; $i--)
-        {
-            $f = $st->functions[$i];
-            // здесь использовался substr_replace, но чо-то на 5.3.10 с utf8 оно глючит
-            $code .= substr($r, $f[0], $f[1]-$f[0]);
-            $r = substr($r, 0, $f[0]) . substr($r, $f[1]);
-        }
-
-        // заворачиваем основной код в _main()
-        $rfn = addcslashes($fn, '\\\'');
-        $code = "<?php // $fn
-class Template_$func_ns extends ".__CLASS__." {
-static \$template_filename = '$rfn';
-function __construct(\$t) {
-\$this->tpldata = &\$t->tpldata;
-\$this->parent = &\$t;
-}
-function ___main() {
-\$stack = array();
-\$t = '';
-$r
-return \$t;
-}
-$code
-}
-";
-        $r = '';
-
-        // записываем в файл
-        $fp = fopen($file, 'wb');
-        fwrite($fp, $code);
-        fclose($fp);
-
-        // возвращаем имя файла
-        return $file;
-    }
-
-    // ELSE
-    // ELSE IF expression
-    function compile_code_fragment_else($st, $kw, $t)
-    {
-        if (preg_match('/^IF\s+(.*)$/is', $t, $m))
-            return $this->compile_code_fragment_if($st, 'elsif', $m[1]);
-        return $t ? NULL : "} else {";
-    }
-
-    // IF expression
-    // ELSIF expression
-    function compile_code_fragment_if($st, $kw, $t)
-    {
-        $e = $this->compile_expression($t);
-        if ($e === NULL)
-        {
-            $this->error("Invalid expression in $kw: '$t'");
-            return NULL;
-        }
-        $cf_if = array('elseif' => "} else", 'elsif' => "} else", 'if' => "");
-        $kw = $cf_if[$kw];
-        if (!$kw)
-            $st->in[] = array('if');
-        return $kw . "if ($e) {\n";
-    }
-    function compile_code_fragment_elsif($st, $kw, $t)
-    {
-        return $this->compile_code_fragment_if($st, $kw, $t);
-    }
-    function compile_code_fragment_elseif($st, $kw, $t)
-    {
-        return $this->compile_code_fragment_if($st, $kw, $t);
-    }
-
-    // END [block]
-    function compile_code_fragment_end($st, $kw, $t)
-    {
-        if (!count($st->in))
-        {
-            $this->error("END $t without begin directive");
-            return NULL;
-        }
-        $in = array_pop($st->in);
-        $w = $in[0];
-        if ($this->strict_end &&
-            ($t && ($w != 'begin' || !$in[1] || $in[1] != $t) ||
-            !$t && $w == 'begin' && $in[1]))
-        {
-            $st->in[] = $in;
-            $this->error(strtoupper($kw)." $t after ".strtoupper($w)." ".$in[1]);
-            return NULL;
-        }
-        if ($w == 'set')
-        {
-            return $this->varref($in[1]) . " = \$t;\n\$t = array_pop(\$stack);\n";
-        }
-        elseif ($w == 'function')
-        {
-            $s = "return \$t;\n}\n";
-            foreach (array('blocks', 'in') as $k)
-                $st->$k = $in[2][$k];
-            $st->functions[count($st->functions)-1][] = $st->output_position+strlen($s);
-            return $s;
-        }
-        elseif ($w == 'begin' || $w == 'for')
-        {
-            if ($w == 'begin')
-                array_pop($st->blocks);
-            $v = $this->varref($in[2]);
-            $v_i = $this->varref($in[2].'#');
-            return "}
-array_pop(\$stack);
-$v_i = array_pop(\$stack);
-$v = array_pop(\$stack);
-";
-        }
-        return "}\n";
-    }
-
-    // SET varref ... END
-    // SET varref = expression
-    function compile_code_fragment_set($st, $kw, $t)
-    {
-        if (!preg_match('/^((?:\w+\.)*\w+)(\s*=\s*(.*))?/is', $t, $m))
-            return NULL;
-        if (strlen($m[3]))
-        {
-            $e = $this->compile_expression($m[3]);
-            if ($e === NULL)
-            {
-                $this->error("Invalid expression in $kw: ($m[3])");
-                return NULL;
-            }
-            return $this->varref($m[1]) . ' = ' . $e . ";\n";
-        }
-        $st->in[] = array($kw, $m[1]);
-        return "\$stack[] = \$t;\n\$t = '';\n";
-    }
-
-    // FUNCTION|BLOCK|MACRO name ... END
-    // FUNCTION|BLOCK|MACRO name = expression
-    function compile_code_fragment_function($st, $kw, $t)
-    {
-        if (!preg_match('/^([^=]*)(=\s*(.*))?/is', $t, $m))
-            return NULL;
-        if (!preg_match('/^[^\W\d]\w*$/', $m[1]) || $m[1] == '_main')
-        {
-            $this->error("Template function names:
-* must start with a letter
-* must consist of alphanumeric characters
-* must not be equal to '_main'
-I see 'FUNCTION $m[1]' instead.");
-            return NULL;
-        }
-        if ($st->functions && count($st->functions[count($st->functions)-1]) == 1)
-        {
-            $this->error("Template functions cannot be nested");
-            return NULL;
-        }
-        /* при первом обращении к шаблону все его функции,
-           включая "основную" _main, становятся членами класса шаблона.
-           при последующих они просто вызываются без дополнительных затрат.
-           слишком много функций в классе не появится, т.к. PHP всё равно
-           сбрасывается при каждом запросе. */
-        $s = "function __$m[1] () {\n";
-        if (strlen($m[3]))
-        {
-            $e = $this->compile_expression($m[3]);
-            if ($e === NULL)
-            {
-                $this->error("Invalid expression in $kw: ($m[3])");
-                return NULL;
-            }
-            $s .= "return $e;\n}\n";
-            $st->functions[] = array(
-                $st->output_position,
-                $st->output_position+strlen($s)
-            );
-            return $s;
-        }
-        /* блоки сохраняются и сбрасываются */
-        $st->in = array(array('function', $m[1], array('in' => $st->in, 'blocks' => $st->blocks)));
-        $st->blocks = array();
-        /* запоминаем положение в выходном потоке
-           для последующего разбиения его на функции */
-        $st->functions[] = array($st->output_position);
-        return $s . "\$stack = array();\n\$t = '';\n";
-    }
-    function compile_code_fragment_block($st, $kw, $t)
-    {
-        return $this->compile_code_fragment_function($st, $kw, $t);
-    }
-    function compile_code_fragment_macro($st, $kw, $t)
-    {
-        return $this->compile_code_fragment_function($st, $kw, $t);
-    }
-
-    // INCLUDE template.tpl
-    // legacy, в новом варианте можно использовать с кавычками, и это уже идёт как функция
-    function compile_code_fragment_include($st, $kw, $t)
-    {
-        $t = preg_replace('/^[a-z0-9_\.]+$/', '\'\0\'', $t);
-        if (!is_null($t = $this->compile_expression("include $t")))
-            return "\$t.=$t;\n";
-        return NULL;
+        
     }
 
     static function array1($a)
@@ -617,304 +334,9 @@ I see 'FUNCTION $m[1]' instead.");
         return array($a);
     }
 
-    // FOR[EACH] varref = array
-    // или
-    // FOR[EACH] varref (тогда записывается в себя)
-    function compile_code_fragment_for($st, $kw, $t, $in = false)
-    {
-        if (preg_match('/^((?:\w+\.)*\w+)(\s*=\s*(.*))?/s', $t, $m))
-        {
-            if (!$in)
-                $st->in[] = array('for', $t, $m[1]);
-            $v = $this->varref($m[1]);
-            $v_i = $this->varref($m[1].'#');
-            if (substr($v_i,-1) == substr($v,-1))
-            {
-                $iset = "$v_i = \$stack[count(\$stack)-1]++;\n";
-            }
-            else
-            {
-                // небольшой хак для $1 =~ \.\d+$
-                $iset = '';
-            }
-            $t = $m[3] ? $this->compile_expression($m[3]) : $v;
-            return
-"\$stack[] = $v;
-\$stack[] = $v_i;
-\$stack[] = 0;
-foreach (self::array1($t) as \$item) {
-$v = \$item;
-$iset";
-        }
-        return NULL;
-    }
+    /*** Function implementations ***/
 
-    function compile_code_fragment_foreach($st, $kw, $t)
-    {
-        return $this->compile_code_fragment_for($st, $kw, $t);
-    }
-
-    // BEGIN block [AT e] [BY e] [TO e]
-    // тоже legacy, но пока оставлю...
-    function compile_code_fragment_begin($st, $kw, $t)
-    {
-        if (preg_match('/^([a-z_][a-z0-9_]*)(?:\s+AT\s+(.+))?(?:\s+BY\s+(.+))?(?:\s+TO\s+(.+))?\s*$/is', $t, $m))
-        {
-            $st->blocks[] = $m[1];
-            $t = implode('.', $st->blocks);
-            $st->in[] = array('begin', $m[1], $t);
-            $e = $t;
-            if ($m[2])
-            {
-                $e = "array_slice($e, $m[2]";
-                if ($m[4])
-                    $e .= ", $m[4]";
-                $e .= ")";
-            }
-            if ($m[3])
-            {
-                $e = "self::exec_subarray_divmod($e, $m[3])";
-            }
-            if ($e != $t)
-            {
-                $e = "$t = $e";
-            }
-            return $this->compile_code_fragment_for($st, 'for', $e, 1);
-        }
-        return NULL;
-    }
-
-    // компиляция фрагмента кода <!-- ... -->. это может быть:
-    // 1) [ELSE] IF выражение
-    // 2) BEGIN/FOR/FOREACH имя блока
-    // 3) END [имя блока]
-    // 4) SET переменная
-    // 5) SET переменная = выражение
-    // 6) INCLUDE имя_файла_шаблона
-    // 7) выражение
-    function compile_code_fragment($st, $e)
-    {
-        $e = ltrim($e, " \t\r");
-        $e = rtrim($e);
-        if (substr($e, 0, 1) == '#')
-        {
-            // комментарий!
-            return '';
-        }
-        if (preg_match('/^(?:(ELS)(?:E\s*)?)?IF!\s+(.*)$/s', $e, $m))
-        {
-            $e = $m[1].'IF NOT '.$m[2];
-            // обратная совместимость... нафига она нужна?...
-            // но пока пусть останется...
-            $this->error("Legacy IF! used, consider changing it to IF NOT");
-        }
-        list($kw, $t) = preg_split('/\s+/', $e, 2);
-        $kw = strtolower($kw);
-        if (!preg_match('/\W/s', $kw) &&
-            method_exists($this, $sub = "compile_code_fragment_$kw") &&
-            !is_null($r = $this->$sub($st, $kw, $t)))
-            return $r;
-        elseif (!is_null($t = $this->compile_expression($e)))
-        {
-            // если заданы маркеры подстановок (по умолчанию { ... }),
-            // то выражения, вычисляемые в директивах (по умолчанию <!-- ... -->),
-            // не подставляются в результат
-            if ($this->begin_subst && $this->end_subst &&
-                !preg_match('/^(parse|process|include|exec)/is', $e))
-                return "$t;\n";
-            return "\$t.=$t;\n";
-        }
-        return NULL;
-    }
-
-    // компиляция подстановки переменной {...} это просто выражение
-    function compile_substitution($st, $e)
-    {
-        $e = $this->compile_expression($e);
-        if ($e !== NULL)
-            return "\$t.=$e;\n";
-        return NULL;
-    }
-
-    // компиляция выражения. это может быть:
-    // 1) "строковой литерал"
-    // 2) 123.123 или 0123 или 0x123
-    // 3) переменная
-    // 4) функция(выражение,выражение,...,выражение)
-    // 5) функция выражение
-    // 6) для legacy mode: переменная/имя_функции
-    function compile_expression($e, $after = NULL)
-    {
-        if ($after && (!is_array($after) || !count($after)))
-            $after = NULL;
-        $e = ltrim($e, " \t\r");
-        if ($after)
-            $after[0] = '';
-        else
-            $e = rtrim($e);
-        // строковой или числовой литерал
-        if (preg_match('/^((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\'|-?0\d+|-?[0-9]\d*(\.\d+)?|-?0x\d+)\s*(.*)$/is', $e, $m))
-        {
-            if ($m[4])
-            {
-                if (!$after)
-                    return NULL;
-                $after[0] = $m[4];
-            }
-            $e = $m[1];
-            if ($m[2])
-                $e = str_replace('$', '\\$', $e);
-            return $e;
-        }
-        // функция нескольких аргументов или вызов метода объекта
-        elseif (preg_match('/^([a-z_][a-z0-9_]*((?:\.[a-z0-9_]+)*))\s*\((.*)$/is', $e, $m))
-        {
-            /* вызов методов по цепочке типа obj.method().other_method()
-               не поддерживаем, потому что к таким цепочкам без сохранения звеньев
-               нервно относится сам PHP */
-            $f = strtolower($m[1]);
-            if ($m[2])
-            {
-                /* вызов метода объекта obj.method() */
-                $p = strrpos($m[1], '.');
-                $method = substr(substr_replace($m[1], '', $p+1), 1);
-                if (preg_match('/^[^a-z_]/is', $method))
-                {
-                    $this->error("Object method name cannot start with a number: '$method' of '$m[1]'");
-                    return NULL;
-                }
-                $varref = $this->varref($m[1]).'->'.$method;
-            }
-            elseif ($this->compiletime_functions[$f])
-                $ct_callable = $this->compiletime_functions[$f];
-            else
-            {
-                if (!($a = self::$function_aliases[$f]))
-                    $a = $f;
-                if (!method_exists($this, "function_$a"))
-                {
-                    $this->error("Unknown function: '$f' in '$e'");
-                    return NULL;
-                }
-                $ct_callable = array($this, "function_$a");
-            }
-            /* разбираем аргументы */
-            $a = $m[3];
-            $args = array();
-            while (!is_null($e = $this->compile_expression($a, array(&$a))))
-            {
-                $args[] = $e;
-                if (preg_match('/^\s*((,|=>)\s*)?\)/s', $a))
-                    break;
-                elseif ($a == ($b = preg_replace('/^\s*(,|=>)/s', '', $a)))
-                {
-                    $this->error("Unexpected token: '$a' in $f($m[2] parameter list");
-                    return NULL;
-                }
-                $a = $b;
-            }
-            if ($a == ($b = preg_replace('/^\s*((,|=>)\s*)?\)\s*/', '', $a)))
-            {
-                $this->error("Unexpected token: '$a' in the end of $f($m[2] parameter list");
-                return NULL;
-            }
-            $a = $b;
-            /* записываем остатки в $after */
-            if ($a)
-            {
-                if (!$after)
-                    return NULL;
-                $after[0] = $a;
-            }
-            /* вызов метода объекта или компиляция вызова функции */
-            if ($varref)
-                return "$varref(".implode(",", $args).")";
-            return call_user_func_array($ct_callable, $args);
-        }
-        // функция одного аргумента
-        elseif (preg_match('/^([a-z_][a-z0-9_]*)\s+(?=\S)(.*)$/is', $e, $m))
-        {
-            $f = strtolower($m[1]);
-            if (!($a = self::$function_aliases[$f]))
-                $a = $f;
-            if (!method_exists($this, "function_$a"))
-            {
-                $this->error("Unknown function: '$f' in '$e'");
-                return NULL;
-            }
-            $function_name = "function_$a";
-            $a = $m[2];
-            $arg = $this->compile_expression($a, array(&$a));
-            if ($arg === NULL)
-            {
-                $this->error("Invalid expression: ($e)");
-                return NULL;
-            }
-            $a = ltrim($a);
-            if ($a)
-            {
-                if (!$after)
-                    return NULL;
-                $after[0] = $a;
-            }
-            return $this->$function_name($arg);
-        }
-        // переменная плюс legacy-mode переменная/функция
-        elseif (preg_match('/^((?:[a-z0-9_]+\.)*(?:[a-z0-9_]+\#?))(?:\/([a-z]+))?\s*(.*)$/is', $e, $m))
-        {
-            if ($m[3])
-            {
-                if (!$after)
-                    return NULL;
-                $after[0] = $m[3];
-            }
-            $e = $this->varref($m[1]);
-            if ($m[2])
-            {
-                $f = strtolower($m[2]);
-                if (!($a = self::$function_aliases[$f]))
-                    $a = $f;
-                if (!method_exists($this, "function_$a"))
-                {
-                    $this->error("Unknown function: '$f' called in legacy mode ($m[0])");
-                    return NULL;
-                }
-                $f = "function_$a";
-                $e = $this->$f($e);
-            }
-            return $e;
-        }
-        return NULL;
-    }
-
-    // генерация ссылки на переменную
-    function varref($e)
-    {
-        if (!$e)
-            return "";
-        $e = explode('.', $e);
-        $t = '$this->tpldata';
-        foreach ($e as $el)
-        {
-            if (preg_match('/^\d+$/', $el))
-            {
-                $t .= "[$el]";
-            }
-            else
-            {
-                $el = addcslashes($el, '\\\'');
-                $t .= "['$el']";
-            }
-        }
-        return $t;
-    }
-
-    // операция над аргументами
-    static function fmop($op, $args)
-    {
-        return "((" . join(") $op (", $args) . "))";
-    }
-
+    // Is the array associative?
     static function is_assoc($a)
     {
         foreach (array_keys($a) as $k)
@@ -923,7 +345,7 @@ $iset";
         return false;
     }
 
-    // вспомогательная функция - вызов функции с раскрытием аргументов
+    // Call a function with merged array arguments
     static function call_array_func()
     {
         $args = func_get_args();
@@ -937,9 +359,10 @@ $iset";
             else
                 $aa[] = $a;
         }
-        return call_user_func_array($cb, $args);
+        return call_user_func_array($cb, $aa);
     }
 
+    // Returns count of elements for arrays and 0 for others
     static function array_count($a)
     {
         if (is_array($a))
@@ -947,17 +370,7 @@ $iset";
         return 0;
     }
 
-    // вызов функции с аргументами и раскрытием массивов
-    static function fearr($f, $args)
-    {
-        $e = "self::call_array_func($f";
-        foreach ($args as $a)
-            $e .= ", $a";
-        $e .= ")";
-        return $e;
-    }
-
-    // перлоподобный OR-оператор, который возвращает первое истинное значение
+    // Perlish OR operator - returns first true value
     static function perlish_or()
     {
         $a = func_get_args();
@@ -967,7 +380,7 @@ $iset";
         return false;
     }
 
-    // вызов своей функции
+    // Call a function
     function exec_call($f, $sub, $args)
     {
         if (is_callable($sub))
@@ -976,55 +389,1152 @@ $iset";
         return NULL;
     }
 
-    /*** Функции ***/
+    // Variable dump
+    static function exec_dump($var)
+    {
+        ob_start();
+        var_dump($var);
+        $var = ob_get_contents();
+        ob_end_clean();
+        return $var;
+    }
 
-    /** Алиасы */
-    static $function_aliases = array(
-        'i'             => 'int',
-        'intval'        => 'int',
-        'lower'         => 'lc',
-        'lowercase'     => 'lc',
-        'upper'         => 'uc',
-        'uppercase'     => 'uc',
-        'addslashes'    => 'quote',
-        'q'             => 'quote',
-        'sq'            => 'sql_quote',
-        're_quote'      => 'requote',
-        'preg_quote'    => 'requote',
-        'uri_escape'    => 'urlencode',
-        'uriquote'      => 'urlencode',
-        'substring'     => 'substr',
-        'htmlspecialchars' => 'html',
-        's'             => 'html',
-        'strip_tags'    => 'strip',
-        't'             => 'strip',
-        'h'             => 'strip_unsafe',
-        'implode'       => 'join',
-        'truncate'      => 'strlimit',
-        'hash_keys'     => 'keys',
-        'array_keys'    => 'keys',
-        'array_slice'   => 'subarray',
-        'hget'          => 'get',
-        'aget'          => 'get',
-        'var_dump'      => 'dump',
-        'process'       => 'parse',
-        'include'       => 'parse',
-        'process_inline' => 'parse_inline',
-        'include_inline' => 'parse_inline',
+    // Extract values from an array by modulus of their indexes
+    // exec_subarray_divmod([], 2)
+    // exec_subarray_divmod([], 2, 1)
+    static function exec_subarray_divmod($array, $div, $mod)
+    {
+        if (!$div || !is_array($array))
+            return $array;
+        if (!$mod)
+            $mod = 0;
+        $i = 0;
+        $r = array();
+        foreach ($array as $k => $v)
+            if (($i % $div) == $mod)
+                $r[$k] = $v;
+        return $r;
+    }
+
+    // Executes subst()
+    static function exec_subst($str)
+    {
+        $args = func_get_args();
+        $str = preg_replace_callback('/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is', create_function('$m', 'return $args[$m[2]?$m[2]:$m[3]];'), $str);
+        return $str;
+    }
+
+    // Normal sort, but returns the sorted array
+    static function exec_sort($array)
+    {
+        sort($array);
+        return $array;
+    }
+
+    // Returns array item
+    static function exec_get($array, $key)
+    {
+        return $array[$key];
+    }
+
+    // Creates hash from an array
+    static function exec_hash($array)
+    {
+        $hash = array();
+        $l = count($array);
+        for ($i = 0; $i < $l; $i += 2)
+            $hash[$array[$i]] = $array[$i+1];
+        return $hash;
+    }
+
+    // For a hash, returns an array with pairs { key => 'key', value => 'value' }
+    static function exec_pairs($array)
+    {
+        $r = array();
+        foreach ($array as $k => $v)
+            $r[] = array('key' => $k, 'value' => $v);
+        return $r;
+    }
+
+    // Limit string length, cut it on space boundary and add '...' if length is over
+    static function strlimit($str, $maxlen, $dots = '...')
+    {
+        if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
+            return $str;
+        $str = substr($str, 0, $maxlen);
+        $p = strrpos($str, ' ');
+        if (!$p || ($pt = strrpos($str, "\t")) > $p)
+            $p = $pt;
+        if ($p)
+            $str = substr($str, 0, $p);
+        return $str . $dots;
+    }
+
+    // UTF-8 (mb_internal_encoding() really) variant of strlimit()
+    static function mb_strlimit($str, $maxlen, $dots = '...')
+    {
+        if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
+            return $str;
+        $str = mb_substr($str, 0, $maxlen);
+        $p = mb_strrpos($str, ' ');
+        if (!$p || ($pt = mb_strrpos($str, "\t")) > $p)
+            $p = $pt;
+        if ($p)
+            $str = mb_substr($str, 0, $p);
+        return $str . $dots;
+    }
+
+    // UTF-8 lcfirst()
+    static function mb_lcfirst($str)
+    {
+        return mb_strtolower(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+    }
+
+    // UTF-8 ucfirst()
+    static function mb_ucfirst($str)
+    {
+        return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+    }
+
+    // Limited-edition timestamp parser
+    static function timestamp($ts = 0, $format = 0)
+    {
+        if (!self::$Mon)
+        {
+            self::$Mon = explode(' ', 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec');
+            self::$mon = array_reverse(explode(' ', 'jan feb mar apr may jun jul aug sep oct nov dec'));
+            self::$Wday = explode(' ', 'Sun Mon Tue Wed Thu Fri Sat');
+        }
+        if (!strcmp(intval($ts), $ts))
+        {
+            // TS_UNIX or Epoch
+            if (!$ts)
+                $ts = time;
+        }
+        elseif (preg_match('/^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/s', $ts, $m))
+        {
+            // TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
+            $ts = mktime(0+$m[4], 0+$m[5], 0+$m[6], $m[2], $m[3], $m[1]);
+        }
+        elseif (preg_match('/^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/s', $ts, $m))
+        {
+            // TS_ORACLE
+            $ts = mktime($m[4], $m[5], $m[6], $mon[strtolower($m[2])]+1, intval($m[1]), $m[3] < 100 ? $m[3]+1900 : $m[3]);
+        }
+        elseif (preg_match('/^\s*..., (\d\d?) (...) (\d{4,}) (\d\d):(\d\d):(\d\d)\s*([\+\- ]\d\d)\s*$/s', $ts, $m))
+        {
+            // TS_RFC822
+            $ts = mktime($m[4], $m[5], $m[6], $mon[strtolower($m[2])]+1, intval($m[1]), $m[3]);
+        }
+        else
+        {
+            // Bogus value, return NULL
+            return NULL;
+        }
+
+        if (!$format)
+        {
+            // TS_UNIX
+            return $ts;
+        }
+        elseif ($format == self::TS_MW)
+        {
+            return strftime("%Y%m%d%H%M%S", $ts);
+        }
+        elseif ($format == self::TS_DB)
+        {
+            return strftime("%Y-%m-%d %H:%M:%S", $ts);
+        }
+        elseif ($format == self::TS_DB_DATE)
+        {
+            return strftime("%Y-%m-%d", $ts);
+        }
+        elseif ($format == self::TS_ISO_8601)
+        {
+            return strftime("%Y-%m-%dT%H:%M:%SZ", $ts);
+        }
+        elseif ($format == self::TS_EXIF)
+        {
+            return strftime("%Y:%m:%d %H:%M:%S", $ts);
+        }
+        elseif ($format == self::TS_RFC822)
+        {
+            $l = localtime($ts);
+            return strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", $ts);
+        }
+        elseif ($format == self::TS_ORACLE)
+        {
+            $l = localtime($ts);
+            return strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", $ts);
+        }
+        return $ts;
+    }
+}
+
+// Parse exception
+class TemplateParseException extends Exception {}
+
+/* Parser grammar:
+
+--- template.y ---
+
+*/
+
+class VMXTemplateOptions
+{
+    var $begin_code    = '<!--';    // instruction start
+    var $end_code      = '-->';     // instruction end
+    var $begin_subst   = '{';       // substitution start (optional)
+    var $end_subst     = '}';       // substitution end (optional)
+    var $no_code_subst = false;     // do not substitute expressions in instructions
+    var $eat_code_line = true;      // remove the "extra" lines which contain instructions only
+    var $root          = '.';       // directory with templates
+    var $cache_dir     = false;     // compiled templates cache directory
+    var $reload        = 1;         // 0 means to not check for new versions of cached templates
+    var $wrapper       = false;     // filter for generated content
+    var $use_utf8      = true;      // use UTF-8 for all string operations on template variables
+    var $raise_error   = false;     // die() on fatal template errors
+    var $print_error   = false;     // print fatal template errors
+    var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
+    var $compiletime_functions = array();   // custom compilation time functions (code generators)
+
+    function __construct($options = array())
+    {
+        $this->set($options);
+    }
+
+    function set($options)
+    {
+        foreach ($options as $k => $v)
+            if (isset($this->$k))
+                $this->$k = $v;
+        if (!$this->begin_subst || !$this->end_subst)
+        {
+            $this->begin_subst = false;
+            $this->end_subst = false;
+            $this->no_code_subst = false;
+        }
+    }
+}
+
+/**
+ * Parser of templates and expressions into PHP code.
+ * Includes:
+ * - Lexical analyzer (~regexp)
+ * - O(n) recursive descent syntactic analyzer and translator
+ */
+class VMXTemplateExpressionParser
+{
+    // Options, state
+    var $options, $st;
+
+    // Code (string) and current position inside it
+    var $code, $codelen, $pos, $lineno;
+
+    // Extracted tokens (array), their source positions and current token number
+    var $tokens, $tokpos, $tokline, $ptr;
+
+    // Possible tokens consisting of special characters
+    static $chartokens = '+ - * / % ! , . < > ( ) { } [ ] || && == != <= >= =>';
+
+    // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
+    // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
+    // ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
+    // ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
+    // ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
+    static $ops = array(
+        'or'  => array(array('||', '$or', '$xor'), 'and', true),
+        'and' => array(array('&&', '$and'), 'eq', true),
+        'eq'  => array(array('==', '!='), 'cmp', false),
+        'cmp' => array(array('<', '>', '<=', '>='), 'add', false),
+        'add' => array(array('+', '-'), 'mul', true),
+        'mul' => array(array('*', '/', '%'), 'neg', true),
     );
+
+    // Function aliases
+    static $functions = array(
+        'i'                 => 'int',
+        'intval'            => 'int',
+        'lower'             => 'lc',
+        'lowercase'         => 'lc',
+        'upper'             => 'uc',
+        'uppercase'         => 'uc',
+        'addslashes'        => 'quote',
+        'q'                 => 'quote',
+        'sq'                => 'sql_quote',
+        're_quote'          => 'requote',
+        'preg_quote'        => 'requote',
+        'uri_escape'        => 'urlencode',
+        'uriquote'          => 'urlencode',
+        'substring'         => 'substr',
+        'htmlspecialchars'  => 'html',
+        's'                 => 'html',
+        'strip_tags'        => 'strip',
+        't'                 => 'strip',
+        'h'                 => 'strip_unsafe',
+        'implode'           => 'join',
+        'truncate'          => 'strlimit',
+        'hash_keys'         => 'keys',
+        'array_keys'        => 'keys',
+        'array_slice'       => 'subarray',
+        'hget'              => 'get',
+        'aget'              => 'get',
+        'var_dump'          => 'dump',
+        'process'           => 'parse',
+        'include'           => 'parse',
+        'process_inline'    => 'parse_inline',
+        'include_inline'    => 'parse_inline',
+    );
+
+    /**
+     * USAGE:
+     * $p = new TemplateExpressionParser($options);
+     * try { $e = $p->parse_all($code); } catch (Exception $e) { ... }
+     */
+    function __construct(VMXTemplateOptions $options)
+    {
+        $this->options = $options;
+        $this->nchar = array();
+        foreach (explode(' ', self::$chartokens) as $t)
+            $this->nchar[strlen($t)][$t] = true;
+        // Add code fragment finishing token to the list
+        $this->nchar[strlen($this->options->end_code)][$this->options->end_code] = true;
+        if ($this->end_subst)
+            $this->nchar[strlen($this->options->end_subst)][$this->options->end_subst] = true;
+        $this->lens = array_keys($this->nchar);
+        rsort($this->lens);
+    }
+
+    /*** Lexical analysis ***/
+
+    function clear_tokens()
+    {
+        $this->tokens = array();
+        $this->tokpos = array();
+        $this->tokline = array();
+        $this->ptr = 0;
+    }
+
+    function set_code($code)
+    {
+        $this->code = $code;
+        $this->pos = $this->lineno = 0;
+        $this->codelen = strlen($this->code);
+        $this->clear_tokens();
+    }
+
+    /**
+     * Get (current+$num) token from buffer or read it from the source
+     */
+    function tok($num = 0)
+    {
+        while (($this->ptr+$num >= count($this->tokens)) && $this->read_token())
+        {
+            // Read tokens
+        }
+        if ($this->ptr+$num >= count($this->tokens))
+        {
+            return false;
+        }
+        return $this->tokens[$this->ptr+$num];
+    }
+
+    /**
+     * Get current token position
+     */
+    function tokpos($num)
+    {
+        if (!$this->tok($num))
+        {
+            return false;
+        }
+        return array($this->tokpos[$this->ptr+$num], $this->tokline[$this->ptr+$num]);
+    }
+
+    function throw($msg, $toknum = 0)
+    {
+        if ($toknum)
+        {
+            $l = $this->lineno;
+            $p = $this->pos;
+        }
+        else
+        {
+            list($l, $p) = $this->tokpos($toknum);
+        }
+        throw new TemplateParseException("[line $l, byte $p] $msg");
+    }
+
+    /**
+     * Read next token from the stream and append it to $this->tokens,tokpos,tokline
+     * Returns true if a token was read, and false if EOF occurred
+     */
+    function read_token()
+    {
+        while ($this->pos < $this->codelen)
+        {
+            // Skip whitespace
+            $t = $this->code{$this->pos};
+            if ($t == "\n")
+                $this->lineno++;
+            elseif ($t != "\t" && $t != ' ')
+                break;
+            $this->pos++;
+        }
+        if ($this->pos >= $this->codelen)
+        {
+            // End of code
+            return false;
+        }
+        if (preg_match('#[a-z_][a-z0-9_]*#Ais', $this->code, $m, 0, $this->pos))
+        {
+            // Identifier
+            $this->tokpos[] = $this->pos;
+            $this->tokline[] = $this->lineno;
+            $this->tokens[] = '$'.$m[0];
+            $this->pos += strlen($m[0]);
+        }
+        elseif (preg_match(
+            '/((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\''.
+            '|0\d+|\d+(\.\d+)?|0x\d+)/Ais', $this->code, $m, 0, $this->pos))
+        {
+            // String or numeric non-negative literal
+            $t = $m[1];
+            if ($m[2])
+                $t = str_replace('$', '\\$', $t);
+            $this->tokpos[] = $this->pos;
+            $this->tokline[] = $this->lineno;
+            $this->tokens[] = '#'.$t;
+            $this->pos += strlen($m[0]);
+        }
+        else
+        {
+            // Special characters
+            foreach ($this->lens as $l => $a)
+            {
+                $t = substr($this->code, $this->pos, $l);
+                if (isset($a[$t]))
+                {
+                    if ($t == '=>')
+                    {
+                        // => is a synonym for comma
+                        $t = ',';
+                    }
+                    $this->tokpos[] = $this->pos;
+                    $this->tokline[] = $this->lineno;
+                    $this->tokens[] = $t;
+                    $this->pos += $l;
+                    return true;
+                }
+            }
+            // Unknown character
+            $this->throw(
+                "Unexpected character '".$this->code{$this->pos}."', marked by >>>HERE<<< in ".
+                substr($this->code, 0, $this->pos) . ' >>>HERE<<< ' . substr($this->code, $this->pos),
+                false
+            );
+        }
+        return true;
+    }
+
+    // Assume $token is next in the stream (case-insensitive)
+    // and move pointer forward.
+    // $token may be '$' (assume name), '#' (assume literal),
+    // or an exact value of one of others. For names and literals,
+    // a value is returned, and the token itself for others.
+    function consume($token)
+    {
+        $t = $this->tok();
+        if ($t === false)
+            $this->unexpected($token, 1);
+        elseif ($token == '$' || $token == '#')
+        {
+            if ($t{0} == $token)
+            {
+                $this->ptr++;
+                return substr($t, 1);
+            }
+            else
+                $this->unexpected($token, 1);
+        }
+        elseif (strtolower($t) != strtolower($token))
+            $this->unexpected($token, 1);
+        $this->ptr++;
+        return $t;
+    }
+
+    // Raise "unexpected token" error
+    function unexpected($expected, $skip_frames = 0)
+    {
+        if (!is_array($expected))
+            $expected = array($expected);
+        foreach ($expected as &$e)
+        {
+            if ($e == '#')
+                $e = 'literal';
+            elseif ($e == '$')
+                $e = 'identifier';
+        }
+        $tok = $this->tok();
+        if ($tok === false)
+            $tok = '<EOF>';
+        else
+        {
+            if ($tok{0} == '#' || $tok{0} == '$')
+                $tok = substr($tok, 1);
+            $tok = "'$tok'";
+        }
+        $text = "Unexpected $tok, expected ";
+        if (count($expected) > 1)
+            $text .= "one of ";
+        $text .= implode(', ', $expected);
+        $text .= " in '".$this->expression."'"; // FIXME
+        // TODO report parse traces
+        $this->throw($text);
+    }
+
+    /*** Syntactic analysis ***/
+
+    // Tokenize, parse and return parsed code
+    // @throws TemplateParseException
+    function parse()
+    {
+        $this->clear_tokens();
+        $r = $this->parse_exp();
+        if ($this->ptr < count($this->tokens))
+            $this->unexpected("<END>");
+        return $r;
+    }
+
+    // Parse all code and return compiled template
+    // $filename is the input filename (just for reference)
+    function parse_all($code, $filename = '')
+    {
+        $blocks = array(
+            array(
+                'begin' => $this->options->begin_code,
+                'handler' => 'parse_code',
+                'eat' => $this->options->eat_code_line
+            ),
+        );
+        if ($this->options->begin_subst)
+        {
+            $blocks[] = array(
+                'begin' => $this->options->begin_subst,
+                'handler' => 'parse_subst',
+                'eat' => false,
+            );
+        }
+        // Set code
+        $this->set_code($code);
+        // Create new state object
+        $this->st = new VMXTemplateState();
+        $this->st->input_filename = $filename;
+        $this->st->functions['main'] = array(
+            'name' => 'main',
+            'args' => array(),
+            'body' => '',
+        );
+        $this->st->output = array(&$this->st->functions['main']['body']);
+        $text_pos = 0;
+        $lineno = 0;
+        while ($this->pos < $this->codelen)
+        {
+            // Find nearest code fragment or substitution
+            $min = -1;
+            foreach ($blocks as $i => &$b)
+            {
+                $b['pos'] = strpos($this->code, $b[0], $this->pos);
+                if ($b['pos'] !== false && ($min < 0 || $b['pos'] < $blocks[$min]['pos']))
+                    $min = $i;
+            }
+            $r = '';
+            if ($min >= 0)
+            {
+                // Set source position and line number
+                $lineno = $this->lineno;
+                $pos = $blocks[$min]['pos'];
+                $this->lineno += substr_count($this->code, "\n", $this->pos, $pos-$this->pos);
+                $this->pos = $pos;
+                // Reset token buffer
+                $this->clear_tokens();
+                $handler = $blocks[$min][1];
+                try
+                {
+                    $r = $this->$handler();
+                    // Add newline count from code fragment
+                    $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
+                }
+                catch (TemplateParseException $e)
+                {
+                    
+                    // Only skip 1 starting character and try again
+                    $this->pos = $pos+1;
+                    $this->lineno = $lineno;
+                    continue;
+                }
+            }
+            else
+            {
+                // No more code fragments and substitutions :-(
+                $pos = $this->codelen;
+            }
+            if ($pos > $text_pos)
+            {
+                // Append text fragment
+                $text = substr($this->code, $text_pos, $pos-$text_pos);
+                $text = addcslashes($text, '\\\'');
+                $this->st->output[count($this->st->output)-1] .= "\$t.='$text';\n";
+                $text_pos = $pos;
+            }
+            // Append compiled fragment
+            $this->st->output[count($this->st->output)-1] .= $r."\n";
+        }
+
+        // Generate code for functions
+        $code = '';
+        foreach ($this->st->functions as $f)
+        {
+            $code .= "function fn_$f[name] ($args) {\n";
+            $code .= "\$stack = array();\n\$t = '';\n";
+            $code .= $f['body'];
+            $code .= "return \$t;\n}\n";
+        }
+
+        // Assemble the class code
+        $rfn = addcslashes($this->st->input_filename, '\\\'');
+        $func_ns = md5($this->st->input_filename);
+        $code = "<?php // {$this->st->input_filename}
+class Template_$func_ns extends ".__CLASS__." {
+var \$template_filename = '$rfn';
+var \$version = 3;
+function __construct(\$t) {
+\$this->tpldata = &\$t->tpldata;
+\$this->parent = &\$t;
+}
+$code
+}
+";
+
+        return $code;
+    }
+
+    // code: "IF" exp | "ELSE" | elseif exp | "END" |
+    //  "SET" varref | "SET" varref '=' exp |
+    //  fn name | fn name '=' exp |
+    //  for varref '=' exp | for varref |
+    //  "BEGIN" name bparam | "END" name | exp
+    // fn: "FUNCTION" | "BLOCK" | "MACRO"
+    // for: "FOR" | "FOREACH"
+    // elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
+    function parse_code()
+    {
+        $t = strtolower($this->tok());
+        if ($t == '$if')
+        {
+            $this->ptr++;
+            return "if (".$this->parse_exp().") {";
+        }
+        elseif ($t == '$else')
+        {
+            $this->ptr++;
+            if (strtolower($this->tok()) == '$if')
+            {
+                // Go to elseif
+                $t = '$elseif';
+            }
+            else
+                return "} else {";
+        }
+        // We can go to $elseif from $else, so start if() chain again
+        if ($t == '$elseif' || $t == '$elsif')
+        {
+            $this->ptr++;
+            return "} elseif (".$this->parse_exp().") {";
+        }
+        elseif ($t == '$for' || $t == '$foreach')
+        {
+            // Foreach-style loop
+            // FOR[EACH] varref = array
+            // (default array = varref itself)
+            $this->ptr++;
+            $parts = $this->parse_varref();
+            $exp = false;
+            if ($this->tok() == '=')
+            {
+                $this->ptr++;
+                $exp = $this->parse_exp();
+            }
+            $this->st->in[] = array('for', $parts, $exp);
+            return $this->gen_foreach($parts, $exp);
+        }
+        elseif ($t == '$begin')
+        {
+            // Old-style loop
+            $this->ptr++;
+            return $this->parse_begin();
+        }
+        elseif ($t == '$end')
+        {
+            // End directive
+            $this->ptr++;
+            return $this->parse_end();
+        }
+        elseif ($t == '$set')
+        {
+            if ($this->tok(1) == '(')
+            {
+                // This is the set() function, parse it as an expression
+                return $this->parse_expression();
+            }
+            // SET directive
+            $this->ptr++;
+            $varref = $this->gen_varref($this->parse_varref());
+            if ($this->tok() == '=')
+            {
+                // SET varref = exp
+                $this->ptr++;
+                $e = $this->parse_exp();
+                return $varref . ' = ' . $e . ';';
+            }
+            $this->st->in[] = array('set', $varref);
+            return "\$stack[] = \$t;\n\$t = '';";
+        }
+        elseif ($t == '$function' || $t == '$block' || $t == '$macro')
+        {
+            // Function declaration
+            $this->ptr++;
+            return $this->parse_function();
+        }
+        // Expression
+        $t = $this->parse_exp();
+        if ($this->options->no_code_subst)
+        {
+            // Substitute only $subst_begin..$subst_end
+            return "$t;";
+        }
+        return "\$t.=$t;";
+    }
+
+    // Parse an old-style loop
+    // BEGIN block [AT e] [BY e] [TO e]
+    function parse_begin()
+    {
+        $bname = $this->consume('$');
+        $at = $by = $to = false;
+        while (true)
+        {
+            $tok = strtolower($this->tok());
+            $this->ptr++;
+            if ($at === false && $tok == '$at')
+                $at = $this->parse_exp();
+            elseif ($by === false && $tok == '$by')
+                $by = $this->parse_exp();
+            elseif ($to === false && $tok == '$to')
+                $to = $this->parse_exp();
+            else
+            {
+                $this->ptr--;
+                break;
+            }
+        }
+        $this->st->blocks[] = $bname;
+        $parts = $this->st->blocks;
+        $this->st->in[] = array('begin', array($bname), $t);
+        $exp = $this->gen_varref($parts);
+        if ($at || $to)
+        {
+            $exp = "array_slice($e, ";
+            $exp .= $at ? $at : 0;
+            if ($to)
+                $exp .= ", $to";
+            $exp .= ")";
+        }
+        if ($by)
+            $exp = "self::exec_subarray_divmod($exp, $by)";
+        return $this->gen_foreach($parts, $exp);
+    }
+
+    // Parse END directive - may correspond to one of:
+    // FOREACH, BEGIN, IF, SET or FUNCTION
+    // Optionally with varref specifying what block should end here.
+    function parse_end()
+    {
+        if (!count($this->st->in))
+        {
+            $this->throw("END without begin directive");
+        }
+        $in = array_pop($this->st->in);
+        $w = $in[0];
+        $begin_subj = isset($in[1]) ? $in[1] : false;
+        $end_subj = false;
+        if (substr($this->tok(), 0, 1) == '$')
+            $end_subj = $this->parse_varref();
+        if ($begin_subj)
+        {
+            $b = implode($begin_subj, '.');
+            if ($end_subj ? $b != ($e = implode($end_subj, '.')) : $this->options->strict_end)
+            {
+                $w = strtoupper($w);
+                $this->throw(
+                    $b ? "END $e after $w $b"
+                       : "END subject not specified (after $w $b) in strict mode"
+                );
+            }
+        }
+        if ($w == 'set')
+        {
+            return "$in[1] = \$t;\n\$t = array_pop(\$stack);";
+        }
+        elseif ($w == 'function')
+        {
+            $s = "return \$t;\n}\n";
+            array_pop($this->st->output);
+            return $s;
+        }
+        elseif ($w == 'begin' || $w == 'for')
+        {
+            if ($w == 'begin')
+                array_pop($st->blocks);
+            list($varref, $varref_index) = $this->varref_and_index($in[2]);
+            return "}
+array_pop(\$stack);
+$varref_index = array_pop(\$stack);
+$varref = array_pop(\$stack);";
+        }
+        return "}";
+    }
+
+    // Function definition (with named arguments)
+    // Such functions are called as fn(arg1, arg2) or fn{name => value}
+    // FUNCTION/BLOCK/MACRO name (arglist) [ = expression]
+    function parse_function()
+    {
+        $tokptr = $this->ptr;
+        $name = $this->consume('$');
+        $args = array();
+        if ($this->tok() == '(')
+        {
+            $this->ptr++;
+            while ($this->tok() != ')')
+            {
+                $args[] = $this->consume('$');
+                if ($this->tok() == ',')
+                    $this->ptr++;
+            }
+        }
+        $code = false;
+        if ($this->tok() == '=')
+        {
+            $code = $this->parse_exp();
+        }
+        if (isset($this->st->functions[$name]))
+        {
+            $this->throw(
+                "Attempt to redeclare function $name, previously defined on line ".
+                ($this->st->functions[$name]['line']+1)." (byte ".
+                ($this->st->functions[$name]['pos']).")",
+                $tokptr-$this->ptr
+            );
+        }
+        $this->st->functions[$name] = array(
+            'name' => $name,
+            'args' => $args,
+            'pos'  => $pos,
+            'line' => $line,
+            'body' => '',
+        );
+        $this->st->in[] = array('function', array($name));
+        $this->st->output[] = &$this->st->functions[$name]['body'];
+    }
+
+    // Make and return loop varref and loop index varref
+    function varref_and_index($parts)
+    {
+        $varref = $this->gen_varref($parts);
+        $parts[count($parts)-1] .= ".'#'";
+        $varref_index = $this->gen_varref($parts);
+        return array($varref, $varref_index);
+    }
+
+    // Generate foreach() code (FOR $parts = $exp)
+    function gen_foreach($parts, $exp)
+    {
+        list($varref, $varref_index) = $this->varref_and_index($parts);
+        if (!$exp)
+            $exp = $varref;
+        // FIXME We'll have a problem in Perl version here (arrays vs hashes)
+        return
+"\$stack[] = $varref;
+\$stack[] = $varref_index;
+\$stack[] = 0;
+foreach (self::array1($exp) as \$item) {
+$varref = \$item;
+$varref_index = \$stack[count(\$stack)-1]++;";
+    }
+
+    // exp: ops_or | "NOT" exp
+    function parse_exp()
+    {
+        if (strtolower($this->tok()) == '$not')
+        {
+            $this->ptr++;
+            return '(!'.$this->parse_exp().')';
+        }
+        return $this->parse_or();
+    }
+
+    // ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
+    function parse_or()
+    {
+        $ops = array('||', '$or', '$xor');
+        $e = array($this->parse_ops('and'));
+        while (in_array($t = strtolower($this->tok()), $ops))
+        {
+            $this->ptr++;
+            if ($t == '$xor')
+                $xor = true;
+            $e[] = $t == '$xor' ? 'XOR' : '||';
+            $e[] = $this->parse_ops('and');
+        }
+        if (count($e) == 1)
+            return $e[0];
+        if ($xor)
+            return "(".implode(' ', $e).")";
+        // Expressions without XOR are executed as the "perlish OR"
+        $args = array();
+        for ($i = 0, $j = 0; $i < count($e); $i += 2)
+            $args[$j++] = $e[$i];
+        return "self::perlish_or(".implode(",", $args).")";
+    }
+
+    // Parse operator expression. See self::$ops
+    function parse_ops($name)
+    {
+        list($ops, $next, $repeat) = self::$ops[$name];
+        if (isset(self::$ops[$next]))
+            $next = array(array($this, 'parse_ops'), array($next));
+        else
+            $next = array(array($this, 'parse_'.$next), array());
+        $e = call_user_func_array($next[0], $next[1]);
+        $brace = false;
+        while (in_array($t = strtolower($this->tok()), $ops))
+        {
+            $this->ptr++;
+            $e .= ' ';
+            $e .= $t{0} == '$' ? substr($t, 1) : $t;
+            $e .= ' ';
+            $e .= call_user_func_array($next[0], $next[1]);
+            $brace = true;
+            if (!$repeat)
+                break;
+        }
+        return $brace ? "($e)" : $e;
+    }
+
+    // exp_neg: exp_not | '-' exp_not
+    function parse_neg()
+    {
+        $neg = false;
+        if ($this->tok() == '-')
+        {
+            $neg = true;
+            $this->ptr++;
+        }
+        $e = $this->parse_not();
+        return $neg ? "-($e)" : $e;
+    }
+
+    // exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
+    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
+    // func: name | varref varpart
+    function parse_not()
+    {
+        $t = $this->tok();
+        if ($t == '!')
+        {
+            $this->ptr++;
+            $r = '(!'.$this->parse_not().')';
+        }
+        elseif ($t == '(')
+        {
+            $this->ptr++;
+            $r = $this->parse_exp();
+            $this->consume(')');
+        }
+        elseif ($t == '{')
+        {
+            $this->ptr++;
+            if ($this->tok() != '}')
+            {
+                $r = 'array(' . $this->parse_hash() . ')';
+                $this->consume('}');
+            }
+        }
+        elseif ($t{0} == '#')
+        {
+            // Literal
+            $r = substr($t, 1);
+            $this->ptr++;
+        }
+        elseif ($t{0} == '$')
+        {
+// FIXME! block calls!
+            // Name -> varref or function call
+            // No support for obj.method().other_method() call syntax
+            // as PHP itself is nervous for it
+            $parts = $this->parse_varref();
+            $t = $this->tok();
+            if ($t{0} == '$')
+            {
+                // Single argument function call without braces
+                $r = $this->call_ref($parts, $this->parse_nonbrace());
+            }
+            elseif ($t == '(')
+            {
+                // Function call with braces
+                $this->ptr++;
+                $r = $this->call_ref($parts, $this->parse_list());
+                $this->consume(')');
+            }
+            else
+                $r = $this->gen_varref($parts);
+        }
+        else
+            $this->unexpected(array('!', '(', '{', '#', '$'));
+        return $r;
+    }
+
+    // list: exp | exp ',' list
+    function parse_list()
+    {
+        $r = $this->parse_exp();
+        while ($this->tok() == ',')
+        {
+            $this->ptr++;
+            $r .= ', '.$this->parse_exp();
+        }
+        return $r;
+    }
+
+    // hash: pair | pair ',' hash |
+    // pair: exp ',' exp
+    function parse_hash()
+    {
+        $r = '';
+        $this->ptr--;
+        do
+        {
+            $this->ptr++;
+            if ($this->tok() == '}')
+                return $r;
+            $k = $this->parse_exp();
+            $this->consume(',');
+            $v = $this->parse_exp();
+            $r .= "$k => $v, ";
+        } while ($this->tok() == ',');
+        return $r;
+    }
+
+    // varref: name | varref varpart
+    // varpart: '.' name | '[' exp ']'
+    // (always begins with name)
+    function parse_varref()
+    {
+        $r = $this->consume('$');
+        $a = array($r);
+        $t = $this->tok();
+        while ($t == '.' || $t == '[')
+        {
+            $this->ptr++;
+            if ($t == '.')
+            {
+                $a[] = $this->consume('$');
+            }
+            else
+            {
+                $a[] = '['.$this->parse_exp().']';
+                $this->consume(']');
+            }
+        }
+        return $a;
+    }
+
+    // Generate varref code from parse_varref output
+    function gen_varref($parts)
+    {
+        $r = '$this->tpldata[\''.addcslashes($parts[0], '\\\'').'\']';
+        for ($i = 1; $i < count($parts); $i++)
+        {
+            if ($parts[$i]{0} == '[')
+                $r .= $parts[$i];
+            else
+                $r .= '[\''.addcslashes($parts[$i], '\\\'').'\']';
+        }
+        return $r;
+    }
+
+    // Construct function call code from $parts (varref parts)
+    // and $args (compiled expressions for function arguments)
+    function call_ref($parts, $args)
+    {
+// FIXME deal with block calls!
+        $r = false;
+        if (count($parts) == 1)
+        {
+            $fn = $parts[0];
+            if (isset(self::$functions[$fn]))
+            {
+                $fn = 'function_'.self::$functions[$fn];
+                $r = $this->$fn($args);
+            }
+            elseif (method_exists($this, "function_$fn"))
+            {
+                $fn = "function_$fn";
+                $r = $this->$fn($args);
+            }
+            elseif (isset($this->compiletime_functions[$fn]))
+                $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
+            else
+                $this->throw("Unknown function: '$fn'");
+        }
+        if ($r === false)
+            $r = 'call_user_func_array('.$this->gen_varref($r).', $args)';
+        return $r;
+    }
+
+    /*** Functions ***/
+
+    /** Utilities for function parsing **/
+
+    // Code for operator-like function
+    static function fmop($op, $args)
+    {
+        return "((" . join(") $op (", $args) . "))";
+    }
+
+    // Code for function with array arguments which are merged into one array
+    static function fearr($f, $args)
+    {
+        $e = "self::call_array_func($f";
+        foreach ($args as $a)
+            $e .= ", $a";
+        $e .= ")";
+        return $e;
+    }
 
     /** Числа, логические операции **/
 
     /* логические операции */
     function function_or()       { $a = func_get_args(); return "self::perlish_or(".join(",", $a).")"; }
-    function function_and()      { $a = func_get_args(); return $this->fmop('&&', $a); }
+    function function_and()      { $a = func_get_args(); return self::fmop('&&', $a); }
     function function_not($e)    { return "!($e)"; }
 
     /* арифметические операции */
-    function function_add()      { $a = func_get_args(); return $this->fmop('+', $a); }
-    function function_sub()      { $a = func_get_args(); return $this->fmop('-', $a); }
-    function function_mul()      { $a = func_get_args(); return $this->fmop('*', $a); }
-    function function_div()      { $a = func_get_args(); return $this->fmop('/', $a); }
+    function function_add()      { $a = func_get_args(); return self::fmop('+', $a); }
+    function function_sub()      { $a = func_get_args(); return self::fmop('-', $a); }
+    function function_mul()      { $a = func_get_args(); return self::fmop('*', $a); }
+    function function_div()      { $a = func_get_args(); return self::fmop('/', $a); }
     function function_mod($a,$b) { return "(($a) % ($b))"; }
 
     /* логарифм */
@@ -1131,7 +1641,7 @@ $iset";
     function function_nl2br($s)                 { return "nl2br($s)"; }
 
     /* конкатенация строк */
-    function function_concat()   { $a = func_get_args(); return $this->fmop('.', $a); }
+    function function_concat()  { $a = func_get_args(); return self::fmop('.', $a); }
 
     /* объединение всех скаляров и всех элементов аргументов-массивов */
     function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
@@ -1349,571 +1859,5 @@ $iset";
         array_shift($args);
         array_unshift($args, "create_function('$arg',$f)");
         return self::fearr("array_map", $args);
-    }
-
-    /*** Реализации функций ***/
-
-    // дамп переменной
-    static function exec_dump($var)
-    {
-        ob_start();
-        var_dump($var);
-        $var = ob_get_contents();
-        ob_end_clean();
-        return $var;
-    }
-
-    // подмассив по кратности номеров элементов
-    // exec_subarray_divmod([], 2)
-    // exec_subarray_divmod([], 2, 1)
-    static function exec_subarray_divmod($array, $div, $mod)
-    {
-        if (!$div || !is_array($array))
-            return $array;
-        if (!$mod)
-            $mod = 0;
-        $i = 0;
-        $r = array();
-        foreach ($array as $k => $v)
-            if (($i % $div) == $mod)
-                $r[$k] = $v;
-        return $r;
-    }
-
-    // выполняет подстановку function_subst
-    static function exec_subst($str)
-    {
-        $args = func_get_args();
-        $str = preg_replace_callback('/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is', create_function('$m', 'return $args[$m[2]?$m[2]:$m[3]];'), $str);
-        return $str;
-    }
-
-    // выполняет сортировку и возвращает сортированный массив
-    static function exec_sort($array)
-    {
-        sort($array);
-        return $array;
-    }
-
-    // возвращает элемент массива
-    static function exec_get($array, $key)
-    {
-        return $array[$key];
-    }
-
-    // делает хеш из массива
-    static function exec_hash($array)
-    {
-        $hash = array();
-        $l = count($array);
-        for ($i = 0; $i < $l; $i += 2)
-            $hash[$array[$i]] = $array[$i+1];
-        return $hash;
-    }
-
-    // возвращает пары вида { key => ключ, value => значение }
-    static function exec_pairs($array)
-    {
-        $r = array();
-        foreach ($array as $k => $v)
-            $r[] = array('key' => $k, 'value' => $v);
-        return $r;
-    }
-
-    // ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
-    static function strlimit($str, $maxlen, $dots = '...')
-    {
-        if (!$maxlen || $maxlen < 1 || strlen($str) <= $maxlen)
-            return $str;
-        $str = substr($str, 0, $maxlen);
-        $p = strrpos($str, ' ');
-        if (!$p || ($pt = strrpos($str, "\t")) > $p)
-            $p = $pt;
-        if ($p)
-            $str = substr($str, 0, $p);
-        return $str . $dots;
-    }
-
-    // то же, но в UTF-8 (точнее, в текущей mb_internal_encoding())
-    static function mb_strlimit($str, $maxlen, $dots = '...')
-    {
-        if (!$maxlen || $maxlen < 1 || mb_strlen($str) <= $maxlen)
-            return $str;
-        $str = mb_substr($str, 0, $maxlen);
-        $p = mb_strrpos($str, ' ');
-        if (!$p || ($pt = mb_strrpos($str, "\t")) > $p)
-            $p = $pt;
-        if ($p)
-            $str = mb_substr($str, 0, $p);
-        return $str . $dots;
-    }
-
-    // lcfirst() и ucfirst() для UTF-8
-    static function mb_lcfirst($str)
-    {
-        return mb_strtolower(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
-    }
-
-    // lcfirst() и ucfirst() для UTF-8
-    static function mb_ucfirst($str)
-    {
-        return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
-    }
-
-    // ограниченная распознавалка дат
-    static function timestamp($ts = 0, $format = 0)
-    {
-        if (!self::$Mon)
-        {
-            self::$Mon = explode(' ', 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec');
-            self::$mon = array_reverse(explode(' ', 'jan feb mar apr may jun jul aug sep oct nov dec'));
-            self::$Wday = explode(' ', 'Sun Mon Tue Wed Thu Fri Sat');
-        }
-        if (!strcmp(intval($ts), $ts))
-        {
-            // TS_UNIX or Epoch
-            if (!$ts)
-                $ts = time;
-        }
-        elseif (preg_match('/^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/s', $ts, $m))
-        {
-            // TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
-            $ts = mktime(0+$m[4], 0+$m[5], 0+$m[6], $m[2], $m[3], $m[1]);
-        }
-        elseif (preg_match('/^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/s', $ts, $m))
-        {
-            // TS_ORACLE
-            $ts = mktime($m[4], $m[5], $m[6], $mon[strtolower($m[2])]+1, intval($m[1]), $m[3] < 100 ? $m[3]+1900 : $m[3]);
-        }
-        elseif (preg_match('/^\s*..., (\d\d?) (...) (\d{4,}) (\d\d):(\d\d):(\d\d)\s*([\+\- ]\d\d)\s*$/s', $ts, $m))
-        {
-            // TS_RFC822
-            $ts = mktime($m[4], $m[5], $m[6], $mon[strtolower($m[2])]+1, intval($m[1]), $m[3]);
-        }
-        else
-        {
-            // Bogus value, return NULL
-            return NULL;
-        }
-
-        if (!$format)
-        {
-            // TS_UNIX
-            return $ts;
-        }
-        elseif ($format == self::TS_MW)
-        {
-            return strftime("%Y%m%d%H%M%S", $ts);
-        }
-        elseif ($format == self::TS_DB)
-        {
-            return strftime("%Y-%m-%d %H:%M:%S", $ts);
-        }
-        elseif ($format == self::TS_DB_DATE)
-        {
-            return strftime("%Y-%m-%d", $ts);
-        }
-        elseif ($format == self::TS_ISO_8601)
-        {
-            return strftime("%Y-%m-%dT%H:%M:%SZ", $ts);
-        }
-        elseif ($format == self::TS_EXIF)
-        {
-            return strftime("%Y:%m:%d %H:%M:%S", $ts);
-        }
-        elseif ($format == self::TS_RFC822)
-        {
-            $l = localtime($ts);
-            return strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", $ts);
-        }
-        elseif ($format == self::TS_ORACLE)
-        {
-            $l = localtime($ts);
-            return strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", $ts);
-        }
-        return $ts;
-    }
-}
-
-// Parse exception
-class TemplateParseException extends Exception {}
-
-/* Parser grammatic:
-exp: ops_or | "NOT" exp
-ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
-ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
-ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
-ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
-ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
-ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
-exp_neg: exp_not | '-' exp_not
-exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
-nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
-func: name | varref varpart
-list: exp | exp ',' list
-hash: pair | pair ',' hash |
-pair: exp "=>" exp
-varref: name | varref varpart
-varpart: '.' name | '[' exp ']'
-*/
-
-// Lexical + syntactic analyzer + translator
-// of template expressions into PHP code.
-class TemplateExpressionParser
-{
-    var $expression, $tokens, $ptr = 0;
-    var $compiletime_functions = array();
-
-    // ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
-    // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
-    // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
-    // ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
-    // ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
-    // ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
-    static $ops = array(
-        'or'  => array(array('||', '$or', '$xor'), 'and', true),
-        'and' => array(array('&&', '$and'), 'eq', true),
-        'eq'  => array(array('==', '!='), 'cmp', false),
-        'cmp' => array(array('<', '>', '<=', '>='), 'add', false),
-        'add' => array(array('+', '-'), 'mul', true),
-        'mul' => array(array('*', '/', '%'), 'neg', true),
-    );
-
-    // Function aliases
-    static $functions = array(
-        'i'                 => 'int',
-        'intval'            => 'int',
-        'lower'             => 'lc',
-        'lowercase'         => 'lc',
-        'upper'             => 'uc',
-        'uppercase'         => 'uc',
-        'addslashes'        => 'quote',
-        'q'                 => 'quote',
-        'sq'                => 'sql_quote',
-        're_quote'          => 'requote',
-        'preg_quote'        => 'requote',
-        'uri_escape'        => 'urlencode',
-        'uriquote'          => 'urlencode',
-        'substring'         => 'substr',
-        'htmlspecialchars'  => 'html',
-        's'                 => 'html',
-        'strip_tags'        => 'strip',
-        't'                 => 'strip',
-        'h'                 => 'strip_unsafe',
-        'implode'           => 'join',
-        'truncate'          => 'strlimit',
-        'hash_keys'         => 'keys',
-        'array_keys'        => 'keys',
-        'array_slice'       => 'subarray',
-        'hget'              => 'get',
-        'aget'              => 'get',
-        'var_dump'          => 'dump',
-        'process'           => 'parse',
-        'include'           => 'parse',
-        'process_inline'    => 'parse_inline',
-        'include_inline'    => 'parse_inline',
-    );
-
-    // USAGE:
-    // $p = new TemplateExpressionParser($expression);
-    // try { $e = $p->parse(); } catch (Exception $e) { ... }
-    function __construct($expression)
-    {
-        $this->expression = $expression;
-    }
-
-    // Tokenize, parse and return parsed code
-    // @throws TemplateParseException
-    function parse()
-    {
-        $this->tokens = $this->tokenize($expression);
-        $this->ptr = 0;
-        return $this->parse_exp();
-    }
-
-    // Performs lexical analysis of $this->expression
-    // and writes the result into $this->tokens
-    // Possible tokens: name 123.01 0x123 0123 "string" 'string'
-    // and || && == != < > <= >= + - * / % ( ) ! { } , => . [ ]
-    function tokenize($expression)
-    {
-        $twochar = array_flip(explode(' ', '|| && == != <= >= =>'));
-        $onechar = array_flip(explode(' ', '+ - * / % ! , . < > ( ) { } [ ]'));
-        $e = ltrim($expression);
-        $r = array();
-        while (strlen($e))
-        {
-            if (isset($twochar[$t = substr($e, 0, 2)]))
-            {
-                // 2-char operators
-                $r[] = $t;
-                $e = substr($e, 2);
-            }
-            elseif (isset($onechar[$t = $e{0}]))
-            {
-                // 1-char operators
-                $r[] = $t;
-                $e = substr($e, 1);
-            }
-            elseif (preg_match('#^[^a-z_][a-z0-9_]*#is', $e, $m, PREG_OFFSET_CAPTURE))
-            {
-                // Identifier
-                $r[] = '$'.$m[0][0];
-                $e = substr($e, $m[0][1]);
-            }
-            elseif (preg_match('/^((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\'|0\d+|\d+(\.\d+)?|0x\d+)/is', $e, $m, PREG_OFFSET_CAPTURE))
-            {
-                // String or numeric non-negative literal
-                $t = $m[1][0];
-                if ($m[2])
-                    $t = str_replace('$', '\\$', $t);
-                $r[] = '#'.$t;
-                $e = substr($e, $m[0][1]);
-            }
-            else
-            {
-                // Unknown character
-                throw new TemplateParseException(
-                    "Unexpected character '".$e{0}."' marked by >>>HERE<<< in ".
-                    substr($expression, 0, -strlen($e)) . ' >>>HERE<<< ' . $e
-                );
-                break;
-            }
-            $e = ltrim($e);
-        }
-        return $r;
-    }
-
-    // exp: ops_or | "NOT" exp
-    function parse_exp()
-    {
-        if (strtolower($this->tokens[$this->ptr]) == '$not')
-        {
-            $this->ptr++;
-            return '(!'.$this->parse_exp().')';
-        }
-        return $this->parse_ops('or');
-    }
-
-    // Parse operator expression. See self::$ops
-    function parse_ops($name)
-    {
-        list($ops, $next, $repeat) = self::$ops[$name];
-        if (isset(self::$ops[$next]))
-            $next = array(array($this, 'parse_ops'), array($next));
-        else
-            $next = array(array($this, 'parse_'.$next), array());
-        $e = call_user_func_array($next[0], $next[1]);
-        $brace = false;
-        while (in_array(strtolower($this->tokens[$this->ptr]), $ops))
-        {
-            $e .= $this->tokens[$this->ptr++];
-            $e .= call_user_func_array($next[0], $next[1]);
-            $brace = true;
-            if (!$repeat)
-                break;
-        }
-        return $brace ? "($e)" : $e;
-    }
-
-    // exp_neg: exp_not | '-' exp_not
-    function parse_neg()
-    {
-        $neg = false;
-        if ($this->tokens[$this->ptr] == '-')
-        {
-            $neg = true;
-            $this->ptr++;
-        }
-        $e = $this->parse_not();
-        return $neg ? "-($e)" : $e;
-    }
-
-    // exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
-    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
-    // func: name | varref varpart
-    function parse_not()
-    {
-        if ($this->tokens[$this->ptr] == '!')
-        {
-            $this->ptr++;
-            $r = '(!'.$this->parse_not().')';
-        }
-        elseif ($this->tokens[$this->ptr] == '(')
-        {
-            $this->ptr++;
-            $r = $this->parse_exp();
-            $this->consume(')');
-        }
-        elseif ($this->tokens[$this->ptr] == '{')
-        {
-            $this->ptr++;
-            if ($this->tokens[$this->ptr] != '}')
-            {
-                $r = 'array(' . $this->parse_hash() . ')';
-                $this->consume('}');
-            }
-        }
-        elseif ($this->tokens[$this->ptr]{0} == '#')
-        {
-            // Literal
-            $r = substr($this->tokens[$this->ptr++], 1);
-        }
-        elseif ($this->tokens[$this->ptr]{0} == '$')
-        {
-            // Name -> varref or function call
-            $parts = $this->parse_varref();
-            if ($this->tokens[$this->ptr]{0} == '$')
-            {
-                // Single argument function call without braces
-                $r = $this->call_ref($parts, $this->parse_nonbrace());
-            }
-            elseif ($this->tokens[$this->ptr] == '(')
-            {
-                // Function call with braces
-                $this->ptr++;
-                $r = $this->call_ref($parts, $this->parse_list());
-                $this->consume(')');
-            }
-            else
-                $r = $this->gen_varref($parts);
-        }
-        else
-            $this->unexpected(array('!', '(', '{', '#', '$'));
-        return $r;
-    }
-
-    // list: exp | exp ',' list
-    function parse_list()
-    {
-        $r = $this->parse_exp();
-        while ($this->tokens[$this->ptr] == ',')
-        {
-            $this->ptr++;
-            $r .= ', '.$this->parse_exp();
-        }
-        return $r;
-    }
-
-    // hash: pair | pair ',' hash |
-    // pair: exp "=>" exp
-    function parse_hash()
-    {
-        $r = '';
-        $this->ptr--;
-        do
-        {
-            $this->ptr++;
-            if ($this->tokens[$this->ptr] == '}')
-                return $r;
-            $k = $this->parse_exp();
-            $this->consume('=>');
-            $v = $this->parse_exp();
-            $r .= "$k => $v, ";
-        } while ($this->tokens[$this->ptr] == ',');
-        return $r;
-    }
-
-    // varref: name | varref varpart
-    // varpart: '.' name | '[' exp ']'
-    // (always begins with name)
-    function parse_varref()
-    {
-        $r = $this->consume('$');
-        $a = array($r);
-        while ($this->tokens[$this->ptr] == '.' ||
-            $this->tokens[$this->ptr] == '[')
-        {
-            if ($this->tokens[$this->ptr++] == '.')
-            {
-                $a[] = $this->consume('$');
-            }
-            else
-            {
-                $a[] = '['.$this->parse_exp().']';
-                $this->consume(']');
-            }
-        }
-        return $r;
-    }
-
-    // Generate varref code from parse_varref output
-    function gen_varref($parts)
-    {
-        $r = '$this->tpldata[\''.$parts[0].'\']';
-        for ($i = 1; $i < count($parts); $i++)
-        {
-            if ($parts[$i]{0} == '[')
-                $r .= $parts[$i];
-            else
-                $r .= '[\''.$parts[$i].'\']';
-        }
-        return $r;
-    }
-
-    // Construct function call code from $parts (varref parts)
-    // and $args (compiled expressions for function arguments)
-    function call_ref($parts, $args)
-    {
-        $r = false;
-        if (count($parts) == 1)
-        {
-            $fn = $parts[0];
-            if (isset(self::$functions[$fn]))
-            {
-                $fn = 'function_'.self::$functions[$fn];
-                $r = $this->$fn($args);
-            }
-            elseif (method_exists($this, "function_$fn"))
-            {
-                $fn = "function_$fn";
-                $r = $this->$fn($args);
-            }
-            elseif (isset($this->compiletime_functions[$fn]))
-                $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
-            else
-                throw new TemplateParseException("Unknown function: '$fn' in '{$this->expression}'");
-        }
-        if ($r === false)
-            $r = 'call_user_func_array('.$this->gen_varref($r).', $args)';
-        return $r;
-    }
-
-    // Assume $token is next in the stream and move pointer forward
-    // $token may be '$' (assume name), '#' (assume literal),
-    // or an exact value of one of others. For names and literals,
-    // a value is returned, and the token itself for others.
-    function consume($token)
-    {
-        if ($token == '$' || $token == '#')
-        {
-            if ($this->tokens[$this->ptr]{0} == $token)
-                return substr($this->tokens[$this->ptr++], 1);
-            else
-                $this->unexpected($token, 1);
-        }
-        elseif ($this->tokens[$this->ptr] != $token)
-            $this->unexpected($token, 1);
-        return $this->tokens[$this->ptr++];
-    }
-
-    // Raise "unexpected token" error
-    function unexpected($expected, $skip_frames = 0)
-    {
-        if (!is_array($expected))
-            $expected = array($expected);
-        foreach ($tokens as &$e)
-        {
-            if ($e == '#')
-                $e = 'literal';
-            elseif ($e == '$')
-                $e = 'identifier';
-        }
-        $tok = $this->tokens[$this->ptr];
-        if ($tok{0} == '#' || $tok{0} == '$')
-            $tok = substr($tok, 1);
-        $text = "Unexpected '$tok', expected one of ".implode(', ', $expected);
-        // TODO report parse traces
-        throw new TemplateParseException($text);
     }
 }
