@@ -1,5 +1,5 @@
-// Грамматика Новой Новой Версии шаблонизатора.
-// Конфликтов нет. "=>" предполагается эквивалентным ",".
+// Грамматика Новой-Новой Версии шаблонизатора.
+// Конфликтов нет.
 // BEGIN, возможно, ещё будет ликвидирован.
 // FIXME не хватает foreach($a as $k => $v)
 
@@ -33,12 +33,15 @@ p8: p9 | p9 '+' p8 | p9 '-' p8
 p9: p10 | p10 '*' p9 | p10 '/' p9 | p10 '%' p9
 p10: p11 | '-' p11
 p11: nonbrace | '(' exp ')' varpath | '!' p11 | func nonbrace
-nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
+nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')'
+list_or_gthash: list | gthash |
 func: name | varref varpart
-list: exp | exp ',' list |
+list: exp | exp ',' list
 arglist: name | name ',' arglist |
 hash: pair | pair ',' hash |
-pair: exp ',' exp
+gthash: gtpair | gtpair ',' gthash |
+pair: exp ',' exp | gtpair
+gtpair: exp "=>" exp
 varref: name | varref varpart
 varpart: '.' name | '[' exp ']'
 varpath: | varpath varpart

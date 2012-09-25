@@ -1,11 +1,12 @@
 <?php
 
 # "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
-# Компилятор переписан уже 2 раза - сначала на regexы, потом на index() :-)
-# А обратная совместимость по синтаксису, как ни странно, до сих пор цела.
+
+# "Oh that perlists... anything they write is just another Template Toolkit"
+# Rewritten 3 times: regex -> index() -> grammar. Still backwards compatible...
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
-# Author: Vitaliy Filippov, 2006-2011
+# Author: Vitaliy Filippov, 2006-2012
 # $Id$
 
 class VMXTemplateState
@@ -30,6 +31,7 @@ class VMXTemplateState
 
 if (!defined('TS_UNIX'))
 {
+    // Global timestamp format constants
     define('TS_UNIX', 0);
     define('TS_DB', 1);
     define('TS_DB_DATE', 2);
@@ -47,6 +49,7 @@ class VMXTemplate
     static $cache       = array();
     static $safe_tags   = '<div> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
 
+    // Timestamp format constants
     const TS_UNIX       = 0;
     const TS_DB         = 1;
     const TS_DB_DATE    = 2;
@@ -56,82 +59,102 @@ class VMXTemplate
     const TS_ISO_8601   = 6;
     const TS_RFC822     = 7;
 
-    var $errors        = array(); // содержит последние ошибки
-    var $root          = '.';     // каталог с шаблонами
-    var $reload        = 1;       // если 0, шаблоны не будут перечитываться с диска, и вызовов stat() происходить не будет
-    var $wrapper       = false;   // фильтр, вызываемый перед выдачей результата parse
-    var $tpldata       = array(); // сюда будут сохранены: данные
-    var $cache_dir     = false;   // необязательный кэш, ускоряющий работу только в случае частых инициализаций интерпретатора
-    var $use_utf8      = true;    // использовать кодировку UTF-8 для операций со строками
-    var $begin_code    = '<!--';  // начало кода
-    var $end_code      = '-->';   // конец кода
-    var $eat_code_line = true;    // съедать "лишний" перевод строки, если в строке только инструкция?
-    var $begin_subst   = '{';     // начало подстановки (необязательно)
-    var $end_subst     = '}';     // конец подстановки (необязательно)
-    var $strict_end    = false;   // жёстко требовать имя блока в его завершающей инструкции (<!-- end block -->)
-    var $raise_error   = false;   // говорить die() при ошибках в шаблонах
-    var $print_error   = false;   // печатать фатальные ошибки
-    var $compiletime_functions = array();   // дополнительные функции времени компиляции
-    var $parent        = NULL;    // сюда сохраняется объект, от которого отпочкован объект класса конкретного шаблона
-                                  // компилятор всегда дёргается в рамках объекта Template, а не объекта конкретного шаблона
+    // Version of code classes, saved into static $version
+    const CODE_VERSION  = 3;
 
-    var $failed        = array(); // сюда сохраняются имена файлов, загрузка которых не удалась,
-                                  // чтобы не долбиться в один и тот же кривой шаблон много раз за запрос
+    // Logged errors
+    var $errors = array();
 
-    function __construct($args)
+    // Data passed to the template
+    var $tpldata = array();
+
+    // Parent 'VMXTemplate' object for compiled templates
+    // parse_anything() functions are always called on $this->parent
+    var $parent = NULL;
+
+    // Failed-to-load filenames, saved to skip them during the request
+    var $failed = array();
+
+    // Search path for template functions (filenames indexed by function name)
+    var $function_search_path = array();
+
+    // Options object
+    var $options;
+
+    /**
+     * Constructor
+     *
+     * @param array $options Options
+     */
+    function __construct($options)
     {
-        foreach ($args as $k => $v)
-            $this->$k = $v;
-        $this->cache_dir = preg_replace('!/*$!s', '/', $this->cache_dir);
-        if (!is_writable($this->cache_dir))
-            $this->error('Template: cache_dir='.$this->cache_dir.' is not writable', true);
-        $this->root = preg_replace('!/*$!s', '/', $this->root);
+        $this->options = new VMXTemplateOptions($options);
     }
 
-    // Сохранить ошибку
+    /**
+     * Log an error
+     */
     function error($e, $fatal = false)
     {
         $this->errors[] = $e;
-        if ($this->raise_error && $fatal)
-            die(__CLASS__."::error: $e");
-        elseif ($this->print_error)
-            print __CLASS__."::error: $e<br />";
+        if ($this->options->raise_error && $fatal)
+            die(__CLASS__." error: $e");
+        elseif ($this->options->print_error)
+            print __CLASS__." error: $e<br />";
     }
 
-    // Функция уничтожает данные шаблона
+    /**
+     * Clear template data
+     */
     function clear()
     {
         $this->tpldata = array();
         return true;
     }
 
-    // Подлить в огонь переменных. Возвращает новый массив.
+    /**
+     * Shortcut for $this->vars()
+     */
     function assign_vars($new = NULL, $value = NULL)
     {
-        return $this->vars($new, $value);
+        $this->vars($new, $value);
     }
+
+    /**
+     * Set template data value/values.
+     * $obj->vars($key, $value);
+     * or
+     * $obj->vars(array(key => value, ...));
+     */
     function vars($new = NULL, $value = NULL)
     {
         if (is_array($new))
+        {
             $this->tpldata = array_merge($this->tpldata, $new);
-        else if ($new && $value !== NULL)
+        }
+        elseif ($new && $value !== NULL)
+        {
             $this->tpldata[$new] = $value;
-        return $this->tpldata;
+        }
     }
 
-    // Кэш (xcache, eaccelerator)
+    /*** Cache support - XCache/APC/eAccelerator ***/
+
     static function cache_check_type()
     {
         if (is_null(self::$cache_type))
         {
             if (function_exists('xcache_get'))
                 self::$cache_type = 'x';
-            else if (function_exists('eaccelerator_get'))
+            elseif (function_exists('apc_store'))
+                self::$cache_type = 'a';
+            elseif (function_exists('eaccelerator_get'))
                 self::$cache_type = 'e';
             else
                 self::$cache_type = '';
         }
     }
+
     static function cache_get($key)
     {
         self::cache_check_type();
@@ -139,62 +162,87 @@ class VMXTemplate
         {
             if (self::$cache_type == 'x')
                 self::$cache[$key] = xcache_get($key);
-            else if (self::$cache_type == 'e')
+            elseif (self::$cache_type == 'a')
+                self::$cache[$key] = apc_fetch($key);
+            elseif (self::$cache_type == 'e')
                 self::$cache[$key] = eaccelerator_get($key);
         }
         return self::$cache[$key];
     }
+
     static function cache_del($key)
     {
         self::cache_check_type();
         unset(self::$cache[$key]);
         if (self::$cache_type == 'x')
             xcache_unset($key);
-        else if (self::$cache_type == 'e')
+        elseif (self::$cache_type == 'a')
+            apc_delete($key);
+        elseif (self::$cache_type == 'e')
             eaccelerator_rm($key);
     }
+
     static function cache_set($key, $value)
     {
         self::cache_check_type();
         self::$cache[$key] = $value;
         if (self::$cache_type == 'x')
             xcache_set($key, $value);
-        else if (self::$cache_type == 'e')
+        elseif (self::$cache_type == 'a')
+            apc_store($key, $value);
+        elseif (self::$cache_type == 'e')
             eaccelerator_put($key, $value);
     }
 
-    // Вызов функции из шаблона
+    /*** Parse functions ***/
+
+    /**
+     * Normal (main) parse function.
+     * Use it to run the template.
+     *
+     * @param string $filename Template filename
+     * @param array $vars Optional data, will override $this->tpldata
+     */
+    function parse($filename, $vars = NULL)
+    {
+        return $this->parse_real($filename, NULL, '_main', $vars);
+    }
+
+    /**
+     * Call template block (= macro/function)
+     *
+     * @param string $filename Template filename
+     * @param string $function Function name
+     * @param array $vars Optional data
+     */
     function exec_from($filename, $function, $vars = NULL)
     {
         return $this->parse_real($filename, NULL, $function, $vars);
     }
 
-    // Вызов функции из кода шаблона
-    // Совсем не рекомендовано, но возможно
-    function exec_from_inline($code, $function, $vars = NULL)
-    {
-        return $this->parse_real(NULL, $code, $function, $vars);
-    }
-
-    // Обработка главного блока шаблона
-    // $page = $obj->parse($filename);
-    // $page = $obj->parse($filename, $tpldata);
-    function parse($fn, $vars = NULL)
-    {
-        return $this->parse_real($fn, NULL, '_main', $vars);
-    }
-
-    // Обработка явно переданного кода шаблона
-    // Менее рекомендовано, но возможно
+    /**
+     * Should not be used without great need.
+     * Run template passed as argument.
+     */
     function parse_inline($code, $vars = NULL)
     {
         return $this->parse_real(NULL, $code, '_main', $vars);
     }
 
-    // "Реальная" функция, обрабатывающая все вызовы типа parse
+    /**
+     * Should not be used without great need.
+     * Execute a function from the code passed as argument.
+     */
+    function exec_from_inline($code, $function, $vars = NULL)
+    {
+        return $this->parse_real(NULL, $code, $function, $vars);
+    }
+
+    /**
+     * "Real" parse function, handles all parse_*()
+     */
     function parse_real($fn, $inline, $func, $vars = NULL)
     {
-        $this->errors = array();
         if (!$fn)
         {
             if (!strlen($inline))
@@ -207,18 +255,15 @@ class VMXTemplate
         else
         {
             if (substr($fn, 0, 1) != '/')
-                $fn = $this->root.$fn;
-            /* Пока что, если класс существует - просто используем его.
-               Однако если внезапно потребуется перезагружать шаблоны
-               в рамках ОДНОГО запроса - надо будет добавить stat()... FIXME?
-               Зато можно не бояться многократно вызывать какой-нибудь блок. */
+                $fn = $this->options->root.$fn;
+            /* Don't reload already loaded classes - optimal for multiple parse() calls.
+               But if we would like to reload templates during ONE request some day... */
             $class = 'Template_'.md5($fn);
             if (!class_exists($class))
             {
-                if ($this->failed[$fn])
+                if (isset($this->failed[$fn]))
                 {
-                    /* Если один раз за запрос загрузить не смогли,
-                       то больше не пытаемся */
+                    // Fail recorded, don't retry until next request
                     return NULL;
                 }
                 if (!($text = $this->loadfile($fn)))
@@ -239,13 +284,18 @@ class VMXTemplate
                     $this->failed[$fn] = true;
                     return NULL;
                 }
-                if (!class_exists($class))
+                if (!class_exists($class) || !isset($class::$version) || $class::$version < self::CODE_VERSION)
                 {
-                    /* кэш от старой версии, нужно сбросить
-                       FIXME в будущем совместимость со старым кэшем будет убрана */
+                    // Cache file from some older version - reset it
                     $this->error("Please, clear template cache path after upgrading VMX::Template", true);
                     $this->failed[$fn] = true;
                     return NULL;
+                }
+                foreach ($class::$functions as $loaded_function)
+                {
+                    // FIXME Мэйби придумать покрасивее
+                    // При загрузке файлов запоминаем функции
+                    $this->function_search_path[$loaded_function][] = $fn;
                 }
             }
         }
@@ -254,35 +304,44 @@ class VMXTemplate
         if ($vars)
             $tpl->tpldata = &$vars;
         $t = $tpl->$func();
-        /* FIXME Кусочек legacy, но тоже пока оставлен */
-        if ($this->wrapper)
+        // FIXME Somewhat legacy, but still here
+        if ($this->options->wrapper)
         {
-            $w = $this->wrapper;
+            $w = $this->options->wrapper;
             if (is_callable($w))
+            {
                 call_user_func_array($w, array(&$t));
+            }
         }
         return $t;
     }
 
-    // Функция загружает файл с кэшированием
-    // $textref = $obj->loadfile($file)
+    /**
+     * Load file (using cache)
+     *
+     * @param string $fn Filename
+     */
     function loadfile($fn)
     {
         $load = false;
-        if (!($text = self::cache_get("U$fn")) || $this->reload)
+        if (!($text = self::cache_get("U$fn")) || $this->options->reload)
         {
             $mtime = stat($fn);
             $mtime = $mtime[9];
             if (!$text)
+            {
                 $load = true;
+            }
             else
             {
                 $ctime = self::cache_get("T$fn");
                 if ($ctime < $mtime)
+                {
                     $load = true;
+                }
             }
         }
-        // если файл изменился - перезасасываем
+        // Reload if file changed
         if ($load)
         {
             if ($fp = fopen($fn, "rb"))
@@ -294,36 +353,70 @@ class VMXTemplate
                 fclose($fp);
             }
             else
+            {
                 return NULL;
+            }
+            // FIXME Different keys may expire separately!
             self::cache_set("T$fn", $mtime);
             self::cache_set("U$fn", $text);
         }
         return $text;
     }
 
-    // Функция компилирует код.
-    // $file = $this->compile($code, $fn);
-    // require $file;
-    // --> class Template_...
+    /**
+     * Compile code into a file and return its filename.
+     * This file, evaluated, will create the "Template_XXX" class
+     *
+     * $file = $this->compile($code, $fn);
+     * require $file;
+     */
     function compile($code, $fn, $reload = false)
     {
         $md5 = md5($code);
-        $file = $this->cache_dir . 'tpl' . $md5 . '.php';
+        $file = $this->options->cache_dir . 'tpl' . $md5 . '.php';
         if (file_exists($file) && !$reload)
+        {
             return $file;
+        }
 
-        // "имя" файла для кода не из файла
         if (!$fn)
         {
+            // Mock filename for inline code
             $func_ns = 'X' . $md5;
             $c = debug_backtrace();
             $c = $c[2];
             $fn = '(inline template at '.$c['file'].':'.$c['line'].')';
         }
         else
+        {
             $func_ns = md5($fn);
-        
+        }
+
+        $parser = new VMXTemplateParser($this->options);
+        $compiled = $parser->parse_all($code, $fn, $func_ns);
+        if (!file_put_contents($file, $compiled))
+        {
+            throw new VMXTemplateException("Failed writing $file");
+        }
+
+        return $file;
     }
+
+    /**
+     * Call template block / "function" from the template where it was defined
+     */
+    function call_block($block, $args, $errorinfo)
+    {
+        if (isset($this->function_search_path[$block]))
+        {
+            // FIXME maybe do it better!
+            $fn = $this->function_search_path[$block][0];
+            return $this->parse_real($fn, NULL, $block, $args);
+        }
+        throw new VMXTemplateException("$errorinfo Unknown block '$block'");
+    }
+
+    /*** Function implementations ***/
 
     static function array1($a)
     {
@@ -333,8 +426,6 @@ class VMXTemplate
             return $a;
         return array($a);
     }
-
-    /*** Function implementations ***/
 
     // Is the array associative?
     static function is_assoc($a)
@@ -571,15 +662,15 @@ class VMXTemplate
     }
 }
 
-// Parse exception
-class TemplateParseException extends Exception {}
+/**
+ * Template exception classes
+ */
+class VMXTemplateException extends Exception {}
+class VMXTemplateParseException extends VMXTemplateException {}
 
-/* Parser grammar:
-
---- template.y ---
-
-*/
-
+/**
+ * Options class
+ */
 class VMXTemplateOptions
 {
     var $begin_code    = '<!--';    // instruction start
@@ -596,7 +687,7 @@ class VMXTemplateOptions
     var $raise_error   = false;     // die() on fatal template errors
     var $print_error   = false;     // print fatal template errors
     var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
-    var $compiletime_functions = array();   // custom compilation time functions (code generators)
+    var $compiletime_functions = array();   // custom compile-time functions (code generators)
 
     function __construct($options = array())
     {
@@ -614,16 +705,23 @@ class VMXTemplateOptions
             $this->end_subst = false;
             $this->no_code_subst = false;
         }
+        $this->cache_dir = preg_replace('!/*$!s', '/', $this->cache_dir);
+        if (!is_writable($this->cache_dir))
+        {
+            throw new VMXTemplateException('VMXTemplate: cache_dir='.$this->cache_dir.' is not writable');
+        }
+        $this->root = preg_replace('!/*$!s', '/', $this->root);
     }
 }
 
 /**
  * Parser of templates and expressions into PHP code.
+ *
  * Includes:
  * - Lexical analyzer (~regexp)
  * - O(n) recursive descent syntactic analyzer and translator
  */
-class VMXTemplateExpressionParser
+class VMXTemplateParser
 {
     // Options, state
     var $options, $st;
@@ -688,7 +786,7 @@ class VMXTemplateExpressionParser
 
     /**
      * USAGE:
-     * $p = new TemplateExpressionParser($options);
+     * $p = new VMXTemplateParser($options);
      * try { $e = $p->parse_all($code); } catch (Exception $e) { ... }
      */
     function __construct(VMXTemplateOptions $options)
@@ -751,18 +849,22 @@ class VMXTemplateExpressionParser
         return array($this->tokpos[$this->ptr+$num], $this->tokline[$this->ptr+$num]);
     }
 
-    function throw($msg, $toknum = 0)
+    function errorinfo()
     {
-        if ($toknum)
-        {
-            $l = $this->lineno;
-            $p = $this->pos;
-        }
-        else
-        {
-            list($l, $p) = $this->tokpos($toknum);
-        }
-        throw new TemplateParseException("[line $l, byte $p] $msg");
+        // TODO Maybe report parse traces?
+        return "[{$this->st->input_filename}, line {$this->lineno}, byte {$this->pos}]";
+    }
+
+    function warn($text)
+    {
+        print $text;
+    }
+
+    function raise($msg)
+    {
+        throw new TemplateParseException(
+            $this->errorinfo().' '.$msg
+        );
     }
 
     /**
@@ -815,11 +917,6 @@ class VMXTemplateExpressionParser
                 $t = substr($this->code, $this->pos, $l);
                 if (isset($a[$t]))
                 {
-                    if ($t == '=>')
-                    {
-                        // => is a synonym for comma
-                        $t = ',';
-                    }
                     $this->tokpos[] = $this->pos;
                     $this->tokline[] = $this->lineno;
                     $this->tokens[] = $t;
@@ -828,20 +925,22 @@ class VMXTemplateExpressionParser
                 }
             }
             // Unknown character
-            $this->throw(
+            $this->raise(
                 "Unexpected character '".$this->code{$this->pos}."', marked by >>>HERE<<< in ".
-                substr($this->code, 0, $this->pos) . ' >>>HERE<<< ' . substr($this->code, $this->pos),
-                false
+                substr($this->code, 0, $this->pos) . ' >>>HERE<<< ' . substr($this->code, $this->pos)
             );
         }
         return true;
     }
 
-    // Assume $token is next in the stream (case-insensitive)
-    // and move pointer forward.
-    // $token may be '$' (assume name), '#' (assume literal),
-    // or an exact value of one of others. For names and literals,
-    // a value is returned, and the token itself for others.
+    /**
+     * Assume $token is next in the stream (case-insensitive)
+     * and move pointer forward.
+     *
+     * $token may be '$' (assume name), '#' (assume literal),
+     * or an exact value of one of others. For names and literals,
+     * a value is returned, and the token itself for others.
+     */
     function consume($token)
     {
         $t = $this->tok();
@@ -857,17 +956,18 @@ class VMXTemplateExpressionParser
             else
                 $this->unexpected($token, 1);
         }
-        elseif (strtolower($t) != strtolower($token))
+        elseif (!in_array(strtolower($t), (array)$token))
             $this->unexpected($token, 1);
         $this->ptr++;
         return $t;
     }
 
-    // Raise "unexpected token" error
+    /**
+     * Raise "unexpected token" error
+     */
     function unexpected($expected, $skip_frames = 0)
     {
-        if (!is_array($expected))
-            $expected = array($expected);
+        $expected = (array)$expected;
         foreach ($expected as &$e)
         {
             if ($e == '#')
@@ -888,9 +988,8 @@ class VMXTemplateExpressionParser
         if (count($expected) > 1)
             $text .= "one of ";
         $text .= implode(', ', $expected);
-        $text .= " in '".$this->expression."'"; // FIXME
         // TODO report parse traces
-        $this->throw($text);
+        $this->raise($text);
     }
 
     /*** Syntactic analysis ***/
@@ -906,9 +1005,14 @@ class VMXTemplateExpressionParser
         return $r;
     }
 
-    // Parse all code and return compiled template
-    // $filename is the input filename (just for reference)
-    function parse_all($code, $filename = '')
+    /**
+     * Parse all code and return compiled template
+     *
+     * @param $code full template code
+     * @param $filename input filename for error reporting
+     * @param $func_ns suffix for class name (Template_SUFFIX)
+     */
+    function parse_all($code, $filename, $func_ns)
     {
         $blocks = array(
             array(
@@ -946,7 +1050,9 @@ class VMXTemplateExpressionParser
             {
                 $b['pos'] = strpos($this->code, $b[0], $this->pos);
                 if ($b['pos'] !== false && ($min < 0 || $b['pos'] < $blocks[$min]['pos']))
+                {
                     $min = $i;
+                }
             }
             $r = '';
             if ($min >= 0)
@@ -961,13 +1067,14 @@ class VMXTemplateExpressionParser
                 $handler = $blocks[$min][1];
                 try
                 {
+                    // Try to parse from here, skip invalid parts
                     $r = $this->$handler();
                     // Add newline count from code fragment
                     $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
                 }
                 catch (TemplateParseException $e)
                 {
-                    
+                    $this->warn($e->getMessage());
                     // Only skip 1 starting character and try again
                     $this->pos = $pos+1;
                     $this->lineno = $lineno;
@@ -1002,12 +1109,13 @@ class VMXTemplateExpressionParser
         }
 
         // Assemble the class code
+        $functions = var_export(array_keys($this->st->functions));
         $rfn = addcslashes($this->st->input_filename, '\\\'');
-        $func_ns = md5($this->st->input_filename);
         $code = "<?php // {$this->st->input_filename}
 class Template_$func_ns extends ".__CLASS__." {
 var \$template_filename = '$rfn';
-var \$version = 3;
+static \$version = ".VMXTemplate::CODE_VERSION.";
+static \$functions = $functions;
 function __construct(\$t) {
 \$this->tpldata = &\$t->tpldata;
 \$this->parent = &\$t;
@@ -1162,7 +1270,7 @@ $code
     {
         if (!count($this->st->in))
         {
-            $this->throw("END without begin directive");
+            $this->raise("END without begin directive");
         }
         $in = array_pop($this->st->in);
         $w = $in[0];
@@ -1176,7 +1284,7 @@ $code
             if ($end_subj ? $b != ($e = implode($end_subj, '.')) : $this->options->strict_end)
             {
                 $w = strtoupper($w);
-                $this->throw(
+                $this->raise(
                     $b ? "END $e after $w $b"
                        : "END subject not specified (after $w $b) in strict mode"
                 );
@@ -1206,11 +1314,11 @@ $varref = array_pop(\$stack);";
     }
 
     // Function definition (with named arguments)
-    // Such functions are called as fn(arg1, arg2) or fn{name => value}
+    // Such functions are always called as fn(name => value, ...)
     // FUNCTION/BLOCK/MACRO name (arglist) [ = expression]
     function parse_function()
     {
-        $tokptr = $this->ptr;
+        list($pos, $line) = $this->tokpos();
         $name = $this->consume('$');
         $args = array();
         if ($this->tok() == '(')
@@ -1230,11 +1338,10 @@ $varref = array_pop(\$stack);";
         }
         if (isset($this->st->functions[$name]))
         {
-            $this->throw(
+            $this->raise(
                 "Attempt to redeclare function $name, previously defined on line ".
                 ($this->st->functions[$name]['line']+1)." (byte ".
-                ($this->st->functions[$name]['pos']).")",
-                $tokptr-$this->ptr
+                ($this->st->functions[$name]['pos']).")"
             );
         }
         $this->st->functions[$name] = array(
@@ -1346,7 +1453,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     // exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
-    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')'
+    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')' | func '(' gthash ')'
     // func: name | varref varpart
     function parse_not()
     {
@@ -1379,8 +1486,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         }
         elseif ($t{0} == '$')
         {
-// FIXME! block calls!
-            // Name -> varref or function call
+            // Name => varref or function call
             // No support for obj.method().other_method() call syntax
             // as PHP itself is nervous for it
             $parts = $this->parse_varref();
@@ -1388,13 +1494,14 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             if ($t{0} == '$')
             {
                 // Single argument function call without braces
-                $r = $this->call_ref($parts, $this->parse_nonbrace());
+                $r = $this->call_ref($parts, 'list', $this->parse_nonbrace());
             }
             elseif ($t == '(')
             {
                 // Function call with braces
                 $this->ptr++;
-                $r = $this->call_ref($parts, $this->parse_list());
+                list($type, $args) = $this->parse_list_or_gthash();
+                $r = $this->call_ref($parts, $type, $args);
                 $this->consume(')');
             }
             else
@@ -1403,6 +1510,47 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         else
             $this->unexpected(array('!', '(', '{', '#', '$'));
         return $r;
+    }
+
+    // list_or_gthash: list | gthash
+    // list: exp | exp ',' list
+    // gthash: gtpair | gtpair ',' gthash |
+    // gtpair: exp '=>' exp
+    function parse_list_or_gthash()
+    {
+        $r = $this->parse_exp();
+        $t = $this->tok();
+        if ($t == ',')
+        {
+            // list, array output
+            $type = 'list';
+            $r = array($r);
+            while ($this->tok() == ',')
+            {
+                $this->ptr++;
+                $r[] = $this->parse_exp();
+            }
+        }
+        elseif ($t == '=>')
+        {
+            // hash separated with '=>', string output
+            $this->ptr++;
+            $type = 'hash';
+            $r .= ' => ';
+            $r .= $this->parse_exp();
+            $r .= ', ';
+            while ($this->tok() == ',')
+            {
+                $this->ptr++;
+                $r .= $this->parse_exp();
+                $r .= ' => ';
+                $this->consume('=>');
+                $r .= $this->parse_exp();
+                $r .= ', ';
+            }
+            $r = "array($r)";
+        }
+        return array($type, $r);
     }
 
     // list: exp | exp ',' list
@@ -1418,7 +1566,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     // hash: pair | pair ',' hash |
-    // pair: exp ',' exp
+    // pair: exp ',' exp | exp '=>' exp
     function parse_hash()
     {
         $r = '';
@@ -1429,7 +1577,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             if ($this->tok() == '}')
                 return $r;
             $k = $this->parse_exp();
-            $this->consume(',');
+            $this->consume(array(',', '=>'));
             $v = $this->parse_exp();
             $r .= "$k => $v, ";
         } while ($this->tok() == ',');
@@ -1476,10 +1624,18 @@ $varref_index = \$stack[count(\$stack)-1]++;";
 
     // Construct function call code from $parts (varref parts)
     // and $args (compiled expressions for function arguments)
-    function call_ref($parts, $args)
+    // $args = array('list', <list items>) or array('hash', <hash key>, <hash value>, ...)
+    function call_ref($parts, $type, $args)
     {
-// FIXME deal with block calls!
         $r = false;
+        if ($type == 'hash')
+        {
+            if (count($parts) > 1)
+            {
+                $this->raise("Object method calls with hash arguments are not supported");
+            }
+            $r = "\$this->parent->call_block($parts[0], $args, \"".addslashes($this->errorinfo())."\")";
+        }
         if (count($parts) == 1)
         {
             $fn = $parts[0];
@@ -1496,10 +1652,12 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             elseif (isset($this->compiletime_functions[$fn]))
                 $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
             else
-                $this->throw("Unknown function: '$fn'");
+                $this->raise("Unknown function: '$fn'");
         }
         if ($r === false)
+        {
             $r = 'call_user_func_array('.$this->gen_varref($r).', $args)';
+        }
         return $r;
     }
 
@@ -1850,7 +2008,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     {
         if (!method_exists($this, "function_$f"))
         {
-            $this->error("Unknown function specified for map(): $f");
+            $this->raise("Unknown function specified for map(): $f");
             return NULL;
         }
         $f = "function_$f";
