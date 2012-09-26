@@ -32,9 +32,9 @@ p7: p8 | p8 '<' p8 | p8 '>' p8 | p8 "<=" p8 | p8 ">=" p8
 p8: p9 | p9 '+' p8 | p9 '-' p8
 p9: p10 | p10 '*' p9 | p10 '/' p9 | p10 '%' p9
 p10: p11 | '-' p11
-p11: nonbrace | '(' exp ')' varpath | '!' p11 | func nonbrace
-nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')'
-list_or_gthash: list | gthash |
+p11: nonbrace | '(' exp ')' varpath | '!' p11
+nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')' | func nonbrace
+list_or_gthash: list | gthash
 func: name | varref varpart
 list: exp | exp ',' list
 arglist: name | name ',' arglist |

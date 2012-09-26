@@ -1184,7 +1184,7 @@ $code
     function parse_subst()
     {
         $e = $this->parse_exp();
-        return "\$t .= $e;\n";
+        return "\$t.=$e;\n";
     }
 
     // code: "IF" exp | "ELSE" | elseif exp | "END" |
@@ -1511,9 +1511,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         return $neg ? "-($e)" : $e;
     }
 
-    // exp_not: nonbrace | '(' exp ')' | '!' exp_not | func nonbrace
-    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')' | func '(' gthash ')'
-    // func: name | varref varpart
+    // exp_not: nonbrace | '(' exp ')' varpath | '!' exp_not
     function parse_not()
     {
         $t = $this->tok();
@@ -1527,8 +1525,21 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             $this->ptr++;
             $r = $this->parse_exp();
             $this->consume(')');
+            // FIXME parse_varpath here
         }
-        elseif ($t == '{')
+        else
+        {
+            $r = $this->parse_nonbrace();
+        }
+        return $r;
+    }
+
+    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')' | func '(' gthash ')' | func nonbrace
+    // func: name | varref varpart
+    function parse_nonbrace()
+    {
+        $t = $this->tok();
+        if ($t == '{')
         {
             $this->ptr++;
             if ($this->tok() != '}')
@@ -1567,7 +1578,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
                 $r = $this->gen_varref($parts);
         }
         else
-            $this->unexpected(array('!', '(', '{', '#', '$'));
+            $this->unexpected(array('{', '#', '$'));
         return $r;
     }
 
@@ -1645,6 +1656,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
 
     // varref: name | varref varpart
     // varpart: '.' name | '[' exp ']'
+    // varpath: | varpath varpart
     // (always begins with name)
     function parse_varref()
     {
