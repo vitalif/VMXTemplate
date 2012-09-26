@@ -205,7 +205,7 @@ class VMXTemplate
      */
     function parse($filename, $vars = NULL)
     {
-        return $this->parse_real($filename, NULL, '_main', $vars);
+        return $this->parse_real($filename, NULL, 'main', $vars);
     }
 
     /**
@@ -226,7 +226,7 @@ class VMXTemplate
      */
     function parse_inline($code, $vars = NULL)
     {
-        return $this->parse_real(NULL, $code, '_main', $vars);
+        return $this->parse_real(NULL, $code, 'main', $vars);
     }
 
     /**
@@ -293,16 +293,19 @@ class VMXTemplate
                 }
                 foreach ($class::$functions as $loaded_function)
                 {
-                    // FIXME Мэйби придумать покрасивее
-                    // При загрузке файлов запоминаем функции
+                    // FIXME Do it better
+                    // Remember functions during file loading
                     $this->function_search_path[$loaded_function][] = $fn;
                 }
             }
         }
-        $func = "__$func";
+        $func = "fn_$func";
         $tpl = new $class($this);
         if ($vars)
+        {
+            // FIXME useless &
             $tpl->tpldata = &$vars;
+        }
         $t = $tpl->$func();
         // FIXME Somewhat legacy, but still here
         if ($this->options->wrapper)
@@ -720,6 +723,7 @@ class VMXTemplateOptions
  * Includes:
  * - Lexical analyzer (~regexp)
  * - O(n) recursive descent syntactic analyzer and translator
+ *   I.e. no backtracking, but performance maybe is worse than with LALR.
  */
 class VMXTemplateParser
 {
@@ -733,7 +737,7 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '+ - * / % ! , . < > ( ) { } [ ] || && == != <= >= =>';
+    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] || && == != <= >= =>';
 
     // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
@@ -794,11 +798,16 @@ class VMXTemplateParser
         $this->options = $options;
         $this->nchar = array();
         foreach (explode(' ', self::$chartokens) as $t)
+        {
             $this->nchar[strlen($t)][$t] = true;
-        // Add code fragment finishing token to the list
+        }
+        // Add code fragment finishing tokens
         $this->nchar[strlen($this->options->end_code)][$this->options->end_code] = true;
-        if ($this->end_subst)
+        if ($this->options->end_subst)
+        {
             $this->nchar[strlen($this->options->end_subst)][$this->options->end_subst] = true;
+        }
+        // Reverse-sort lengths
         $this->lens = array_keys($this->nchar);
         rsort($this->lens);
     }
@@ -852,18 +861,25 @@ class VMXTemplateParser
     function errorinfo()
     {
         // TODO Maybe report parse traces?
-        return "[{$this->st->input_filename}, line {$this->lineno}, byte {$this->pos}]";
+        $l = strlen($this->code);
+        $linestart = strrpos($this->code, "\n", $this->pos-$l) ?: 0;
+        $lineend = strpos($this->code, "\n", $this->pos) ?: $l;
+        $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
+        $line .= '^^^';
+        $line .= substr($this->code, $this->pos, $lineend-$this->pos);
+        return "in {$this->st->input_filename}, line {$this->lineno}, byte {$this->pos}, marked by ^^^ in $line";
     }
 
     function warn($text)
     {
-        print $text;
+        // FIXME
+        print $text."\n";
     }
 
     function raise($msg)
     {
-        throw new TemplateParseException(
-            $this->errorinfo().' '.$msg
+        throw new VMXTemplateParseException(
+            $msg.' '.$this->errorinfo()
         );
     }
 
@@ -902,7 +918,7 @@ class VMXTemplateParser
         {
             // String or numeric non-negative literal
             $t = $m[1];
-            if ($m[2])
+            if (isset($m[2]))
                 $t = str_replace('$', '\\$', $t);
             $this->tokpos[] = $this->pos;
             $this->tokline[] = $this->lineno;
@@ -912,8 +928,9 @@ class VMXTemplateParser
         else
         {
             // Special characters
-            foreach ($this->lens as $l => $a)
+            foreach ($this->lens as $l)
             {
+                $a = $this->nchar[$l];
                 $t = substr($this->code, $this->pos, $l);
                 if (isset($a[$t]))
                 {
@@ -926,8 +943,7 @@ class VMXTemplateParser
             }
             // Unknown character
             $this->raise(
-                "Unexpected character '".$this->code{$this->pos}."', marked by >>>HERE<<< in ".
-                substr($this->code, 0, $this->pos) . ' >>>HERE<<< ' . substr($this->code, $this->pos)
+                "Unexpected character '".$this->code{$this->pos}."'"
             );
         }
         return true;
@@ -995,7 +1011,7 @@ class VMXTemplateParser
     /*** Syntactic analysis ***/
 
     // Tokenize, parse and return parsed code
-    // @throws TemplateParseException
+    // @throws VMXTemplateParseException
     function parse()
     {
         $this->clear_tokens();
@@ -1040,6 +1056,9 @@ class VMXTemplateParser
             'body' => '',
         );
         $this->st->output = array(&$this->st->functions['main']['body']);
+        // $text_pos = Position up to which all text was already printed
+        // $pos = Instruction start position
+        // $this->pos = Instruction end position
         $text_pos = 0;
         $lineno = 0;
         while ($this->pos < $this->codelen)
@@ -1048,7 +1067,7 @@ class VMXTemplateParser
             $min = -1;
             foreach ($blocks as $i => &$b)
             {
-                $b['pos'] = strpos($this->code, $b[0], $this->pos);
+                $b['pos'] = strpos($this->code, $b['begin'], $this->pos);
                 if ($b['pos'] !== false && ($min < 0 || $b['pos'] < $blocks[$min]['pos']))
                 {
                     $min = $i;
@@ -1061,10 +1080,24 @@ class VMXTemplateParser
                 $lineno = $this->lineno;
                 $pos = $blocks[$min]['pos'];
                 $this->lineno += substr_count($this->code, "\n", $this->pos, $pos-$this->pos);
-                $this->pos = $pos;
+                $this->pos = $pos + strlen($blocks[$min]['begin']);
+                if ($blocks[$min]['eat'])
+                {
+                    // TODO configurable eat, like in TT [%+ [%-
+                    // Eat line beginning (when there are only spaces)
+                    $p = $pos;
+                    while ($p > 0 && ctype_space($c = $this->code{$p-1}) && $c != "\n")
+                    {
+                        $p--;
+                    }
+                    if ($p == 0 || $c == "\n")
+                    {
+                        $pos = $p;
+                    }
+                }
                 // Reset token buffer
                 $this->clear_tokens();
-                $handler = $blocks[$min][1];
+                $handler = $blocks[$min]['handler'];
                 try
                 {
                     // Try to parse from here, skip invalid parts
@@ -1072,7 +1105,7 @@ class VMXTemplateParser
                     // Add newline count from code fragment
                     $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
                 }
-                catch (TemplateParseException $e)
+                catch (VMXTemplateParseException $e)
                 {
                     $this->warn($e->getMessage());
                     // Only skip 1 starting character and try again
@@ -1080,11 +1113,28 @@ class VMXTemplateParser
                     $this->lineno = $lineno;
                     continue;
                 }
+                if ($blocks[$min]['eat'])
+                {
+                    // Eat line end (when there are only spaces)
+                    $p = $this->pos;
+                    while ($p < $this->codelen && ctype_space($c = $this->code{$p}) && $c != "\n")
+                    {
+                        $p++;
+                    }
+                    if ($p == $this->codelen || $c == "\n")
+                    {
+                        if ($p < $this->codelen)
+                        {
+                            $p++;
+                        }
+                        $this->pos = $p;
+                    }
+                }
             }
             else
             {
                 // No more code fragments and substitutions :-(
-                $pos = $this->codelen;
+                $pos = $this->pos = $this->codelen;
             }
             if ($pos > $text_pos)
             {
@@ -1092,28 +1142,31 @@ class VMXTemplateParser
                 $text = substr($this->code, $text_pos, $pos-$text_pos);
                 $text = addcslashes($text, '\\\'');
                 $this->st->output[count($this->st->output)-1] .= "\$t.='$text';\n";
-                $text_pos = $pos;
+                $text_pos = $this->pos;
             }
-            // Append compiled fragment
-            $this->st->output[count($this->st->output)-1] .= $r."\n";
+            if ($r !== '')
+            {
+                // Append compiled fragment
+                $this->st->output[count($this->st->output)-1] .= $r."\n";
+            }
         }
 
         // Generate code for functions
         $code = '';
         foreach ($this->st->functions as $f)
         {
-            $code .= "function fn_$f[name] ($args) {\n";
+            $code .= "function fn_$f[name] () {\n";
             $code .= "\$stack = array();\n\$t = '';\n";
             $code .= $f['body'];
             $code .= "return \$t;\n}\n";
         }
 
         // Assemble the class code
-        $functions = var_export(array_keys($this->st->functions));
+        $functions = var_export(array_keys($this->st->functions), true);
         $rfn = addcslashes($this->st->input_filename, '\\\'');
         $code = "<?php // {$this->st->input_filename}
-class Template_$func_ns extends ".__CLASS__." {
-var \$template_filename = '$rfn';
+class Template_$func_ns extends VMXTemplate {
+static \$template_filename = '$rfn';
 static \$version = ".VMXTemplate::CODE_VERSION.";
 static \$functions = $functions;
 function __construct(\$t) {
@@ -1125,6 +1178,13 @@ $code
 ";
 
         return $code;
+    }
+
+    // Substitution
+    function parse_subst()
+    {
+        $e = $this->parse_exp();
+        return "\$t .= $e;\n";
     }
 
     // code: "IF" exp | "ELSE" | elseif exp | "END" |
@@ -1304,7 +1364,7 @@ $code
         {
             if ($w == 'begin')
                 array_pop($st->blocks);
-            list($varref, $varref_index) = $this->varref_and_index($in[2]);
+            list($varref, $varref_index) = $this->varref_and_index($in[1]);
             return "}
 array_pop(\$stack);
 $varref_index = array_pop(\$stack);
@@ -1359,8 +1419,7 @@ $varref = array_pop(\$stack);";
     function varref_and_index($parts)
     {
         $varref = $this->gen_varref($parts);
-        $parts[count($parts)-1] .= ".'#'";
-        $varref_index = $this->gen_varref($parts);
+        $varref_index = substr($varref, 0, -1) . ".'#']";
         return array($varref, $varref_index);
     }
 
@@ -1604,6 +1663,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
                 $a[] = '['.$this->parse_exp().']';
                 $this->consume(']');
             }
+            $t = $this->tok();
         }
         return $a;
     }
@@ -1945,7 +2005,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $args = func_get_args();
         $file = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real($file, NULL, '_main'$args)";
+        return "\$this->parent->parse_real($file, NULL, 'main'$args)";
     }
 
     /* включение блока из текущего файла: exec('блок'[, аргументы]) */
@@ -1973,7 +2033,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $args = func_get_args();
         $code = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real(NULL, $code, '_main'$args)";
+        return "\$this->parent->parse_real(NULL, $code, 'main'$args)";
     }
 
     /* сильно не рекомендуется, но возможно:
