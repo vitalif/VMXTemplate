@@ -4,6 +4,7 @@
 
 # "Oh that perlists... anything they write is just another Template Toolkit"
 # Rewritten 3 times: regex -> index() -> grammar. Still backwards compatible...
+# Needs another rewrite to some parser generator. Maybe LIME...
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # Author: Vitaliy Filippov, 2006-2012
@@ -862,18 +863,25 @@ class VMXTemplateParser
     {
         // TODO Maybe report parse traces?
         $l = strlen($this->code);
-        $linestart = strrpos($this->code, "\n", $this->pos-$l) ?: 0;
+        $linestart = strrpos($this->code, "\n", $this->pos-$l-1) ?: -1;
         $lineend = strpos($this->code, "\n", $this->pos) ?: $l;
         $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
         $line .= '^^^';
         $line .= substr($this->code, $this->pos, $lineend-$this->pos);
-        return "in {$this->st->input_filename}, line {$this->lineno}, byte {$this->pos}, marked by ^^^ in $line";
+        return "in {$this->st->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
     }
 
     function warn($text)
     {
         // FIXME
-        print $text."\n";
+        if (PHP_SAPI == 'cli')
+        {
+            print "$text\n";
+        }
+        else
+        {
+            print htmlspecialchars($text).'<br />';
+        }
     }
 
     function raise($msg)
@@ -979,6 +987,18 @@ class VMXTemplateParser
     }
 
     /**
+     * Assume next token is "EOD" (end-of-directive)
+     * Used in "stateful" directives to prevent changing state on incorrect parse
+     */
+    function assume_eod()
+    {
+        if ($this->tok() != $this->eod)
+        {
+            $this->unexpected($this->eod, 1);
+        }
+    }
+
+    /**
      * Raise "unexpected token" error
      */
     function unexpected($expected, $skip_frames = 0)
@@ -1033,6 +1053,7 @@ class VMXTemplateParser
         $blocks = array(
             array(
                 'begin' => $this->options->begin_code,
+                'end' => $this->options->end_code,
                 'handler' => 'parse_code',
                 'eat' => $this->options->eat_code_line
             ),
@@ -1041,6 +1062,7 @@ class VMXTemplateParser
         {
             $blocks[] = array(
                 'begin' => $this->options->begin_subst,
+                'end' => $this->options->end_subst,
                 'handler' => 'parse_subst',
                 'eat' => false,
             );
@@ -1079,7 +1101,10 @@ class VMXTemplateParser
                 // Set source position and line number
                 $lineno = $this->lineno;
                 $pos = $blocks[$min]['pos'];
-                $this->lineno += substr_count($this->code, "\n", $this->pos, $pos-$this->pos);
+                if ($pos > $this->pos)
+                {
+                    $this->lineno += substr_count($this->code, "\n", $this->pos, $pos-$this->pos);
+                }
                 $this->pos = $pos + strlen($blocks[$min]['begin']);
                 if ($blocks[$min]['eat'])
                 {
@@ -1097,11 +1122,13 @@ class VMXTemplateParser
                 }
                 // Reset token buffer
                 $this->clear_tokens();
+                $this->eod = $blocks[$min]['end'];
                 $handler = $blocks[$min]['handler'];
                 try
                 {
                     // Try to parse from here, skip invalid parts
                     $r = $this->$handler();
+                    $this->consume($this->eod);
                     // Add newline count from code fragment
                     $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
                 }
@@ -1120,6 +1147,10 @@ class VMXTemplateParser
                     while ($p < $this->codelen && ctype_space($c = $this->code{$p}) && $c != "\n")
                     {
                         $p++;
+                    }
+                    if ($c == "\n")
+                    {
+                        $this->lineno++;
                     }
                     if ($p == $this->codelen || $c == "\n")
                     {
@@ -1201,7 +1232,10 @@ $code
         if ($t == '$if')
         {
             $this->ptr++;
-            return "if (".$this->parse_exp().") {";
+            $e = $this->parse_exp();
+            $this->assume_eod();
+            $this->st->in[] = array('if');
+            return "if ($e) {";
         }
         elseif ($t == '$else')
         {
@@ -1233,6 +1267,7 @@ $code
                 $this->ptr++;
                 $exp = $this->parse_exp();
             }
+            $this->assume_eod();
             $this->st->in[] = array('for', $parts, $exp);
             return $this->gen_foreach($parts, $exp);
         }
@@ -1257,15 +1292,16 @@ $code
             }
             // SET directive
             $this->ptr++;
-            $varref = $this->gen_varref($this->parse_varref());
+            $def = $this->parse_varref();
             if ($this->tok() == '=')
             {
                 // SET varref = exp
                 $this->ptr++;
                 $e = $this->parse_exp();
-                return $varref . ' = ' . $e . ';';
+                return $this->gen_varref($def) . ' = ' . $e . ';';
             }
-            $this->st->in[] = array('set', $varref);
+            $this->assume_eod();
+            $this->st->in[] = array('set', $def);
             return "\$stack[] = \$t;\n\$t = '';";
         }
         elseif ($t == '$function' || $t == '$block' || $t == '$macro')
@@ -1306,6 +1342,7 @@ $code
                 break;
             }
         }
+        $this->assume_eod();
         $this->st->blocks[] = $bname;
         $parts = $this->st->blocks;
         $this->st->in[] = array('begin', array($bname), $t);
@@ -1328,6 +1365,12 @@ $code
     // Optionally with varref specifying what block should end here.
     function parse_end()
     {
+        $end_subj = false;
+        if (substr($this->tok(), 0, 1) == '$')
+        {
+            $end_subj = $this->parse_varref();
+        }
+        $this->assume_eod();
         if (!count($this->st->in))
         {
             $this->raise("END without begin directive");
@@ -1335,13 +1378,10 @@ $code
         $in = array_pop($this->st->in);
         $w = $in[0];
         $begin_subj = isset($in[1]) ? $in[1] : false;
-        $end_subj = false;
-        if (substr($this->tok(), 0, 1) == '$')
-            $end_subj = $this->parse_varref();
         if ($begin_subj)
         {
-            $b = implode($begin_subj, '.');
-            if ($end_subj ? $b != ($e = implode($end_subj, '.')) : $this->options->strict_end)
+            $b = implode('.', $begin_subj);
+            if ($end_subj ? $b != ($e = implode('.', $end_subj)) : $this->options->strict_end)
             {
                 $w = strtoupper($w);
                 $this->raise(
@@ -1352,7 +1392,7 @@ $code
         }
         if ($w == 'set')
         {
-            return "$in[1] = \$t;\n\$t = array_pop(\$stack);";
+            return $this->gen_varref($in[1])." = \$t;\n\$t = array_pop(\$stack);";
         }
         elseif ($w == 'function')
         {
@@ -1396,6 +1436,7 @@ $varref = array_pop(\$stack);";
         {
             $code = $this->parse_exp();
         }
+        $this->assume_eod();
         if (isset($this->st->functions[$name]))
         {
             $this->raise(
