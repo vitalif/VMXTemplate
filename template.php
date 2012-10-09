@@ -242,7 +242,7 @@ class VMXTemplate
     /**
      * "Real" parse function, handles all parse_*()
      */
-    function parse_real($fn, $inline, $func, $vars = NULL)
+    function parse_real($fn, $inline, $func, &$vars = NULL)
     {
         if (!$fn)
         {
@@ -304,10 +304,18 @@ class VMXTemplate
         $tpl = new $class($this);
         if ($vars)
         {
-            // FIXME useless &
             $tpl->tpldata = &$vars;
         }
+        $old = error_reporting();
+        if ($old & E_NOTICE)
+        {
+            error_reporting($old & ~E_NOTICE);
+        }
         $t = $tpl->$func();
+        if ($old & E_NOTICE)
+        {
+            error_reporting($old);
+        }
         // FIXME Somewhat legacy, but still here
         if ($this->options->wrapper)
         {
@@ -321,7 +329,7 @@ class VMXTemplate
     }
 
     /**
-     * Load file (using cache)
+     * Load file (with caching)
      *
      * @param string $fn Filename
      */
@@ -360,7 +368,7 @@ class VMXTemplate
             {
                 return NULL;
             }
-            // FIXME Different keys may expire separately!
+            // Different keys may expire separately, but that's not a problem here
             self::cache_set("T$fn", $mtime);
             self::cache_set("U$fn", $text);
         }
@@ -469,10 +477,11 @@ class VMXTemplate
     static function perlish_or()
     {
         $a = func_get_args();
+        $last = array_pop($a);
         foreach ($a as $v)
             if ($v)
                 return $v;
-        return false;
+        return $last;
     }
 
     // Call a function
@@ -861,26 +870,41 @@ class VMXTemplateParser
 
     function errorinfo()
     {
-        // TODO Maybe report parse traces?
         $l = strlen($this->code);
         $linestart = strrpos($this->code, "\n", $this->pos-$l-1) ?: -1;
         $lineend = strpos($this->code, "\n", $this->pos) ?: $l;
         $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
         $line .= '^^^';
         $line .= substr($this->code, $this->pos, $lineend-$this->pos);
-        return "in {$this->st->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
+        $in = '';
+        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+        foreach ($trace as $frame)
+        {
+            if ($frame['function'] == 'parse_all')
+            {
+                break;
+            }
+            elseif (substr($frame['function'], 0, 6) == 'parse_')
+            {
+                $in = strtoupper(substr($frame['function'], 6)).", ";
+                break;
+            }
+        }
+        return "in $in{$this->st->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
     }
 
     function warn($text)
     {
-        // FIXME
-        if (PHP_SAPI == 'cli')
+        if ($this->options->print_error)
         {
-            print "$text\n";
-        }
-        else
-        {
-            print htmlspecialchars($text).'<br />';
+            if (PHP_SAPI == 'cli')
+            {
+                print "$text\n";
+            }
+            else
+            {
+                print htmlspecialchars($text).'<br />';
+            }
         }
     }
 
@@ -1024,7 +1048,6 @@ class VMXTemplateParser
         if (count($expected) > 1)
             $text .= "one of ";
         $text .= implode(', ', $expected);
-        // TODO report parse traces
         $this->raise($text);
     }
 
@@ -1288,7 +1311,7 @@ $code
             if ($this->tok(1) == '(')
             {
                 // This is the set() function, parse it as an expression
-                return $this->parse_expression();
+                return $this->parse_exp();
             }
             // SET directive
             $this->ptr++;
@@ -1496,6 +1519,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     {
         $ops = array('||', '$or', '$xor');
         $e = array($this->parse_ops('and'));
+        $xor = false;
         while (in_array($t = strtolower($this->tok()), $ops))
         {
             $this->ptr++;
@@ -1602,21 +1626,24 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             // as PHP itself is nervous for it
             $parts = $this->parse_varref();
             $t = $this->tok();
-            if ($t{0} == '$')
+            if ($t{0} == '$' || $t{0} == '#' || $t == '{')
             {
-                // Single argument function call without braces
+                // Name, literal, { -> Single argument function call without braces
                 $r = $this->call_ref($parts, 'list', $this->parse_nonbrace());
             }
             elseif ($t == '(')
             {
-                // Function call with braces
+                // ( -> function call with braces
                 $this->ptr++;
                 list($type, $args) = $this->parse_list_or_gthash();
                 $r = $this->call_ref($parts, $type, $args);
                 $this->consume(')');
             }
             else
+            {
+                // Nothing after the varref
                 $r = $this->gen_varref($parts);
+            }
         }
         else
             $this->unexpected(array('{', '#', '$'));
@@ -1660,6 +1687,10 @@ $varref_index = \$stack[count(\$stack)-1]++;";
                 $r .= ', ';
             }
             $r = "array($r)";
+        }
+        else
+        {
+            $this->unexpected(array('=>', ','));
         }
         return array($type, $r);
     }
@@ -1745,13 +1776,13 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         {
             if (count($parts) > 1)
             {
-                $this->raise("Object method calls with hash arguments are not supported");
+                $this->raise("Object method calls with hash arguments are impossible");
             }
             $r = "\$this->parent->call_block($parts[0], $args, \"".addslashes($this->errorinfo())."\")";
         }
         if (count($parts) == 1)
         {
-            $fn = $parts[0];
+            $fn = strtolower($parts[0]);
             if (isset(self::$functions[$fn]))
             {
                 $fn = 'function_'.self::$functions[$fn];
