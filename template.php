@@ -1046,8 +1046,8 @@ class VMXTemplateParser
         }
         $text = "Unexpected $tok, expected ";
         if (count($expected) > 1)
-            $text .= "one of ";
-        $text .= implode(', ', $expected);
+            $text .= "one of '";
+        $text .= implode("', '", $expected)."'";
         $this->raise($text);
     }
 
@@ -1196,8 +1196,8 @@ class VMXTemplateParser
                 $text = substr($this->code, $text_pos, $pos-$text_pos);
                 $text = addcslashes($text, '\\\'');
                 $this->st->output[count($this->st->output)-1] .= "\$t.='$text';\n";
-                $text_pos = $this->pos;
             }
+            $text_pos = $this->pos;
             if ($r !== '')
             {
                 // Append compiled fragment
@@ -1238,7 +1238,7 @@ $code
     function parse_subst()
     {
         $e = $this->parse_exp();
-        return "\$t.=$e;\n";
+        return "\$t.=$e;";
     }
 
     // code: "IF" exp | "ELSE" | elseif exp | "END" |
@@ -1629,7 +1629,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             if ($t{0} == '$' || $t{0} == '#' || $t == '{')
             {
                 // Name, literal, { -> Single argument function call without braces
-                $r = $this->call_ref($parts, 'list', $this->parse_nonbrace());
+                $r = $this->call_ref($parts, 'list', array($this->parse_nonbrace()));
             }
             elseif ($t == '(')
             {
@@ -1658,18 +1658,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     {
         $r = $this->parse_exp();
         $t = $this->tok();
-        if ($t == ',')
-        {
-            // list, array output
-            $type = 'list';
-            $r = array($r);
-            while ($this->tok() == ',')
-            {
-                $this->ptr++;
-                $r[] = $this->parse_exp();
-            }
-        }
-        elseif ($t == '=>')
+        if ($t == '=>')
         {
             // hash separated with '=>', string output
             $this->ptr++;
@@ -1690,7 +1679,14 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         }
         else
         {
-            $this->unexpected(array('=>', ','));
+            // list separated with ',', array output
+            $type = 'list';
+            $r = array($r);
+            while ($this->tok() == ',')
+            {
+                $this->ptr++;
+                $r[] = $this->parse_exp();
+            }
         }
         return array($type, $r);
     }
@@ -1785,22 +1781,38 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             $fn = strtolower($parts[0]);
             if (isset(self::$functions[$fn]))
             {
+                // Builtin function call using alias
                 $fn = 'function_'.self::$functions[$fn];
-                $r = $this->$fn($args);
+                $r = call_user_func_array(array($this, $fn), $args);
             }
             elseif (method_exists($this, "function_$fn"))
             {
+                // Builtin function call using name
                 $fn = "function_$fn";
-                $r = $this->$fn($args);
+                $r = call_user_func_array(array($this, $fn), $args);
             }
             elseif (isset($this->compiletime_functions[$fn]))
+            {
+                // Custom compile-time function call
                 $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
+            }
             else
+            {
                 $this->raise("Unknown function: '$fn'");
+            }
         }
-        if ($r === false)
+        else
         {
-            $r = 'call_user_func_array('.$this->gen_varref($r).', $args)';
+            // Object method call
+            $fn = array_pop($parts);
+            $r = $this->gen_varref($parts).'->';
+            if ($fn{0} == '[')
+                $r .= '{'.substr($fn, 1, -1).'}';
+            elseif (preg_match('/\W/s', $fn))
+                $r .= '{\''.addcslashes($fn, '\\\'').'\'}';
+            else
+                $r .= $fn;
+            $r .= '('.implode(', ', $args).')';
         }
         return $r;
     }
@@ -1879,16 +1891,16 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     /** Строки **/
 
     /* нижний регистр */
-    function function_lc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
+    function function_lc($e)         { return ($this->options->use_utf8 ? "mb_" : "") . "strtolower($e)"; }
 
     /* верхний регистр */
-    function function_uc($e)         { return ($this->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
+    function function_uc($e)         { return ($this->options->use_utf8 ? "mb_" : "") . "strtoupper($e)"; }
 
     /* нижний регистр первого символа */
-    function function_lcfirst($e)    { return ($this->use_utf8 ? "self::mb_" : "") . "lcfirst($e)"; }
+    function function_lcfirst($e)    { return ($this->options->use_utf8 ? "self::mb_" : "") . "lcfirst($e)"; }
 
     /* верхний регистр первого символа */
-    function function_ucfirst($e)    { return ($this->use_utf8 ? "self::mb_" : "") . "ucfirst($e)"; }
+    function function_ucfirst($e)    { return ($this->options->use_utf8 ? "self::mb_" : "") . "ucfirst($e)"; }
 
     /* экранирование кавычек */
     function function_quote($e)      { return "str_replace(array(\"\\n\",\"\\r\"),array(\"\\\\n\",\"\\\\r\"),addslashes($e))"; }
@@ -1913,12 +1925,12 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     /* длина строки */
-    function function_strlen($s) { return ($this->use_utf8 ? "mb_" : "") . "strlen($s)"; }
+    function function_strlen($s) { return ($this->options->use_utf8 ? "mb_" : "") . "strlen($s)"; }
 
     /* подстрока */
     function function_substr($s, $start, $length = NULL)
     {
-        return ($this->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
+        return ($this->options->use_utf8 ? "mb_" : "") . "substr($s, $start" . ($length !== NULL ? ", $length" : "") . ")";
     }
 
     /* убиение пробелов в начале и конце */
@@ -1966,7 +1978,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     function function_strlimit($a)
     {
         $a = func_get_args();
-        return "self::" . ($this->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
+        return "self::" . ($this->options->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
     }
 
     /** Массивы и хеши **/
