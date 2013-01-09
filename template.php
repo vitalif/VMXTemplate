@@ -240,9 +240,17 @@ class VMXTemplate
     }
 
     /**
+     * parse_real variant that does not require $vars to be an lvalue
+     */
+    protected function parse_discard($fn, $inline, $func, $vars = NULL)
+    {
+        return $this->parse_real($fn, $inline, $func, $vars);
+    }
+
+    /**
      * "Real" parse function, handles all parse_*()
      */
-    function parse_real($fn, $inline, $func, &$vars = NULL)
+    protected function parse_real($fn, $inline, $func, &$vars = NULL)
     {
         if (!$fn)
         {
@@ -316,12 +324,23 @@ class VMXTemplate
         {
             error_reporting($old);
         }
-        // FIXME Somewhat legacy, but still here
-        if ($this->options->wrapper)
+        if ($this->options->filters)
         {
-            $w = $this->options->wrapper;
-            if (is_callable($w))
+            $filters = $this->options->filters;
+            if (is_callable($filters) || is_string($filters) && is_callable(array(__CLASS__, "filter_$filters")))
             {
+                $filters = array($filters);
+            }
+            foreach ($filters as $w)
+            {
+                if (is_string($w) && is_callable(array(__CLASS__, "filter_$w")))
+                {
+                    $w = array(__CLASS__, "filter_$w");
+                }
+                elseif (!is_callable($w))
+                {
+                    continue;
+                }
                 call_user_func_array($w, array(&$t));
             }
         }
@@ -426,6 +445,17 @@ class VMXTemplate
             return $this->parse_real($fn, NULL, $block, $args);
         }
         throw new VMXTemplateException("$errorinfo Unknown block '$block'");
+    }
+
+    /*** Built-in filters ***/
+
+    /**
+     * Strips space from the beginning and ending of each line
+     */
+    static function filter_strip_space(&$text)
+    {
+        $text = preg_replace('/^[ \t\v]+/m', '', $text);
+        $text = preg_replace('/[ \t\v]+$/m', '', $text);
     }
 
     /*** Function implementations ***/
@@ -695,11 +725,12 @@ class VMXTemplateOptions
     var $root          = '.';       // directory with templates
     var $cache_dir     = false;     // compiled templates cache directory
     var $reload        = 1;         // 0 means to not check for new versions of cached templates
-    var $wrapper       = false;     // filter for generated content
+    var $filters       = array();   // filter to run on output of every template
     var $use_utf8      = true;      // use UTF-8 for all string operations on template variables
     var $raise_error   = false;     // die() on fatal template errors
     var $print_error   = false;     // print fatal template errors
     var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
+    var $strip_space   = false;     // strip spaces from beginning and end of each line
     var $compiletime_functions = array();   // custom compile-time functions (code generators)
 
     function __construct($options = array())
@@ -710,8 +741,16 @@ class VMXTemplateOptions
     function set($options)
     {
         foreach ($options as $k => $v)
+        {
             if (isset($this->$k))
+            {
                 $this->$k = $v;
+            }
+        }
+        if ($this->strip_space)
+        {
+            $this->filters[] = 'strip_space';
+        }
         if (!$this->begin_subst || !$this->end_subst)
         {
             $this->begin_subst = false;
@@ -1159,7 +1198,7 @@ class VMXTemplateParser
                 {
                     $this->warn($e->getMessage());
                     // Only skip 1 starting character and try again
-                    $this->pos = $pos+1;
+                    $this->pos = $blocks[$min]['pos']+1;
                     $this->lineno = $lineno;
                     continue;
                 }
@@ -1656,7 +1695,16 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     // gtpair: exp '=>' exp
     function parse_list_or_gthash()
     {
-        $r = $this->parse_exp();
+        $beg = $this->ptr;
+        try
+        {
+            $r = $this->parse_exp();
+        }
+        catch(VMXTemplateParseException $e)
+        {
+            $this->ptr = $beg;
+            return array('list', array());
+        }
         $t = $this->tok();
         if ($t == '=>')
         {
@@ -2101,7 +2149,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $args = func_get_args();
         $file = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real($file, NULL, 'main'$args)";
+        return "\$this->parent->parse_discard($file, NULL, 'main'$args)";
     }
 
     /* включение блока из текущего файла: exec('блок'[, аргументы]) */
@@ -2110,7 +2158,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $args = func_get_args();
         $block = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real(self::\$template_filename, NULL, $block$args)";
+        return "\$this->parent->parse_discard(self::\$template_filename, NULL, $block$args)";
     }
 
     /* включение блока из другого файла: exec_from('файл', 'блок'[, аргументы]) */
@@ -2120,7 +2168,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $file = array_shift($args);
         $block = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real($file, NULL, $block$args)";
+        return "\$this->parent->parse_discard($file, NULL, $block$args)";
     }
 
     /* parse не из файла, хотя и не рекомендуется */
@@ -2129,7 +2177,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $args = func_get_args();
         $code = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real(NULL, $code, 'main'$args)";
+        return "\$this->parent->parse_discard(NULL, $code, 'main'$args)";
     }
 
     /* сильно не рекомендуется, но возможно:
@@ -2141,7 +2189,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $code = array_shift($args);
         $block = array_shift($args);
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_real(NULL, $code, $block$args)";
+        return "\$this->parent->parse_discard(NULL, $code, $block$args)";
     }
 
     /* вызов функции объекта по вычисляемому имени:
