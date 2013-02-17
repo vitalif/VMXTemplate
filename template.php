@@ -786,7 +786,7 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] || && == != <= >= =>';
+    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | || && == != <= >= =>';
 
     // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
@@ -898,7 +898,7 @@ class VMXTemplateParser
     /**
      * Get current token position
      */
-    function tokpos($num)
+    function tokpos($num = 0)
     {
         if (!$this->tok($num))
         {
@@ -1522,7 +1522,7 @@ $varref = array_pop(\$stack);";
     function varref_and_index($parts)
     {
         $varref = $this->gen_varref($parts);
-        $varref_index = substr($varref, 0, -1) . ".'#']";
+        $varref_index = substr($varref, 0, -1) . ".'_index']";
         return array($varref, $varref_index);
     }
 
@@ -1542,7 +1542,7 @@ $varref = \$item;
 $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
-    // exp: ops_or | "NOT" exp
+    // exp: ops_or | ops_or "|" exp
     function parse_exp()
     {
         if (strtolower($this->tok()) == '$not')
@@ -1550,7 +1550,14 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             $this->ptr++;
             return '(!'.$this->parse_exp().')';
         }
-        return $this->parse_or();
+        $e = array($this->parse_or());
+        while ($this->tok() == '|')
+        {
+            $this->ptr++;
+            $e[] = $this->parse_or();
+        }
+        $e = "(" . implode(") . (", $e) . ")";
+        return $e;
     }
 
     // ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
@@ -1615,7 +1622,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         return $neg ? "-($e)" : $e;
     }
 
-    // exp_not: nonbrace | '(' exp ')' varpath | '!' exp_not
+    // exp_not: nonbrace | '(' exp ')' varpath | '!' exp_not | "NOT" exp_not
     function parse_not()
     {
         $t = $this->tok();
@@ -1839,10 +1846,10 @@ $varref_index = \$stack[count(\$stack)-1]++;";
                 $fn = "function_$fn";
                 $r = call_user_func_array(array($this, $fn), $args);
             }
-            elseif (isset($this->compiletime_functions[$fn]))
+            elseif (isset($this->options->compiletime_functions[$fn]))
             {
                 // Custom compile-time function call
-                $r = call_user_func($this->compiletime_functions[$fn], $this, $args);
+                $r = call_user_func($this->options->compiletime_functions[$fn], $this, $args);
             }
             else
             {
@@ -2127,7 +2134,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     /* JSON-кодирование */
-    function function_json($v)  { return "json_encode($v)"; }
+    function function_json($v)  { return "json_encode($v, JSON_UNESCAPED_UNICODE)"; }
 
     /* Аргументы для функций включения
        аргументы ::= hash(ключ => значение, ...) | ключ => значение, ...

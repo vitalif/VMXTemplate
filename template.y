@@ -24,7 +24,7 @@ fn: "FUNCTION" | "BLOCK" | "MACRO"
 for: "FOR" | "FOREACH"
 elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
 
-exp: p4 | "NOT" exp
+exp: p4 | p4 "|" exp
 p4: p5 | p5 "||" p4 | p5 "OR" p4 | p5 "XOR" p4
 p5: p6 | p6 "&&" p5 | p6 "AND" p5
 p6: p7 | p7 "==" p7 | p7 "!=" p7
@@ -32,7 +32,7 @@ p7: p8 | p8 '<' p8 | p8 '>' p8 | p8 "<=" p8 | p8 ">=" p8
 p8: p9 | p9 '+' p8 | p9 '-' p8
 p9: p10 | p10 '*' p9 | p10 '/' p9 | p10 '%' p9
 p10: p11 | '-' p11
-p11: nonbrace | '(' exp ')' varpath | '!' p11
+p11: nonbrace | '(' exp ')' varpath | '!' p11 | "NOT" p11
 nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')' | func nonbrace
 list_or_gthash: list | gthash
 func: name | varref varpart
