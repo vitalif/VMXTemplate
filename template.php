@@ -469,21 +469,20 @@ class VMXTemplate
         return array($a);
     }
 
-    // Is the array associative?
+    // Guess if the array is associative based on the first key (for performance)
     static function is_assoc($a)
     {
-        foreach (array_keys($a) as $k)
-            if (!is_int($k))
-                return true;
-        return false;
+        reset($a);
+        return !is_int(key($a));
     }
 
-    // Call a function with merged array arguments
-    static function call_array_func()
+    // Merge all scalar and list arguments into one list
+    static function merge_to_array()
     {
         $args = func_get_args();
-        $cb = array_shift($args);
-        $aa = array();
+        $aa = (array) array_shift($args);
+        if (self::is_assoc($aa))
+            $aa = array($aa);
         foreach ($args as $a)
         {
             if (is_array($a) && !self::is_assoc($a))
@@ -492,7 +491,7 @@ class VMXTemplate
             else
                 $aa[] = $a;
         }
-        return call_user_func_array($cb, $aa);
+        return $aa;
     }
 
     // Returns count of elements for arrays and 0 for others
@@ -1884,16 +1883,6 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         return "((" . join(") $op (", $args) . "))";
     }
 
-    // Code for function with array arguments which are merged into one array
-    static function fearr($f, $args)
-    {
-        $e = "self::call_array_func($f";
-        foreach ($args as $a)
-            $e .= ", $a";
-        $e .= ")";
-        return $e;
-    }
-
     /** Числа, логические операции **/
 
     /* логические операции */
@@ -2012,16 +2001,29 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     function function_nl2br($s)                 { return "nl2br($s)"; }
 
     /* конкатенация строк */
-    function function_concat()  { $a = func_get_args(); return self::fmop('.', $a); }
+    function function_concat()                  { $a = func_get_args(); return self::fmop('.', $a); }
 
     /* объединение всех скаляров и всех элементов аргументов-массивов */
-    function function_join()    { $a = func_get_args(); return self::fearr("'join'", $a); }
+    function function_join()
+    {
+        $a = func_get_args();
+        $sep = array_shift($a);
+        return "call_user_func('implode', $sep, self::merge_to_array(".implode(', ', $a)."))";
+    }
 
     /* подставляет на места $1, $2 и т.п. в строке аргументы */
-    function function_subst()   { $a = func_get_args(); return self::fearr("'VMXTemplate::exec_subst'", $a); }
+    function function_subst()
+    {
+        $a = func_get_args();
+        return "call_user_func_array('VMXTemplate::exec_subst', self::merge_to_array(".implode(', ', $a)."))";
+    }
 
     /* sprintf */
-    function function_sprintf() { $a = func_get_args(); return self::fearr("'sprintf'", $a); }
+    function function_sprintf()
+    {
+        $a = func_get_args();
+        return "call_user_func_array('sprintf', self::merge_to_array(".implode(', ', $a)."))";
+    }
 
     /* strftime */
     function function_strftime($fmt, $date, $time = '')
@@ -2066,8 +2068,15 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     /* ключи хеша или массива */
     function function_keys($a) { return "array_keys(is_array($a) ? $a : array())"; }
 
-    /* сортировка массива */
-    function function_sort()   { $a = func_get_args(); return self::fearr("'VMXTemplate::exec_sort'", $a); }
+    /* значения хеша или массива */
+    function function_values($a) { return "array_values(is_array($a) ? $a : array())"; }
+
+    /* сортировка массива/массивов */
+    function function_sort()
+    {
+        $a = func_get_args();
+        return "call_user_func('VMXTemplate::exec_sort', self::merge_to_array(".implode(', ', $a)."))";
+    }
 
     /* пары id => ключ, name => значение для ассоциативного массива */
     function function_pairs($a) { return "self::exec_pairs(is_array($a) ? $a : array())"; }
@@ -2228,7 +2237,6 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         $f = $this->$f('$arg');
         $args = func_get_args();
         array_shift($args);
-        array_unshift($args, "create_function('$arg',$f)");
-        return self::fearr("array_map", $args);
+        return "call_user_func('array_map', create_function('$arg', $f), self::merge_to_array(".implode(", ", $args)."))";
     }
 }
