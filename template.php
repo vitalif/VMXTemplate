@@ -3,11 +3,11 @@
 # "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
 
 # "Oh that perlists... anything they write is just another Template Toolkit"
-# Rewritten 3 times: regex -> index() -> grammar. Still backwards compatible...
-# Needs another rewrite to some parser generator. Maybe LIME...
+# Rewritten 3 times: phpbb -> regex -> index() -> recursive descent.
+# Needs another rewrite using a LALR parser generator, maybe LIME...
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
-# Author: Vitaliy Filippov, 2006-2012
+# Author: Vitaliy Filippov, 2006-2013
 # $Id$
 
 class VMXTemplateState
@@ -1157,6 +1157,9 @@ class VMXTemplateParser
                     $min = $i;
                 }
             }
+            // Save outputRef before trying to run a handler because
+            // if we don't the last text portion from function body will be added to MAIN
+            $outputRef = &$this->st->output[count($this->st->output)-1];
             $r = '';
             if ($min >= 0)
             {
@@ -1234,13 +1237,13 @@ class VMXTemplateParser
                 // Append text fragment
                 $text = substr($this->code, $text_pos, $pos-$text_pos);
                 $text = addcslashes($text, '\\\'');
-                $this->st->output[count($this->st->output)-1] .= "\$t.='$text';\n";
+                $outputRef .= "\$t.='$text';\n";
             }
             $text_pos = $this->pos;
             if ($r !== '')
             {
                 // Append compiled fragment
-                $this->st->output[count($this->st->output)-1] .= $r."\n";
+                $outputRef .= $r."\n";
             }
         }
 
@@ -1248,7 +1251,7 @@ class VMXTemplateParser
         $code = '';
         foreach ($this->st->functions as $f)
         {
-            $code .= "function fn_$f[name] () {\n";
+            $code .= "function fn_".$f['name']." () {\n";
             $code .= "\$stack = array();\n\$t = '';\n";
             $code .= $f['body'];
             $code .= "return \$t;\n}\n";
@@ -1458,9 +1461,8 @@ $code
         }
         elseif ($w == 'function')
         {
-            $s = "return \$t;\n}\n";
             array_pop($this->st->output);
-            return $s;
+            return '';
         }
         elseif ($w == 'begin' || $w == 'for')
         {
