@@ -473,7 +473,7 @@ class VMXTemplate
     static function is_assoc($a)
     {
         reset($a);
-        return !is_int(key($a));
+        return $a && !is_int(key($a));
     }
 
     // Merge all scalar and list arguments into one list
