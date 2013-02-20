@@ -63,9 +63,6 @@ class VMXTemplate
     // Version of code classes, saved into static $version
     const CODE_VERSION  = 3;
 
-    // Logged errors
-    var $errors = array();
-
     // Data passed to the template
     var $tpldata = array();
 
@@ -90,18 +87,6 @@ class VMXTemplate
     function __construct($options)
     {
         $this->options = new VMXTemplateOptions($options);
-    }
-
-    /**
-     * Log an error
-     */
-    function error($e, $fatal = false)
-    {
-        $this->errors[] = $e;
-        if ($this->options->raise_error && $fatal)
-            die(__CLASS__." error: $e");
-        elseif ($this->options->print_error)
-            print __CLASS__." error: $e<br />";
     }
 
     /**
@@ -277,7 +262,7 @@ class VMXTemplate
                 }
                 if (!($text = $this->loadfile($fn)))
                 {
-                    $this->error("couldn't load template file '$fn'", true);
+                    $this->options->error("couldn't load template file '$fn'", true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
@@ -289,14 +274,14 @@ class VMXTemplate
                 $r = include($file);
                 if ($r !== 1)
                 {
-                    $this->error("error including compiled template for '$fn'", true);
+                    $this->options->error("error including compiled template for '$fn'", true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
                 if (!class_exists($class) || !isset($class::$version) || $class::$version < self::CODE_VERSION)
                 {
                     // Cache file from some older version - reset it
-                    $this->error("Please, clear template cache path after upgrading VMX::Template", true);
+                    $this->options->error("Please, clear template cache path after upgrading VMX::Template", true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
@@ -518,7 +503,7 @@ class VMXTemplate
     {
         if (is_callable($sub))
             return call_user_func_array($sub, $args);
-        $this->error("Unknown function: '$f'");
+        $this->parent->options->error("Unknown function: '$f'");
         return NULL;
     }
 
@@ -727,14 +712,19 @@ class VMXTemplateOptions
     var $filters       = array();   // filter to run on output of every template
     var $use_utf8      = true;      // use UTF-8 for all string operations on template variables
     var $raise_error   = false;     // die() on fatal template errors
+    var $log_error     = false;     // send errors to standard error output
     var $print_error   = false;     // print fatal template errors
     var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
     var $strip_space   = false;     // strip spaces from beginning and end of each line
     var $compiletime_functions = array();   // custom compile-time functions (code generators)
 
+    // Logged errors (not an option)
+    var $errors;
+
     function __construct($options = array())
     {
         $this->set($options);
+        $this->errors = array();
     }
 
     function set($options)
@@ -762,6 +752,34 @@ class VMXTemplateOptions
             throw new VMXTemplateException('VMXTemplate: cache_dir='.$this->cache_dir.' is not writable');
         }
         $this->root = preg_replace('!/*$!s', '/', $this->root);
+    }
+
+    function __destruct()
+    {
+        if ($this->print_error && $this->errors && PHP_SAPI != 'cli')
+        {
+            print '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
+                'VMXTemplate errors:<ul><li>'.
+                implode('</li><li>', array_map('html_pbr', $this->errors)).
+                '</li></ul>';
+                $fp = fopen("php://stderr", 'a');
+                fprintf($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
+                fclose($fp);
+        }
+    }
+
+    /**
+     * Log an error or a warning
+     */
+    function error($e, $fatal = false)
+    {
+        $this->errors[] = $e;
+        if ($this->raise_error && $fatal)
+            die("VMXTemplate error: $e");
+        if ($this->log_error)
+            error_log("VMXTemplate error: $e");
+        elseif ($this->print_error && PHP_SAPI == 'cli')
+            print("VMXTemplate error: $e\n");
     }
 }
 
@@ -933,17 +951,7 @@ class VMXTemplateParser
 
     function warn($text)
     {
-        if ($this->options->print_error)
-        {
-            if (PHP_SAPI == 'cli')
-            {
-                print "$text\n";
-            }
-            else
-            {
-                print htmlspecialchars($text).'<br />';
-            }
-        }
+        $this->options->error($text);
     }
 
     function raise($msg)
