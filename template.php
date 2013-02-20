@@ -262,7 +262,8 @@ class VMXTemplate
                 }
                 if (!($text = $this->loadfile($fn)))
                 {
-                    $this->options->error("couldn't load template file '$fn'", true);
+                    $e = error_get_last();
+                    $this->options->error("couldn't load template file '$fn': ".$e['message'], true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
@@ -342,7 +343,7 @@ class VMXTemplate
         $load = false;
         if (!($text = self::cache_get("U$fn")) || $this->options->reload)
         {
-            $mtime = stat($fn);
+            $mtime = @stat($fn);
             $mtime = $mtime[9];
             if (!$text)
             {
@@ -360,7 +361,7 @@ class VMXTemplate
         // Reload if file changed
         if ($load)
         {
-            if ($fp = fopen($fn, "rb"))
+            if ($fp = @fopen($fn, "rb"))
             {
                 fseek($fp, 0, SEEK_END);
                 $t = ftell($fp);
