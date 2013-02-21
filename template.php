@@ -804,7 +804,7 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | || && == != <= >= =>';
+    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | .. && == != <= >= =>';
 
     // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
@@ -1552,7 +1552,8 @@ $varref = \$item;
 $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
-    // exp: ops_or | ops_or "|" exp
+    // (concatenation)
+    // exp: ops_or | ops_or ".." exp
     function parse_exp()
     {
         if (strtolower($this->tok()) == '$not')
@@ -1561,7 +1562,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             return '(!'.$this->parse_exp().')';
         }
         $e = array($this->parse_or());
-        while ($this->tok() == '|')
+        while ($this->tok() == '..')
         {
             $this->ptr++;
             $e[] = $this->parse_or();
