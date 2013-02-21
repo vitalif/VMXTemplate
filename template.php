@@ -804,7 +804,7 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | .. && == != <= >= =>';
+    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | .. || && == != <= >= =>';
 
     // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
