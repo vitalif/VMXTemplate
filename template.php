@@ -616,7 +616,7 @@ class VMXTemplate
     }
 
     // Select one of 3 plural forms for russian language
-    function plural_ru($count, $one, $few, $many)
+    static function plural_ru($count, $one, $few, $many)
     {
         $sto = $count % 100;
         if ($sto >= 10 && $sto <= 20)
