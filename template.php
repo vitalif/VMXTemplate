@@ -615,6 +615,22 @@ class VMXTemplate
         return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
     }
 
+    // Select one of 3 plural forms for russian language
+    function plural_ru($count, $one, $few, $many)
+    {
+        $sto = $count % 100;
+        if ($sto >= 10 && $sto <= 20)
+            return $many;
+        switch ($count % 10)
+        {
+            case 1: return $one;
+            case 2:
+            case 3:
+            case 4: return $few;
+        }
+        return $many;
+    }
+
     // Limited-edition timestamp parser
     static function timestamp($ts = 0, $format = 0)
     {
@@ -628,7 +644,7 @@ class VMXTemplate
         {
             // TS_UNIX or Epoch
             if (!$ts)
-                $ts = time;
+                $ts = time();
         }
         elseif (preg_match('/^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/s', $ts, $m))
         {
@@ -804,7 +820,7 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] | .. || && == != <= >= =>';
+    static $chartokens = '# + - = * / % ! , . < > ( ) { } [ ] | .. || && == != <= >= =>';
 
     // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
@@ -1200,10 +1216,23 @@ class VMXTemplateParser
                 try
                 {
                     // Try to parse from here, skip invalid parts
-                    $r = $this->$handler();
-                    $this->consume($this->eod);
-                    // Add newline count from code fragment
-                    $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
+                    if ($this->tok() == '#')
+                    {
+                        // Comment!
+                        $this->pos = strpos($this->code, $this->eod, $this->pos);
+                        if ($this->pos === false)
+                        {
+                            throw new VMXTemplateParseException($this->eod . ' not found');
+                        }
+                        $this->pos += strlen($this->eod);
+                    }
+                    else
+                    {
+                        $r = $this->$handler();
+                        $this->consume($this->eod);
+                        // Add newline count from code fragment
+                        $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
+                    }
                 }
                 catch (VMXTemplateParseException $e)
                 {
@@ -2036,10 +2065,9 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     /* strftime */
-    function function_strftime($fmt, $date, $time = '')
+    function function_strftime($fmt, $date)
     {
-        $e = $time ? "($date).' '.($time)" : $date;
-        return "strftime($fmt, self::timestamp($e))";
+        return "strftime($fmt, self::timestamp($date))";
     }
 
     /* ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что. */
@@ -2048,6 +2076,12 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     {
         $a = func_get_args();
         return "self::" . ($this->options->use_utf8 ? "mb_" : "") . "strlimit(".join(",", $a).")";
+    }
+
+    /* выбор правильной формы множественного числа для русского языка */
+    function function_plural_ru($one, $few, $many)
+    {
+        return "self::plural_ru($one, $few, $many)";
     }
 
     /** Массивы и хеши **/
