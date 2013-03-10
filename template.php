@@ -2079,9 +2079,9 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     }
 
     /* выбор правильной формы множественного числа для русского языка */
-    function function_plural_ru($one, $few, $many)
+    function function_plural_ru($count, $one, $few, $many)
     {
-        return "self::plural_ru($one, $few, $many)";
+        return "self::plural_ru($count, $one, $few, $many)";
     }
 
     /** Массивы и хеши **/
