@@ -10,6 +10,8 @@
 # Author: Vitaliy Filippov, 2006-2013
 # $Id$
 
+# TODO for perl version - rewrite it and prevent auto-vivification on a.b
+
 class VMXTemplateState
 {
     // Old-style blocks
@@ -820,16 +822,17 @@ class VMXTemplateParser
     var $tokens, $tokpos, $tokline, $ptr;
 
     // Possible tokens consisting of special characters
-    static $chartokens = '# + - = * / % ! , . < > ( ) { } [ ] | .. || && == != <= >= =>';
+    static $chartokens = '# + - = * / % ! , . < > ( ) { } [ ] & .. || && == != <= >= =>';
 
-    // ops_and: ops_eq | ops_eq "&&" ops_and | ops_eq "AND" ops_and
+    // ops_and: ops_bitand | ops_bitand "&&" ops_and | ops_bitand "AND" ops_and
+    // ops_bitand: ops_eq | ops_eq "&" ops_bitand
     // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
     // ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
     // ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
     // ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
     static $ops = array(
-        'or'  => array(array('||', '$or', '$xor'), 'and', true),
-        'and' => array(array('&&', '$and'), 'eq', true),
+        'and' => array(array('&&', '$and'), 'bitand', true),
+        'bitand' => array(array('&'), 'eq', true),
         'eq'  => array(array('==', '!='), 'cmp', false),
         'cmp' => array(array('<', '>', '<=', '>='), 'add', false),
         'add' => array(array('+', '-'), 'mul', true),
@@ -1109,8 +1112,8 @@ class VMXTemplateParser
         }
         $text = "Unexpected $tok, expected ";
         if (count($expected) > 1)
-            $text .= "one of '";
-        $text .= implode("', '", $expected)."'";
+            $text .= "one of ";
+        $text .= "'".implode("', '", $expected)."'";
         $this->raise($text);
     }
 
@@ -1531,6 +1534,7 @@ $varref = array_pop(\$stack);";
                 if ($this->tok() == ',')
                     $this->ptr++;
             }
+            $this->ptr++;
         }
         $code = false;
         if ($this->tok() == '=')
@@ -1871,7 +1875,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
             }
             $r = "\$this->parent->call_block($parts[0], $args, \"".addslashes($this->errorinfo())."\")";
         }
-        if (count($parts) == 1)
+        elseif (count($parts) == 1)
         {
             $fn = strtolower($parts[0]);
             if (isset(self::$functions[$fn]))

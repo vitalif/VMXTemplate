@@ -26,7 +26,8 @@ elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
 
 exp: p4 | p4 ".." exp
 p4: p5 | p5 "||" p4 | p5 "OR" p4 | p5 "XOR" p4
-p5: p6 | p6 "&&" p5 | p6 "AND" p5
+p5: bitand | bitand "&&" p5 | bitand "AND" p5
+bitand: p6 | p6 "&" bitand
 p6: p7 | p7 "==" p7 | p7 "!=" p7
 p7: p8 | p8 '<' p8 | p8 '>' p8 | p8 "<=" p8 | p8 ">=" p8
 p8: p9 | p9 '+' p8 | p9 '-' p8
