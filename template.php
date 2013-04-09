@@ -50,7 +50,7 @@ class VMXTemplate
     static $Mon, $mon, $Wday;
     static $cache_type  = NULL;
     static $cache       = array();
-    static $safe_tags   = '<div> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
+    static $safe_tags   = '<div> <blockquote> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
 
     // Timestamp format constants
     const TS_UNIX       = 0;
@@ -283,8 +283,7 @@ class VMXTemplate
                 }
                 if (!class_exists($class) || !isset($class::$version) || $class::$version < self::CODE_VERSION)
                 {
-                    // Cache file from some older version - reset it
-                    $this->options->error("Please, clear template cache path after upgrading VMX::Template", true);
+                    $this->options->error("MD5 collision :) file=$fn, cache=$file", true);
                     $this->failed[$fn] = true;
                     return NULL;
                 }
@@ -442,8 +441,8 @@ class VMXTemplate
      */
     static function filter_strip_space(&$text)
     {
-        $text = preg_replace('/^[ \t\v]+/m', '', $text);
-        $text = preg_replace('/[ \t\v]+$/m', '', $text);
+        $text = preg_replace('/^[ \t]+/m', '', $text);
+        $text = preg_replace('/[ \t]+$/m', '', $text);
     }
 
     /*** Function implementations ***/
@@ -2038,6 +2037,7 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
 
     /* удаление "небезопасных" HTML-тегов */
+    /* TODO: м.б исправлять некорректную разметку? */
     function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
 
     /* заменить \n на <br /> */
