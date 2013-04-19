@@ -14,9 +14,9 @@
 %left ".."
 %left "||" "OR" "XOR"
 %left "&&" "AND"
-%left "&"
 %nonassoc "==" "!=" "<" ">" "<=" ">="
 %left "+" "-"
+%left "&"
 %left "*" "/" "%"
 
 %%
@@ -38,10 +38,10 @@ elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
 exp: exp ".." exp |
     exp "||" exp | exp "OR" exp | exp "XOR" exp |
     exp "&&" exp | exp "AND" exp |
-    exp "&" exp |
     exp "==" exp | exp "!=" exp |
     exp "<" exp | exp ">" exp | exp "<=" exp | exp ">=" exp |
     exp "+" exp | exp "-" exp |
+    exp "&" exp |
     exp "*" exp | exp "/" exp | exp "%" exp |
     p10
 p10: p11 | '-' p11
