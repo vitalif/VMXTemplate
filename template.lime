@@ -1,0 +1,286 @@
+// Контекстно-свободная грамматика шаблонизатора
+
+// Подразумевается, что лексический анализатор зависим от работы синтаксического,
+// знает о его состоянии и соответственно выдаёт либо лексемы "внутри" блоков кода,
+// либо литералы "вне" оных
+
+// Олдстайл BEGIN .. END ликвидирован
+
+// TODO foreach ... as key => value
+
+%class VMXTemplateParser
+%start chunks
+
+%token literal
+%token name
+
+%left ".."
+%left "||" "OR" "XOR"
+%left "&&" "AND"
+%nonassoc "==" "!=" "<" ">" "<=" ">="
+%left "+" "-"
+%left "&"
+%left "*" "/" "%"
+
+// Директивы
+
+chunks = {
+    $$ = '';
+  }
+| chunks/cs chunk/c {
+    $$ = $cs . $c;
+  }
+.
+chunk = error/e {
+    
+  }
+| literal/l {
+    $$ = '$t .= ' . $l . ";\n";
+  }
+| "<!--" code_chunk/c "-->" {
+    $$ = $c;
+  }
+| "{" exp/e "}" {
+    $$ = '$t .= ' . $e . ";\n";
+  }
+.
+code_chunk = c_if | c_set | c_fn | c_for | exp
+c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
+    $$ = "if (" . $e . ") {\n" . $if . "}\n";
+  }
+| "IF" exp/e "-->" chunks/if "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
+    $$ = "if (" . $e . ") {\n" . $if . "} else {\n" . $else . "}\n";
+  }
+| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "END" {
+    $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "}\n";
+  }
+| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
+    $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "} else {\n" . $else . "}\n";
+  }
+.
+c_elseifs = "<!--" elseif exp/e "-->" {
+    $$ = "} elseif (" . $e . ") {\n";
+  }
+| c_elseifs/p chunks/cs "<!--" elseif exp/e "-->" {
+    $$ = $p . $cs . "} elseif (" . $e . ") {\n";
+  }
+.
+c_set = "SET" varref/v "=" exp/e {
+    $$ = $v . ' = ' . $e . "\n";
+  }
+| "SET" varref/v "-->" chunks/cs "<!--" "END" {
+    $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
+  }
+.
+c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
+    $this->functions[$name] = array(
+      'name' => $name,
+      'args' => $args,
+      'body' => 'function fn_'.$name." () {\n\$stack = array();\n\$t = '';\n",
+      //'line' => $line,
+      //'pos' => $pos,
+    );
+    $$ = '';
+            $code .= "function fn_".$f['name']." () {\n";
+            $code .= "\$stack = array();\n\$t = '';\n";
+            $code .= $f['body'];
+            $code .= "return \$t;\n}\n";
+  }
+| fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
+    $this->functions[$name] = array(
+      'name' => $name,
+      'args' => $args,
+      'body' => ,
+      //'line' => $line,
+      //'pos' => $pos,
+    );
+    $$ = '';
+  }
+.
+c_for = for varref/varref "=" exp/exp "-->" chunks "<!--" "END" {
+    $varref_index = substr($varref, 0, -1) . ".'_index']";
+    $$ = "\$stack[] = ".$varref.";
+\$stack[] = ".$varref_index.";
+\$stack[] = 0;
+foreach (self::array1($exp) as \$item) {
+".$varref." = \$item;
+".$varref_index." = \$stack[count(\$stack)-1]++;
+" . $cs . "}
+array_pop(\$stack);
+".$varref_index." = array_pop(\$stack);
+".$varref." = array_pop(\$stack);
+";
+  }
+.
+fn = "FUNCTION" | "BLOCK" | "MACRO"
+for = "FOR" | "FOREACH"
+elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF"
+
+// Выражения
+
+exp: exp/a ".." exp/b {
+    $$ = '(' . $a . ' . ' . $b . ')';
+  }
+| exp/a "||" exp/b {
+    $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
+  }
+| exp/a "OR" exp/b {
+    $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
+  }
+| exp/a "XOR" exp/b {
+    $$ = '(' . $a . ' XOR ' . $b . ')';
+  }
+| exp/a "&&" exp/b {
+    $$ = '(' . $a . ' && ' . $b . ')';
+  }
+| exp/a "AND" exp/b {
+    $$ = '(' . $a . ' && ' . $b . ')';
+  }
+| exp/a "==" exp/b {
+    $$ = '(' . $a . ' == ' . $b . ')';
+  }
+| exp/a "!=" exp/b {
+    $$ = '(' . $a . ' != ' . $b . ')';
+  }
+| exp/a "<" exp/b {
+    $$ = '(' . $a . ' < ' . $b . ')';
+  }
+| exp/a ">" exp/b {
+    $$ = '(' . $a . ' > ' . $b . ')';
+  }
+| exp/a "<=" exp/b {
+    $$ = '(' . $a . ' <= ' . $b . ')';
+  }
+| exp/a ">=" exp/b {
+    $$ = '(' . $a . ' >= ' . $b . ')';
+  }
+| exp/a "+" exp/b {
+    $$ = '(' . $a . ' + ' . $b . ')';
+  }
+| exp/a "-" exp/b {
+    $$ = '(' . $a . ' - ' . $b . ')';
+  }
+| exp/a "&" exp/b {
+    $$ = '(' . $a . ' & ' . $b . ')';
+  }
+| exp/a "*" exp/b {
+    $$ = '(' . $a . ' * ' . $b . ')';
+  }
+| exp/a "/" exp/b {
+    $$ = '(' . $a . ' / ' . $b . ')';
+  }
+| exp/a "%" exp/b {
+    $$ = '(' . $a . ' % ' . $b . ')';
+  }
+| p10
+.
+p10: p11 | '-' p11/a {
+    $$ = '(-'.$a.')';
+  }
+.
+p11: nonbrace
+| '(' exp/e ')' varpath/p {
+    $$ = '('.$e.')'.$p;
+  }
+| '!' p11/a {
+    $$ = '(!'.$a.')';
+  }
+| "NOT" p11/a {
+    $$ = '(!'.$a.')';
+  }
+.
+nonbrace: '{' hash/h '}' {
+    $$ = 'array(' . $h . ')';
+  }
+| literal
+| varref
+| name/f '(' ')' {
+    $$ = $this->compile_function($f, []);
+  }
+| name/f '(' list/args ')' {
+    $$ = $this->compile_function($f, $args);
+  }
+| name/f '(' gthash/args ')' {
+    $$ = "\$this->parent->call_block(".$f.", ".$args.")";
+  }
+| name/f nonbrace/arg {
+    $$ = $this->compile_function($f, [ $arg ]);
+  }
+| method/f '(' ')' {
+    $$ = $f.'()';
+  }
+| method/f '(' list/args ')' {
+    $$ = $f.'('.implode(', ', $args).')';
+  }
+.
+method: varref/v '.' name/m {
+    $$ = $v.'->'.$m;
+  }
+.
+list: exp/e {
+    $$ = [ $e ];
+  }
+| exp/e ',' list/l {
+    $$ = $l;
+    array_unshift($$, $e);
+  }
+.
+arglist: name {
+    
+  }
+| name ',' arglist {
+    
+  }
+| {
+    
+  }
+.
+hash: pair/p {
+    $$ = $p;
+  }
+| pair/p ',' hash/h {
+    $$ = $p . ', ' . $h;
+  }
+| {
+    $$ = '';
+  }
+.
+gthash: gtpair/p {
+    $$ = $p;
+  }
+| gtpair/p ',' gthash/h {
+    $$ = $p . ', ' . $h;
+  }
+.
+pair: exp/k ',' exp/v {
+    $$ = $k . ' => ' . $v;
+  }
+| gtpair/e {
+    $$ = $e;
+  }
+.
+gtpair: exp/k "=>" exp/v {
+    $$ = $k . ' => ' . $v;
+  }
+.
+varref: name/n {
+    $$ = '$this->tpldata[\''.addcslashes($n, '\\\'').'\']';
+  }
+| varref/v varpart/p {
+    $$ = $v . $p;
+  }
+.
+varpart: '.' name/n {
+    $$ = '[\''.addcslashes($n, '\\\'').'\']';
+  }
+| '[' exp/e ']' {
+    $$ = '['.$e.']';
+  }
+.
+varpath: {
+    $$ = '';
+  }
+| varpath/a varpart/p {
+    $$ = $a . $p;
+  }
+.

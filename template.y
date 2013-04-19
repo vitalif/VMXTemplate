@@ -46,13 +46,12 @@ exp: exp ".." exp |
     p10
 p10: p11 | '-' p11
 p11: nonbrace | '(' exp ')' varpath | '!' p11 | "NOT" p11
-nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')' | func nonbrace
-list_or_gthash: list | gthash
-func: name | varref varpart
+nonbrace: '{' hash '}' | literal | varref | name '(' ')' | name '(' list ')' | name '(' gthash ')' | name nonbrace | method '(' ')' | method '(' list ')'
+method: varref '.' name
 list: exp | exp ',' list
 arglist: name | name ',' arglist |
 hash: pair | pair ',' hash |
-gthash: gtpair | gtpair ',' gthash |
+gthash: gtpair | gtpair ',' gthash
 pair: exp ',' exp | gtpair
 gtpair: exp "=>" exp
 varref: name | varref varpart
