@@ -1,37 +1,49 @@
-// Грамматика Новой-Новой Версии шаблонизатора.
-// Конфликтов нет.
-// BEGIN, возможно, ещё будет ликвидирован.
-// FIXME не хватает foreach($a as $k => $v)
+// Контекстно-свободная грамматика шаблонизатора
+
+// Подразумевается, что лексический анализатор зависим от работы синтаксического,
+// знает о его состоянии и соответственно выдаёт либо лексемы "внутри" блоков кода,
+// либо литералы "вне" оных
+
+// Олдстайл BEGIN .. END ликвидирован
+
+// TODO foreach ... as key => value
 
 %token literal
 %token name
 
+%left ".."
+%left "||" "OR" "XOR"
+%left "&&" "AND"
+%left "&"
+%nonassoc "==" "!=" "<" ">" "<=" ">="
+%left "+" "-"
+%left "*" "/" "%"
+
 %%
-inst: "<!--" code "-->" | "{" exp "}"
-code: "IF" exp | "ELSE" | elseif exp | "END" | "END" varref |
-    "SET" varref | "SET" varref '=' exp |
-    fn name '(' arglist ')' | fn name '(' arglist ')' '=' exp |
-    for varref '=' exp | for varref |
-    "BEGIN" name bparam | exp
-bparam: |
-    bp1 | bp2 | bp3 |
-    bp1 bp2 | bp2 bp1 | bp1 bp3 | bp3 bp1 | bp2 bp3 | bp3 bp2 |
-    bp1 bp2 bp3 | bp1 bp3 bp2 | bp2 bp1 bp3 | bp2 bp3 bp1 | bp3 bp1 bp2 | bp3 bp2 bp1
-bp1: "AT" exp
-bp2: "BY" exp
-bp3: "TO" exp
+chunks: | chunks chunk
+chunk: error | literal | "<!--" code_chunk "-->" | "{" exp "}"
+code_chunk: c_if | c_set | c_fn | c_for | exp
+c_if: "IF" exp "-->" chunks "<!--" "END" |
+    "IF" exp "-->" chunks "<!--" "ELSE" "-->" chunks "<!--" "END" |
+    "IF" exp "-->" chunks c_elseifs chunks "<!--" "END" |
+    "IF" exp "-->" chunks c_elseifs chunks "<!--" "ELSE" "-->" chunks "<!--" "END"
+c_elseifs: "<!--" elseif exp "-->" | c_elseifs chunks "<!--" elseif exp "-->"
+c_set: "SET" varref "=" exp | "SET" varref "-->" chunks "<!--" "END"
+c_fn: fn name "(" arglist ")" "=" exp | fn name "(" arglist ")" "-->" chunks "<!--" "END"
+c_for: for varref "=" exp "-->" chunks "<!--" "END"
 fn: "FUNCTION" | "BLOCK" | "MACRO"
 for: "FOR" | "FOREACH"
 elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
 
-exp: p4 | p4 ".." exp
-p4: p5 | p5 "||" p4 | p5 "OR" p4 | p5 "XOR" p4
-p5: bitand | bitand "&&" p5 | bitand "AND" p5
-bitand: p6 | p6 "&" bitand
-p6: p7 | p7 "==" p7 | p7 "!=" p7
-p7: p8 | p8 '<' p8 | p8 '>' p8 | p8 "<=" p8 | p8 ">=" p8
-p8: p9 | p9 '+' p8 | p9 '-' p8
-p9: p10 | p10 '*' p9 | p10 '/' p9 | p10 '%' p9
+exp: exp ".." exp |
+    exp "||" exp | exp "OR" exp | exp "XOR" exp |
+    exp "&&" exp | exp "AND" exp |
+    exp "&" exp |
+    exp "==" exp | exp "!=" exp |
+    exp "<" exp | exp ">" exp | exp "<=" exp | exp ">=" exp |
+    exp "+" exp | exp "-" exp |
+    exp "*" exp | exp "/" exp | exp "%" exp |
+    p10
 p10: p11 | '-' p11
 p11: nonbrace | '(' exp ')' varpath | '!' p11 | "NOT" p11
 nonbrace: '{' hash '}' | literal | varref | func '(' list_or_gthash ')' | func nonbrace
