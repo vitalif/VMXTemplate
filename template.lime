@@ -10,45 +10,47 @@
 # (*) Возможно, нужно добавить в каком-то виде foreach ... as key => value
 
 %class VMXTemplateParser
-%start chunks
+%start template
 
 %token literal
+%token incorrect
 %token name
+%token comment
 
-%token ".."     "concatenation operator (..)"
-%token "||"     "OR operator (||)"
-%token "or"     "OR operator (OR)"
-%token "xor"    "XOR operator (XOR)"
-%token "and"    "AND operator (AND)"
-%token "&&"     "AND operator (&&)"
-%token "&"      "bitwise AND operator (&)"
-%token "=="     "equality operator (==)"
-%token "!="     "non-equality operator (!=)"
-%token "<"      "less than operator (<)"
-%token ">"      "greater than operator (>)"
-%token "<="     "less or equal operator (<=)"
-%token ">="     "greater or equal operator (>=)"
-%token "+"      "plus operator (+)"
-%token "-"      "minus operator (-)"
-%token "*"      "multiply operator (*)"
-%token "/"      "divide operator (/)"
-%token "%"      "mod operator (%)"
-%token "("      "left round brace"
-%token ")"      "right round brace"
-%token "!"      "NOT operator (!)"
-%token "not"    "NOT operator (NOT)"
-%token "{"      "left curly brace"
-%token "}"      "right curly brace"
-%token ","      "comma"
-%token "=>"     "hash item operator (=>)"
-%token "["      "left square brace"
-%token "]"      "right square brace"
-%token "<!--"   "directive begin"
-%token "-->"    "directive end"
+%token ".."     "concatenation operator '..'"
+%token "||"     "OR operator '||'"
+%token "or"     "OR operator 'OR'"
+%token "xor"    "XOR operator 'XOR'"
+%token "and"    "AND operator 'AND'"
+%token "&&"     "AND operator '&&'"
+%token "&"      "bitwise AND operator '&'"
+%token "=="     "equality operator '=='"
+%token "!="     "non-equality operator '!='"
+%token "<"      "less than operator '<'"
+%token ">"      "greater than operator '>'"
+%token "<="     "less or equal operator '<='"
+%token ">="     "greater or equal operator '>='"
+%token "+"      "plus operator '+'"
+%token "-"      "minus operator '-'"
+%token "*"      "multiply operator '*'"
+%token "/"      "divide operator '/'"
+%token "%"      "mod operator '%'"
+%token "("      "left round brace '('"
+%token ")"      "right round brace '('"
+%token "!"      "NOT operator '!'"
+%token "not"    "NOT operator 'NOT'"
+%token "{"      "left curly brace '{'"
+%token "}"      "right curly brace '}'"
+%token ","      "comma ','"
+%token "=>"     "hash item operator '=>'"
+%token "["      "left square brace '['"
+%token "]"      "right square brace ']'"
+%token "<!--"   "directive begin '<!--'"
+%token "-->"    "directive end '-->'"
 
 %left ".."
-%left "||" "OR" "XOR"
-%left "&&" "AND"
+%left "||" "or" "xor"
+%left "&&" "and"
 %nonassoc "==" "!=" "<" ">" "<=" ">="
 %left "+" "-"
 %left "&"
@@ -56,15 +58,20 @@
 
 # Директивы
 
-chunks = {
+template = chunks {
+    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$1."\nreturn \$t;\n}\n";
     $$ = '';
   }
-| chunks/cs chunk/c {
-    $$ = $cs . $c;
+.
+chunks = chunk {
+    $$ = $1;
+  }
+| chunks chunk {
+    $$ = $1 . $2;
   }
 .
-chunk = literal/l {
-    $$ = '$t .= ' . $l . ";\n";
+chunk = literal {
+    $$ = '$t .= ' . $1 . ";\n";
   }
 | "<!--" code_chunk/c "-->" {
     $$ = $c;
@@ -72,21 +79,25 @@ chunk = literal/l {
 | "{" exp/e "}" {
     $$ = '$t .= ' . $e . ";\n";
   }
-| error {
-    $$ = $this->lexer->skip_error();
+| error/e {
+    $this->template->lexer->skip_error($e);
+    $$ = '';
   }
 .
-code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp/$ .
-c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
+code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp {
+    $$ = '$t .= ' . $1 . ";\n";
+  }
+.
+c_if = "if" exp/e "-->" chunks/if "<!--" "end" {
     $$ = "if (" . $e . ") {\n" . $if . "}\n";
   }
-| "IF" exp/e "-->" chunks/if "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
+| "if" exp/e "-->" chunks/if "<!--" "else" "-->" chunks/else "<!--" "end" {
     $$ = "if (" . $e . ") {\n" . $if . "} else {\n" . $else . "}\n";
   }
-| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "END" {
+| "if" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "end" {
     $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "}\n";
   }
-| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
+| "if" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "else" "-->" chunks/else "<!--" "end" {
     $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "} else {\n" . $else . "}\n";
   }
 .
@@ -97,15 +108,15 @@ c_elseifs = "<!--" elseif exp/e "-->" {
     $$ = $p . $cs . "} elseif (" . $e . ") {\n";
   }
 .
-c_set = "SET" varref/v "=" exp/e {
-    $$ = $v . ' = ' . $e . "\n";
+c_set = "set" varref/v "=" exp/e {
+    $$ = $v . ' = ' . $e . ";\n";
   }
-| "SET" varref/v "-->" chunks/cs "<!--" "END" {
+| "set" varref/v "-->" chunks/cs "<!--" "end" {
     $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
   }
 .
 c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
-    $this->functions[$name] = array(
+    $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
       'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
@@ -114,8 +125,8 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     );
     $$ = '';
   }
-| fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
-    $this->functions[$name] = array(
+| fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "end" {
+    $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
       'body' => 'function fn_'.$name." () {\$stack = array();\n\$t = '';\n".$cs."\nreturn \$t;\n}\n",
@@ -125,7 +136,7 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     $$ = '';
   }
 .
-c_for = for varref/varref "=" exp/exp "-->" chunks "<!--" "END" {
+c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "end" {
     $varref_index = substr($varref, 0, -1) . ".'_index']";
     $$ = "\$stack[] = ".$varref.";
 \$stack[] = ".$varref_index.";
@@ -133,16 +144,16 @@ c_for = for varref/varref "=" exp/exp "-->" chunks "<!--" "END" {
 foreach (self::array1($exp) as \$item) {
 ".$varref." = \$item;
 ".$varref_index." = \$stack[count(\$stack)-1]++;
-" . $cs . "}
+".$cs."}
 array_pop(\$stack);
 ".$varref_index." = array_pop(\$stack);
 ".$varref." = array_pop(\$stack);
 ";
   }
 .
-fn = "FUNCTION" | "BLOCK" | "MACRO" .
-for = "FOR" | "FOREACH" .
-elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF" .
+fn = "function" | "block" | "macro" .
+for = "for" | "foreach" .
+elseif = "else" "if" | "elsif" | "elseif" .
 
 # Выражения
 
@@ -152,16 +163,16 @@ exp: exp/a ".." exp/b {
 | exp/a "||" exp/b {
     $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
   }
-| exp/a "OR" exp/b {
+| exp/a "or" exp/b {
     $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
   }
-| exp/a "XOR" exp/b {
+| exp/a "xor" exp/b {
     $$ = '(' . $a . ' XOR ' . $b . ')';
   }
 | exp/a "&&" exp/b {
     $$ = '(' . $a . ' && ' . $b . ')';
   }
-| exp/a "AND" exp/b {
+| exp/a "and" exp/b {
     $$ = '(' . $a . ' && ' . $b . ')';
   }
 | exp/a "==" exp/b {
@@ -214,7 +225,7 @@ p11: nonbrace
 | '!' p11/a {
     $$ = '(!'.$a.')';
   }
-| "NOT" p11/a {
+| "not" p11/a {
     $$ = '(!'.$a.')';
   }
 .
@@ -224,16 +235,16 @@ nonbrace: '{' hash/h '}' {
 | literal/$
 | varref/$
 | name/f '(' ')' {
-    $$ = $this->compile_function($f, []);
+    $$ = $this->template->compile_function($f, []);
   }
 | name/f '(' list/args ')' {
-    $$ = $this->compile_function($f, $args);
+    $$ = $this->template->compile_function($f, $args);
   }
 | name/f '(' gthash/args ')' {
-    $$ = "\$this->parent->call_block(".$f.", ".$args.")";
+    $$ = "\$this->parent->call_block('".addcslashes($f, "'\\")."', array(".$args."), '".addcslashes($this->template->lexer->errorinfo(), "'\\")."')";
   }
 | name/f nonbrace/arg {
-    $$ = $this->compile_function($f, [ $arg ]);
+    $$ = $this->template->compile_function($f, [ $arg ]);
   }
 | method/f '(' ')' {
     $$ = $f.'()';
@@ -290,14 +301,14 @@ gtpair: exp/k "=>" exp/v {
   }
 .
 varref: name/n {
-    $$ = '$this->tpldata[\''.addcslashes($n, '\\\'').'\']';
+    $$ = "\$this->tpldata['".addcslashes($n, "\\\'")."']";
   }
 | varref/v varpart/p {
     $$ = $v . $p;
   }
 .
 varpart: '.' name/n {
-    $$ = '[\''.addcslashes($n, '\\\'').'\']';
+    $$ = "['".addcslashes($n, "\\\'")."']";
   }
 | '[' exp/e ']' {
     $$ = '['.$e.']';

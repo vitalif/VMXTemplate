@@ -11,8 +11,8 @@
 %token name
 
 %left ".."
-%left "||" "OR" "XOR"
-%left "&&" "AND"
+%left "||" "or" "xor"
+%left "&&" "and"
 %nonassoc "==" "!=" "<" ">" "<=" ">="
 %left "+" "-"
 %left "&"
@@ -20,23 +20,23 @@
 
 %%
 chunks: | chunks chunk
-chunk: error | literal | "<!--" code_chunk "-->" | "{" exp "}"
+chunk: literal | "<!--" code_chunk "-->" | "{" exp "}" | error
 code_chunk: c_if | c_set | c_fn | c_for | exp
-c_if: "IF" exp "-->" chunks "<!--" "END" |
-    "IF" exp "-->" chunks "<!--" "ELSE" "-->" chunks "<!--" "END" |
-    "IF" exp "-->" chunks c_elseifs chunks "<!--" "END" |
-    "IF" exp "-->" chunks c_elseifs chunks "<!--" "ELSE" "-->" chunks "<!--" "END"
+c_if: "if" exp "-->" chunks "<!--" "end" |
+    "if" exp "-->" chunks "<!--" "else" "-->" chunks "<!--" "end" |
+    "if" exp "-->" chunks c_elseifs chunks "<!--" "end" |
+    "if" exp "-->" chunks c_elseifs chunks "<!--" "else" "-->" chunks "<!--" "end"
 c_elseifs: "<!--" elseif exp "-->" | c_elseifs chunks "<!--" elseif exp "-->"
-c_set: "SET" varref "=" exp | "SET" varref "-->" chunks "<!--" "END"
-c_fn: fn name "(" arglist ")" "=" exp | fn name "(" arglist ")" "-->" chunks "<!--" "END"
-c_for: for varref "=" exp "-->" chunks "<!--" "END"
-fn: "FUNCTION" | "BLOCK" | "MACRO"
-for: "FOR" | "FOREACH"
-elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
+c_set: "set" varref "=" exp | "set" varref "-->" chunks "<!--" "end"
+c_fn: fn name "(" arglist ")" "=" exp | fn name "(" arglist ")" "-->" chunks "<!--" "end"
+c_for: for varref "=" exp "-->" chunks "<!--" "end"
+fn: "function" | "block" | "macro"
+for: "for" | "foreach"
+elseif: "else" "if" | "elsif" | "elseif"
 
 exp: exp ".." exp |
-    exp "||" exp | exp "OR" exp | exp "XOR" exp |
-    exp "&&" exp | exp "AND" exp |
+    exp "||" exp | exp "or" exp | exp "xor" exp |
+    exp "&&" exp | exp "and" exp |
     exp "==" exp | exp "!=" exp |
     exp "<" exp | exp ">" exp | exp "<=" exp | exp ">=" exp |
     exp "+" exp | exp "-" exp |
@@ -44,7 +44,7 @@ exp: exp ".." exp |
     exp "*" exp | exp "/" exp | exp "%" exp |
     p10
 p10: p11 | '-' p11
-p11: nonbrace | '(' exp ')' varpath | '!' p11 | "NOT" p11
+p11: nonbrace | '(' exp ')' varpath | '!' p11 | "not" p11
 nonbrace: '{' hash '}' | literal | varref | name '(' ')' | name '(' list ')' | name '(' gthash ')' | name nonbrace | method '(' ')' | method '(' list ')'
 method: varref '.' name
 list: exp | exp ',' list

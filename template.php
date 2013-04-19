@@ -3,34 +3,15 @@
 # "Ох уж эти перлисты... что ни пишут - всё Template Toolkit получается!"
 
 # "Oh that perlists... anything they write is just another Template Toolkit"
-# Rewritten 3 times: phpbb -> regex -> index() -> recursive descent.
-# Needs another rewrite using a LALR parser generator, maybe LIME...
+# Rewritten 4 times: phpbb -> regex -> index() -> recursive descent -> LIME LALR(1)
 
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # Author: Vitaliy Filippov, 2006-2013
 # $Id$
 
-# TODO for perl version - rewrite it and prevent auto-vivification on a.b
-
-class VMXTemplateState
-{
-    // Old-style blocks
-    var $blocks = array();
-
-    // Stack of code fragments for END checking
-    // array(array($instruction, $subject))
-    // E.g. $instruction = FOR, $subject = varref
-    var $in = array();
-
-    // Functions
-    var $functions = array();
-
-    // Template filename
-    var $input_filename = '';
-
-    // Stack of references to output strings
-    var $output = array();
-}
+# TODO For perl version - rewrite it and prevent auto-vivification on a.b
+# TODO Split into runner and parser
+# TODO <!--# comments -->
 
 if (!defined('TS_UNIX'))
 {
@@ -78,8 +59,8 @@ class VMXTemplate
     // Search path for template functions (filenames indexed by function name)
     var $function_search_path = array();
 
-    // Options object
-    var $options;
+    // Other objects
+    var $options, $st, $lexer, $parser;
 
     /**
      * Constructor
@@ -410,8 +391,7 @@ class VMXTemplate
             $func_ns = md5($fn);
         }
 
-        $parser = new VMXTemplateParser($this->options);
-        $compiled = $parser->parse_all($code, $fn, $func_ns);
+        $compiled = $this->parse_all($code, $fn, $func_ns);
         if (!file_put_contents($file, $compiled))
         {
             throw new VMXTemplateException("Failed writing $file");
@@ -421,17 +401,54 @@ class VMXTemplate
     }
 
     /**
-     * Call template block / "function" from the template where it was defined
+     * Parse all code and return compiled template
+     *
+     * @param $code full template code
+     * @param $filename input filename for error reporting
+     * @param $func_ns suffix for class name (Template_SUFFIX)
      */
-    function call_block($block, $args, $errorinfo)
+    protected function parse_all($code, $filename, $func_ns)
     {
-        if (isset($this->function_search_path[$block]))
+        $this->st = new VMXTemplateState();
+        $this->options->input_filename = $filename;
+        $this->st->functions['main'] = array(
+            'name' => 'main',
+            'args' => array(),
+            'body' => '',
+        );
+        if (!$this->lexer)
         {
-            // FIXME maybe do it better!
-            $fn = $this->function_search_path[$block][0];
-            return $this->parse_real($fn, NULL, $block, $args);
+            $this->lexer = new VMXTemplateLexer($this->options);
+            $this->parser = new parse_engine(new VMXTemplateParser());
+            $this->parser->parser->template = $this;
         }
-        throw new VMXTemplateException("$errorinfo Unknown block '$block'");
+        $this->lexer->set_code($code);
+        $this->lexer->feed($this->parser);
+
+        // Generate code for functions
+        $code = '';
+        foreach ($this->st->functions as $f)
+        {
+            $code .= $f['body'];
+        }
+
+        // Assemble the class code
+        $functions = var_export(array_keys($this->st->functions), true);
+        $rfn = addcslashes($this->options->input_filename, '\\\'');
+        $code = "<?php // {$this->options->input_filename}
+class Template_$func_ns extends VMXTemplate {
+static \$template_filename = '$rfn';
+static \$version = ".VMXTemplate::CODE_VERSION.";
+static \$functions = $functions;
+function __construct(\$t) {
+\$this->tpldata = &\$t->tpldata;
+\$this->parent = &\$t;
+}
+$code
+}
+";
+
+        return $code;
     }
 
     /*** Built-in filters ***/
@@ -446,6 +463,20 @@ class VMXTemplate
     }
 
     /*** Function implementations ***/
+
+    /**
+     * Call template block / "function" from the template where it was defined
+     */
+    function call_block($block, $args, $errorinfo)
+    {
+        if (isset($this->function_search_path[$block]))
+        {
+            // FIXME maybe do it better!
+            $fn = $this->function_search_path[$block][0];
+            return $this->parse_real($fn, NULL, $block, $args);
+        }
+        throw new VMXTemplateException("$errorinfo Unknown block '$block'");
+    }
 
     static function array1($a)
     {
@@ -705,138 +736,6 @@ class VMXTemplate
         }
         return $ts;
     }
-}
-
-/**
- * Template exception classes
- */
-class VMXTemplateException extends Exception {}
-class VMXTemplateParseException extends VMXTemplateException {}
-
-/**
- * Options class
- */
-class VMXTemplateOptions
-{
-    var $begin_code    = '<!--';    // instruction start
-    var $end_code      = '-->';     // instruction end
-    var $begin_subst   = '{';       // substitution start (optional)
-    var $end_subst     = '}';       // substitution end (optional)
-    var $no_code_subst = false;     // do not substitute expressions in instructions
-    var $eat_code_line = true;      // remove the "extra" lines which contain instructions only
-    var $root          = '.';       // directory with templates
-    var $cache_dir     = false;     // compiled templates cache directory
-    var $reload        = 1;         // 0 means to not check for new versions of cached templates
-    var $filters       = array();   // filter to run on output of every template
-    var $use_utf8      = true;      // use UTF-8 for all string operations on template variables
-    var $raise_error   = false;     // die() on fatal template errors
-    var $log_error     = false;     // send errors to standard error output
-    var $print_error   = false;     // print fatal template errors
-    var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
-    var $strip_space   = false;     // strip spaces from beginning and end of each line
-    var $compiletime_functions = array();   // custom compile-time functions (code generators)
-
-    // Logged errors (not an option)
-    var $errors;
-
-    function __construct($options = array())
-    {
-        $this->set($options);
-        $this->errors = array();
-    }
-
-    function set($options)
-    {
-        foreach ($options as $k => $v)
-        {
-            if (isset($this->$k))
-            {
-                $this->$k = $v;
-            }
-        }
-        if ($this->strip_space)
-        {
-            $this->filters[] = 'strip_space';
-        }
-        if (!$this->begin_subst || !$this->end_subst)
-        {
-            $this->begin_subst = false;
-            $this->end_subst = false;
-            $this->no_code_subst = false;
-        }
-        $this->cache_dir = preg_replace('!/*$!s', '/', $this->cache_dir);
-        if (!is_writable($this->cache_dir))
-        {
-            throw new VMXTemplateException('VMXTemplate: cache_dir='.$this->cache_dir.' is not writable');
-        }
-        $this->root = preg_replace('!/*$!s', '/', $this->root);
-    }
-
-    function __destruct()
-    {
-        if ($this->print_error && $this->errors && PHP_SAPI != 'cli')
-        {
-            print '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
-                'VMXTemplate errors:<ul><li>'.
-                implode('</li><li>', array_map('html_pbr', $this->errors)).
-                '</li></ul>';
-                $fp = fopen("php://stderr", 'a');
-                fprintf($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
-                fclose($fp);
-        }
-    }
-
-    /**
-     * Log an error or a warning
-     */
-    function error($e, $fatal = false)
-    {
-        $this->errors[] = $e;
-        if ($this->raise_error && $fatal)
-            die("VMXTemplate error: $e");
-        if ($this->log_error)
-            error_log("VMXTemplate error: $e");
-        elseif ($this->print_error && PHP_SAPI == 'cli')
-            print("VMXTemplate error: $e\n");
-    }
-}
-
-/**
- * Parser of templates and expressions into PHP code.
- *
- * Includes:
- * - Lexical analyzer (~regexp)
- * - O(n) recursive descent syntactic analyzer and translator
- *   I.e. no backtracking, but performance maybe is worse than with LALR.
- */
-class VMXTemplateParser
-{
-    // Options, state
-    var $options, $st;
-
-    // Code (string) and current position inside it
-    var $code, $codelen, $pos, $lineno;
-
-    // Extracted tokens (array), their source positions and current token number
-    var $tokens, $tokpos, $tokline, $ptr;
-
-    // Possible tokens consisting of special characters
-    static $chartokens = '# + - = * / % ! , . < > ( ) { } [ ] & .. || && == != <= >= =>';
-
-    // ops_and: ops_bitand | ops_bitand "&&" ops_and | ops_bitand "AND" ops_and
-    // ops_bitand: ops_eq | ops_eq "&" ops_bitand
-    // ops_eq: ops_cmp | ops_cmp "==" ops_cmp | ops_cmp "!=" ops_cmp
-    // ops_cmp: ops_add | ops_add '<' ops_add | ops_add '>' ops_add | ops_add "<=" ops_add | ops_add ">=" ops_add
-    // ops_add: ops_mul | ops_mul '+' ops_add | ops_mul '-' ops_add
-    // ops_mul: exp_neg | exp_neg '*' ops_mul | exp_neg '/' ops_mul | exp_neg '%' ops_mul
-    static $ops = array(
-        'and' => array(array('&&', '$and'), 'bitand', true),
-        'bitand' => array(array('&'), 'eq', true),
-        'eq'  => array(array('==', '!='), 'cmp', false),
-        'cmp' => array(array('<', '>', '<=', '>='), 'add', false),
-        'add' => array(array('+', '-'), 'mul', true),
-        'mul' => array(array('*', '/', '%'), 'neg', true),
-    );
 
     // Function aliases
     static $functions = array(
@@ -873,1044 +772,30 @@ class VMXTemplateParser
         'include_inline'    => 'parse_inline',
     );
 
-    /**
-     * USAGE:
-     * $p = new VMXTemplateParser($options);
-     * try { $e = $p->parse_all($code); } catch (Exception $e) { ... }
-     */
-    function __construct(VMXTemplateOptions $options)
+    function compile_function($fn, $args)
     {
-        $this->options = $options;
-        $this->nchar = array();
-        foreach (explode(' ', self::$chartokens) as $t)
+        $fn = strtolower($fn);
+        if (isset(self::$functions[$fn]))
         {
-            $this->nchar[strlen($t)][$t] = true;
+            // Builtin function call using alias
+            $fn = 'function_'.self::$functions[$fn];
+            $r = call_user_func_array(array($this, $fn), $args);
         }
-        // Add code fragment finishing tokens
-        $this->nchar[strlen($this->options->end_code)][$this->options->end_code] = true;
-        if ($this->options->end_subst)
+        elseif (method_exists($this, "function_$fn"))
         {
-            $this->nchar[strlen($this->options->end_subst)][$this->options->end_subst] = true;
+            // Builtin function call using name
+            $fn = "function_$fn";
+            $r = call_user_func_array(array($this, $fn), $args);
         }
-        // Reverse-sort lengths
-        $this->lens = array_keys($this->nchar);
-        rsort($this->lens);
-    }
-
-    /*** Lexical analysis ***/
-
-    function clear_tokens()
-    {
-        $this->tokens = array();
-        $this->tokpos = array();
-        $this->tokline = array();
-        $this->ptr = 0;
-    }
-
-    function set_code($code)
-    {
-        $this->code = $code;
-        $this->pos = $this->lineno = 0;
-        $this->codelen = strlen($this->code);
-        $this->clear_tokens();
-    }
-
-    /**
-     * Get (current+$num) token from buffer or read it from the source
-     */
-    function tok($num = 0)
-    {
-        while (($this->ptr+$num >= count($this->tokens)) && $this->read_token())
+        elseif (isset($this->options->compiletime_functions[$fn]))
         {
-            // Read tokens
-        }
-        if ($this->ptr+$num >= count($this->tokens))
-        {
-            return false;
-        }
-        return $this->tokens[$this->ptr+$num];
-    }
-
-    /**
-     * Get current token position
-     */
-    function tokpos($num = 0)
-    {
-        if (!$this->tok($num))
-        {
-            return false;
-        }
-        return array($this->tokpos[$this->ptr+$num], $this->tokline[$this->ptr+$num]);
-    }
-
-    function errorinfo()
-    {
-        $l = strlen($this->code);
-        $linestart = strrpos($this->code, "\n", $this->pos-$l-1) ?: -1;
-        $lineend = strpos($this->code, "\n", $this->pos) ?: $l;
-        $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
-        $line .= '^^^';
-        $line .= substr($this->code, $this->pos, $lineend-$this->pos);
-        $in = '';
-        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-        foreach ($trace as $frame)
-        {
-            if ($frame['function'] == 'parse_all')
-            {
-                break;
-            }
-            elseif (substr($frame['function'], 0, 6) == 'parse_')
-            {
-                $in = strtoupper(substr($frame['function'], 6)).", ";
-                break;
-            }
-        }
-        return "in $in{$this->st->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
-    }
-
-    function warn($text)
-    {
-        $this->options->error($text);
-    }
-
-    function raise($msg)
-    {
-        throw new VMXTemplateParseException(
-            $msg.' '.$this->errorinfo()
-        );
-    }
-
-    /**
-     * Read next token from the stream and append it to $this->tokens,tokpos,tokline
-     * Returns true if a token was read, and false if EOF occurred
-     */
-    function read_token()
-    {
-        while ($this->pos < $this->codelen)
-        {
-            // Skip whitespace
-            $t = $this->code{$this->pos};
-            if ($t == "\n")
-                $this->lineno++;
-            elseif ($t != "\t" && $t != ' ')
-                break;
-            $this->pos++;
-        }
-        if ($this->pos >= $this->codelen)
-        {
-            // End of code
-            return false;
-        }
-        if (preg_match('#[a-z_][a-z0-9_]*#Ais', $this->code, $m, 0, $this->pos))
-        {
-            // Identifier
-            $this->tokpos[] = $this->pos;
-            $this->tokline[] = $this->lineno;
-            $this->tokens[] = '$'.$m[0];
-            $this->pos += strlen($m[0]);
-        }
-        elseif (preg_match(
-            '/((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\''.
-            '|0\d+|\d+(\.\d+)?|0x\d+)/Ais', $this->code, $m, 0, $this->pos))
-        {
-            // String or numeric non-negative literal
-            $t = $m[1];
-            if (isset($m[2]))
-                $t = str_replace('$', '\\$', $t);
-            $this->tokpos[] = $this->pos;
-            $this->tokline[] = $this->lineno;
-            $this->tokens[] = '#'.$t;
-            $this->pos += strlen($m[0]);
+            // Custom compile-time function call
+            $r = call_user_func($this->options->compiletime_functions[$fn], $this, $args);
         }
         else
         {
-            // Special characters
-            foreach ($this->lens as $l)
-            {
-                $a = $this->nchar[$l];
-                $t = substr($this->code, $this->pos, $l);
-                if (isset($a[$t]))
-                {
-                    $this->tokpos[] = $this->pos;
-                    $this->tokline[] = $this->lineno;
-                    $this->tokens[] = $t;
-                    $this->pos += $l;
-                    return true;
-                }
-            }
-            // Unknown character
-            $this->raise(
-                "Unexpected character '".$this->code{$this->pos}."'"
-            );
-        }
-        return true;
-    }
-
-    /**
-     * Assume $token is next in the stream (case-insensitive)
-     * and move pointer forward.
-     *
-     * $token may be '$' (assume name), '#' (assume literal),
-     * or an exact value of one of others. For names and literals,
-     * a value is returned, and the token itself for others.
-     */
-    function consume($token)
-    {
-        $t = $this->tok();
-        if ($t === false)
-            $this->unexpected($token, 1);
-        elseif ($token == '$' || $token == '#')
-        {
-            if ($t{0} == $token)
-            {
-                $this->ptr++;
-                return substr($t, 1);
-            }
-            else
-                $this->unexpected($token, 1);
-        }
-        elseif (!in_array(strtolower($t), (array)$token))
-            $this->unexpected($token, 1);
-        $this->ptr++;
-        return $t;
-    }
-
-    /**
-     * Assume next token is "EOD" (end-of-directive)
-     * Used in "stateful" directives to prevent changing state on incorrect parse
-     */
-    function assume_eod()
-    {
-        if ($this->tok() != $this->eod)
-        {
-            $this->unexpected($this->eod, 1);
-        }
-    }
-
-    /**
-     * Raise "unexpected token" error
-     */
-    function unexpected($expected, $skip_frames = 0)
-    {
-        $expected = (array)$expected;
-        foreach ($expected as &$e)
-        {
-            if ($e == '#')
-                $e = 'literal';
-            elseif ($e == '$')
-                $e = 'identifier';
-        }
-        $tok = $this->tok();
-        if ($tok === false)
-            $tok = '<EOF>';
-        else
-        {
-            if ($tok{0} == '#' || $tok{0} == '$')
-                $tok = substr($tok, 1);
-            $tok = "'$tok'";
-        }
-        $text = "Unexpected $tok, expected ";
-        if (count($expected) > 1)
-            $text .= "one of ";
-        $text .= "'".implode("', '", $expected)."'";
-        $this->raise($text);
-    }
-
-    /*** Syntactic analysis ***/
-
-    // Tokenize, parse and return parsed code
-    // @throws VMXTemplateParseException
-    function parse()
-    {
-        $this->clear_tokens();
-        $r = $this->parse_exp();
-        if ($this->ptr < count($this->tokens))
-            $this->unexpected("<END>");
-        return $r;
-    }
-
-    /**
-     * Parse all code and return compiled template
-     *
-     * @param $code full template code
-     * @param $filename input filename for error reporting
-     * @param $func_ns suffix for class name (Template_SUFFIX)
-     */
-    function parse_all($code, $filename, $func_ns)
-    {
-        $blocks = array(
-            array(
-                'begin' => $this->options->begin_code,
-                'end' => $this->options->end_code,
-                'handler' => 'parse_code',
-                'eat' => $this->options->eat_code_line
-            ),
-        );
-        if ($this->options->begin_subst)
-        {
-            $blocks[] = array(
-                'begin' => $this->options->begin_subst,
-                'end' => $this->options->end_subst,
-                'handler' => 'parse_subst',
-                'eat' => false,
-            );
-        }
-        // Set code
-        $this->set_code($code);
-        // Create new state object
-        $this->st = new VMXTemplateState();
-        $this->st->input_filename = $filename;
-        $this->st->functions['main'] = array(
-            'name' => 'main',
-            'args' => array(),
-            'body' => '',
-        );
-        $this->st->output = array(&$this->st->functions['main']['body']);
-        // $text_pos = Position up to which all text was already printed
-        // $pos = Instruction start position
-        // $this->pos = Instruction end position
-        $text_pos = 0;
-        $lineno = 0;
-        while ($this->pos < $this->codelen)
-        {
-            // Find nearest code fragment or substitution
-            $min = -1;
-            foreach ($blocks as $i => &$b)
-            {
-                $b['pos'] = strpos($this->code, $b['begin'], $this->pos);
-                if ($b['pos'] !== false && ($min < 0 || $b['pos'] < $blocks[$min]['pos']))
-                {
-                    $min = $i;
-                }
-            }
-            // Save outputRef before trying to run a handler because
-            // if we don't the last text portion from function body will be added to MAIN
-            $outputRef = &$this->st->output[count($this->st->output)-1];
-            $r = '';
-            if ($min >= 0)
-            {
-                // Set source position and line number
-                $lineno = $this->lineno;
-                $pos = $blocks[$min]['pos'];
-                if ($pos > $this->pos)
-                {
-                    $this->lineno += substr_count($this->code, "\n", $this->pos, $pos-$this->pos);
-                }
-                $this->pos = $pos + strlen($blocks[$min]['begin']);
-                if ($blocks[$min]['eat'])
-                {
-                    // TODO configurable eat, like in TT [%+ [%-
-                    // Eat line beginning (when there are only spaces)
-                    $p = $pos;
-                    while ($p > 0 && ctype_space($c = $this->code{$p-1}) && $c != "\n")
-                    {
-                        $p--;
-                    }
-                    if ($p == 0 || $c == "\n")
-                    {
-                        $pos = $p;
-                    }
-                }
-                // Reset token buffer
-                $this->clear_tokens();
-                $this->eod = $blocks[$min]['end'];
-                $handler = $blocks[$min]['handler'];
-                try
-                {
-                    // Try to parse from here, skip invalid parts
-                    if ($this->tok() == '#')
-                    {
-                        // Comment!
-                        $this->pos = strpos($this->code, $this->eod, $this->pos);
-                        if ($this->pos === false)
-                        {
-                            throw new VMXTemplateParseException($this->eod . ' not found');
-                        }
-                        $this->pos += strlen($this->eod);
-                    }
-                    else
-                    {
-                        $r = $this->$handler();
-                        $this->consume($this->eod);
-                        // Add newline count from code fragment
-                        $this->lineno += substr_count($this->code, "\n", $pos, $this->pos-$pos);
-                    }
-                }
-                catch (VMXTemplateParseException $e)
-                {
-                    $this->warn($e->getMessage());
-                    // Only skip 1 starting character and try again
-                    $this->pos = $blocks[$min]['pos']+1;
-                    $this->lineno = $lineno;
-                    continue;
-                }
-                if ($blocks[$min]['eat'])
-                {
-                    // Eat line end (when there are only spaces)
-                    $p = $this->pos;
-                    while ($p < $this->codelen && ctype_space($c = $this->code{$p}) && $c != "\n")
-                    {
-                        $p++;
-                    }
-                    if ($c == "\n")
-                    {
-                        $this->lineno++;
-                    }
-                    if ($p == $this->codelen || $c == "\n")
-                    {
-                        if ($p < $this->codelen)
-                        {
-                            $p++;
-                        }
-                        $this->pos = $p;
-                    }
-                }
-            }
-            else
-            {
-                // No more code fragments and substitutions :-(
-                $pos = $this->pos = $this->codelen;
-            }
-            if ($pos > $text_pos)
-            {
-                // Append text fragment
-                $text = substr($this->code, $text_pos, $pos-$text_pos);
-                $text = addcslashes($text, '\\\'');
-                $outputRef .= "\$t.='$text';\n";
-            }
-            $text_pos = $this->pos;
-            if ($r !== '')
-            {
-                // Append compiled fragment
-                $outputRef .= $r."\n";
-            }
-        }
-
-        // Generate code for functions
-        $code = '';
-        foreach ($this->st->functions as $f)
-        {
-            $code .= "function fn_".$f['name']." () {\n";
-            $code .= "\$stack = array();\n\$t = '';\n";
-            $code .= $f['body'];
-            $code .= "return \$t;\n}\n";
-        }
-
-        // Assemble the class code
-        $functions = var_export(array_keys($this->st->functions), true);
-        $rfn = addcslashes($this->st->input_filename, '\\\'');
-        $code = "<?php // {$this->st->input_filename}
-class Template_$func_ns extends VMXTemplate {
-static \$template_filename = '$rfn';
-static \$version = ".VMXTemplate::CODE_VERSION.";
-static \$functions = $functions;
-function __construct(\$t) {
-\$this->tpldata = &\$t->tpldata;
-\$this->parent = &\$t;
-}
-$code
-}
-";
-
-        return $code;
-    }
-
-    // Substitution
-    function parse_subst()
-    {
-        $e = $this->parse_exp();
-        return "\$t.=$e;";
-    }
-
-    // code: "IF" exp | "ELSE" | elseif exp | "END" |
-    //  "SET" varref | "SET" varref '=' exp |
-    //  fn name | fn name '=' exp |
-    //  for varref '=' exp | for varref |
-    //  "BEGIN" name bparam | "END" name | exp
-    // fn: "FUNCTION" | "BLOCK" | "MACRO"
-    // for: "FOR" | "FOREACH"
-    // elseif: "ELSE" "IF" | "ELSIF" | "ELSEIF"
-    function parse_code()
-    {
-        $t = strtolower($this->tok());
-        if ($t == '$if')
-        {
-            $this->ptr++;
-            $e = $this->parse_exp();
-            $this->assume_eod();
-            $this->st->in[] = array('if');
-            return "if ($e) {";
-        }
-        elseif ($t == '$else')
-        {
-            $this->ptr++;
-            if (strtolower($this->tok()) == '$if')
-            {
-                // Go to elseif
-                $t = '$elseif';
-            }
-            else
-                return "} else {";
-        }
-        // We can go to $elseif from $else, so start if() chain again
-        if ($t == '$elseif' || $t == '$elsif')
-        {
-            $this->ptr++;
-            return "} elseif (".$this->parse_exp().") {";
-        }
-        elseif ($t == '$for' || $t == '$foreach')
-        {
-            // Foreach-style loop
-            // FOR[EACH] varref = array
-            // (default array = varref itself)
-            $this->ptr++;
-            $parts = $this->parse_varref();
-            $exp = false;
-            if ($this->tok() == '=')
-            {
-                $this->ptr++;
-                $exp = $this->parse_exp();
-            }
-            $this->assume_eod();
-            $this->st->in[] = array('for', $parts, $exp);
-            return $this->gen_foreach($parts, $exp);
-        }
-        elseif ($t == '$begin')
-        {
-            // Old-style loop
-            $this->ptr++;
-            return $this->parse_begin();
-        }
-        elseif ($t == '$end')
-        {
-            // End directive
-            $this->ptr++;
-            return $this->parse_end();
-        }
-        elseif ($t == '$set')
-        {
-            if ($this->tok(1) == '(')
-            {
-                // This is the set() function, parse it as an expression
-                return $this->parse_exp();
-            }
-            // SET directive
-            $this->ptr++;
-            $def = $this->parse_varref();
-            if ($this->tok() == '=')
-            {
-                // SET varref = exp
-                $this->ptr++;
-                $e = $this->parse_exp();
-                return $this->gen_varref($def) . ' = ' . $e . ';';
-            }
-            $this->assume_eod();
-            $this->st->in[] = array('set', $def);
-            return "\$stack[] = \$t;\n\$t = '';";
-        }
-        elseif ($t == '$function' || $t == '$block' || $t == '$macro')
-        {
-            // Function declaration
-            $this->ptr++;
-            return $this->parse_function();
-        }
-        // Expression
-        $t = $this->parse_exp();
-        if ($this->options->no_code_subst)
-        {
-            // Substitute only $subst_begin..$subst_end
-            return "$t;";
-        }
-        return "\$t.=$t;";
-    }
-
-    // Parse an old-style loop
-    // BEGIN block [AT e] [BY e] [TO e]
-    function parse_begin()
-    {
-        $bname = $this->consume('$');
-        $at = $by = $to = false;
-        while (true)
-        {
-            $tok = strtolower($this->tok());
-            $this->ptr++;
-            if ($at === false && $tok == '$at')
-                $at = $this->parse_exp();
-            elseif ($by === false && $tok == '$by')
-                $by = $this->parse_exp();
-            elseif ($to === false && $tok == '$to')
-                $to = $this->parse_exp();
-            else
-            {
-                $this->ptr--;
-                break;
-            }
-        }
-        $this->assume_eod();
-        $this->st->blocks[] = $bname;
-        $parts = $this->st->blocks;
-        $this->st->in[] = array('begin', array($bname), $t);
-        $exp = $this->gen_varref($parts);
-        if ($at || $to)
-        {
-            $exp = "array_slice($e, ";
-            $exp .= $at ? $at : 0;
-            if ($to)
-                $exp .= ", $to";
-            $exp .= ")";
-        }
-        if ($by)
-            $exp = "self::exec_subarray_divmod($exp, $by)";
-        return $this->gen_foreach($parts, $exp);
-    }
-
-    // Parse END directive - may correspond to one of:
-    // FOREACH, BEGIN, IF, SET or FUNCTION
-    // Optionally with varref specifying what block should end here.
-    function parse_end()
-    {
-        $end_subj = false;
-        if (substr($this->tok(), 0, 1) == '$')
-        {
-            $end_subj = $this->parse_varref();
-        }
-        $this->assume_eod();
-        if (!count($this->st->in))
-        {
-            $this->raise("END without begin directive");
-        }
-        $in = array_pop($this->st->in);
-        $w = $in[0];
-        $begin_subj = isset($in[1]) ? $in[1] : false;
-        if ($begin_subj)
-        {
-            $b = implode('.', $begin_subj);
-            if ($end_subj ? $b != ($e = implode('.', $end_subj)) : $this->options->strict_end)
-            {
-                $w = strtoupper($w);
-                $this->raise(
-                    $b ? "END $e after $w $b"
-                       : "END subject not specified (after $w $b) in strict mode"
-                );
-            }
-        }
-        if ($w == 'set')
-        {
-            return $this->gen_varref($in[1])." = \$t;\n\$t = array_pop(\$stack);";
-        }
-        elseif ($w == 'function')
-        {
-            array_pop($this->st->output);
-            return '';
-        }
-        elseif ($w == 'begin' || $w == 'for')
-        {
-            if ($w == 'begin')
-                array_pop($st->blocks);
-            list($varref, $varref_index) = $this->varref_and_index($in[1]);
-            return "}
-array_pop(\$stack);
-$varref_index = array_pop(\$stack);
-$varref = array_pop(\$stack);";
-        }
-        return "}";
-    }
-
-    // Function definition (with named arguments)
-    // Such functions are always called as fn(name => value, ...)
-    // FUNCTION/BLOCK/MACRO name (arglist) [ = expression]
-    function parse_function()
-    {
-        list($pos, $line) = $this->tokpos();
-        $name = $this->consume('$');
-        $args = array();
-        if ($this->tok() == '(')
-        {
-            $this->ptr++;
-            while ($this->tok() != ')')
-            {
-                $args[] = $this->consume('$');
-                if ($this->tok() == ',')
-                    $this->ptr++;
-            }
-            $this->ptr++;
-        }
-        $code = false;
-        if ($this->tok() == '=')
-        {
-            $code = $this->parse_exp();
-        }
-        $this->assume_eod();
-        if (isset($this->st->functions[$name]))
-        {
-            $this->raise(
-                "Attempt to redeclare function $name, previously defined on line ".
-                ($this->st->functions[$name]['line']+1)." (byte ".
-                ($this->st->functions[$name]['pos']).")"
-            );
-        }
-        $this->st->functions[$name] = array(
-            'name' => $name,
-            'args' => $args,
-            'pos'  => $pos,
-            'line' => $line,
-            'body' => '',
-        );
-        $this->st->in[] = array('function', array($name));
-        $this->st->output[] = &$this->st->functions[$name]['body'];
-    }
-
-    // Make and return loop varref and loop index varref
-    function varref_and_index($parts)
-    {
-        $varref = $this->gen_varref($parts);
-        $varref_index = substr($varref, 0, -1) . ".'_index']";
-        return array($varref, $varref_index);
-    }
-
-    // Generate foreach() code (FOR $parts = $exp)
-    function gen_foreach($parts, $exp)
-    {
-        list($varref, $varref_index) = $this->varref_and_index($parts);
-        if (!$exp)
-            $exp = $varref;
-        // FIXME We'll have a problem in Perl version here (arrays vs hashes)
-        return
-"\$stack[] = $varref;
-\$stack[] = $varref_index;
-\$stack[] = 0;
-foreach (self::array1($exp) as \$item) {
-$varref = \$item;
-$varref_index = \$stack[count(\$stack)-1]++;";
-    }
-
-    // (concatenation)
-    // exp: ops_or | ops_or ".." exp
-    function parse_exp()
-    {
-        if (strtolower($this->tok()) == '$not')
-        {
-            $this->ptr++;
-            return '(!'.$this->parse_exp().')';
-        }
-        $e = array($this->parse_or());
-        while ($this->tok() == '..')
-        {
-            $this->ptr++;
-            $e[] = $this->parse_or();
-        }
-        $e = "(" . implode(") . (", $e) . ")";
-        return $e;
-    }
-
-    // ops_or: ops_and | ops_and "||" ops_or | ops_and "OR" ops_or | ops_and "XOR" ops_or
-    function parse_or()
-    {
-        $ops = array('||', '$or', '$xor');
-        $e = array($this->parse_ops('and'));
-        $xor = false;
-        while (in_array($t = strtolower($this->tok()), $ops))
-        {
-            $this->ptr++;
-            if ($t == '$xor')
-                $xor = true;
-            $e[] = $t == '$xor' ? 'XOR' : '||';
-            $e[] = $this->parse_ops('and');
-        }
-        if (count($e) == 1)
-            return $e[0];
-        if ($xor)
-            return "(".implode(' ', $e).")";
-        // Expressions without XOR are executed as the "perlish OR"
-        $args = array();
-        for ($i = 0, $j = 0; $i < count($e); $i += 2)
-            $args[$j++] = $e[$i];
-        return "self::perlish_or(".implode(",", $args).")";
-    }
-
-    // Parse operator expression. See self::$ops
-    function parse_ops($name)
-    {
-        list($ops, $next, $repeat) = self::$ops[$name];
-        if (isset(self::$ops[$next]))
-            $next = array(array($this, 'parse_ops'), array($next));
-        else
-            $next = array(array($this, 'parse_'.$next), array());
-        $e = call_user_func_array($next[0], $next[1]);
-        $brace = false;
-        while (in_array($t = strtolower($this->tok()), $ops))
-        {
-            $this->ptr++;
-            $e .= ' ';
-            $e .= $t{0} == '$' ? substr($t, 1) : $t;
-            $e .= ' ';
-            $e .= call_user_func_array($next[0], $next[1]);
-            $brace = true;
-            if (!$repeat)
-                break;
-        }
-        return $brace ? "($e)" : $e;
-    }
-
-    // exp_neg: exp_not | '-' exp_not
-    function parse_neg()
-    {
-        $neg = false;
-        if ($this->tok() == '-')
-        {
-            $neg = true;
-            $this->ptr++;
-        }
-        $e = $this->parse_not();
-        return $neg ? "-($e)" : $e;
-    }
-
-    // exp_not: nonbrace | '(' exp ')' varpath | '!' exp_not | "NOT" exp_not
-    function parse_not()
-    {
-        $t = $this->tok();
-        if ($t == '!')
-        {
-            $this->ptr++;
-            $r = '(!'.$this->parse_not().')';
-        }
-        elseif ($t == '(')
-        {
-            $this->ptr++;
-            $r = $this->parse_exp();
-            $this->consume(')');
-            // FIXME parse_varpath here
-        }
-        else
-        {
-            $r = $this->parse_nonbrace();
-        }
-        return $r;
-    }
-
-    // nonbrace: '{' hash '}' | literal | varref | func '(' list ')' | func '(' gthash ')' | func nonbrace
-    // func: name | varref varpart
-    function parse_nonbrace()
-    {
-        $t = $this->tok();
-        if ($t == '{')
-        {
-            $this->ptr++;
-            if ($this->tok() != '}')
-            {
-                $r = 'array(' . $this->parse_hash() . ')';
-                $this->consume('}');
-            }
-        }
-        elseif ($t{0} == '#')
-        {
-            // Literal
-            $r = substr($t, 1);
-            $this->ptr++;
-        }
-        elseif ($t{0} == '$')
-        {
-            // Name => varref or function call
-            // No support for obj.method().other_method() call syntax
-            // as PHP itself is nervous for it
-            $parts = $this->parse_varref();
-            $t = $this->tok();
-            if ($t{0} == '$' || $t{0} == '#' || $t == '{')
-            {
-                // Name, literal, { -> Single argument function call without braces
-                $r = $this->call_ref($parts, 'list', array($this->parse_nonbrace()));
-            }
-            elseif ($t == '(')
-            {
-                // ( -> function call with braces
-                $this->ptr++;
-                list($type, $args) = $this->parse_list_or_gthash();
-                $r = $this->call_ref($parts, $type, $args);
-                $this->consume(')');
-            }
-            else
-            {
-                // Nothing after the varref
-                $r = $this->gen_varref($parts);
-            }
-        }
-        else
-            $this->unexpected(array('{', '#', '$'));
-        return $r;
-    }
-
-    // list_or_gthash: list | gthash
-    // list: exp | exp ',' list
-    // gthash: gtpair | gtpair ',' gthash |
-    // gtpair: exp '=>' exp
-    function parse_list_or_gthash()
-    {
-        $beg = $this->ptr;
-        try
-        {
-            $r = $this->parse_exp();
-        }
-        catch(VMXTemplateParseException $e)
-        {
-            $this->ptr = $beg;
-            return array('list', array());
-        }
-        $t = $this->tok();
-        if ($t == '=>')
-        {
-            // hash separated with '=>', string output
-            $this->ptr++;
-            $type = 'hash';
-            $r .= ' => ';
-            $r .= $this->parse_exp();
-            $r .= ', ';
-            while ($this->tok() == ',')
-            {
-                $this->ptr++;
-                $r .= $this->parse_exp();
-                $r .= ' => ';
-                $this->consume('=>');
-                $r .= $this->parse_exp();
-                $r .= ', ';
-            }
-            $r = "array($r)";
-        }
-        else
-        {
-            // list separated with ',', array output
-            $type = 'list';
-            $r = array($r);
-            while ($this->tok() == ',')
-            {
-                $this->ptr++;
-                $r[] = $this->parse_exp();
-            }
-        }
-        return array($type, $r);
-    }
-
-    // list: exp | exp ',' list
-    function parse_list()
-    {
-        $r = $this->parse_exp();
-        while ($this->tok() == ',')
-        {
-            $this->ptr++;
-            $r .= ', '.$this->parse_exp();
-        }
-        return $r;
-    }
-
-    // hash: pair | pair ',' hash |
-    // pair: exp ',' exp | exp '=>' exp
-    function parse_hash()
-    {
-        $r = '';
-        $this->ptr--;
-        do
-        {
-            $this->ptr++;
-            if ($this->tok() == '}')
-                return $r;
-            $k = $this->parse_exp();
-            $this->consume(array(',', '=>'));
-            $v = $this->parse_exp();
-            $r .= "$k => $v, ";
-        } while ($this->tok() == ',');
-        return $r;
-    }
-
-    // varref: name | varref varpart
-    // varpart: '.' name | '[' exp ']'
-    // varpath: | varpath varpart
-    // (always begins with name)
-    function parse_varref()
-    {
-        $r = $this->consume('$');
-        $a = array($r);
-        $t = $this->tok();
-        while ($t == '.' || $t == '[')
-        {
-            $this->ptr++;
-            if ($t == '.')
-            {
-                $a[] = $this->consume('$');
-            }
-            else
-            {
-                $a[] = '['.$this->parse_exp().']';
-                $this->consume(']');
-            }
-            $t = $this->tok();
-        }
-        return $a;
-    }
-
-    // Generate varref code from parse_varref output
-    function gen_varref($parts)
-    {
-        $r = '$this->tpldata[\''.addcslashes($parts[0], '\\\'').'\']';
-        for ($i = 1; $i < count($parts); $i++)
-        {
-            if ($parts[$i]{0} == '[')
-                $r .= $parts[$i];
-            else
-                $r .= '[\''.addcslashes($parts[$i], '\\\'').'\']';
-        }
-        return $r;
-    }
-
-    // Construct function call code from $parts (varref parts)
-    // and $args (compiled expressions for function arguments)
-    // $args = array('list', <list items>) or array('hash', <hash key>, <hash value>, ...)
-    function call_ref($parts, $type, $args)
-    {
-        $r = false;
-        if ($type == 'hash')
-        {
-            if (count($parts) > 1)
-            {
-                $this->raise("Object method calls with hash arguments are impossible");
-            }
-            $r = "\$this->parent->call_block($parts[0], $args, \"".addslashes($this->errorinfo())."\")";
-        }
-        elseif (count($parts) == 1)
-        {
-            $fn = strtolower($parts[0]);
-            if (isset(self::$functions[$fn]))
-            {
-                // Builtin function call using alias
-                $fn = 'function_'.self::$functions[$fn];
-                $r = call_user_func_array(array($this, $fn), $args);
-            }
-            elseif (method_exists($this, "function_$fn"))
-            {
-                // Builtin function call using name
-                $fn = "function_$fn";
-                $r = call_user_func_array(array($this, $fn), $args);
-            }
-            elseif (isset($this->options->compiletime_functions[$fn]))
-            {
-                // Custom compile-time function call
-                $r = call_user_func($this->options->compiletime_functions[$fn], $this, $args);
-            }
-            else
-            {
-                $this->raise("Unknown function: '$fn'");
-            }
-        }
-        else
-        {
-            // Object method call
-            $fn = array_pop($parts);
-            $r = $this->gen_varref($parts).'->';
-            if ($fn{0} == '[')
-                $r .= '{'.substr($fn, 1, -1).'}';
-            elseif (preg_match('/\W/s', $fn))
-                $r .= '{\''.addcslashes($fn, '\\\'').'\'}';
-            else
-                $r .= $fn;
-            $r .= '('.implode(', ', $args).')';
+            $this->lexer->warn("Unknown function: '$fn'");
+            $r = "false";
         }
         return $r;
     }
@@ -2278,8 +1163,8 @@ $varref_index = \$stack[count(\$stack)-1]++;";
     {
         if (!method_exists($this, "function_$f"))
         {
-            $this->raise("Unknown function specified for map(): $f");
-            return NULL;
+            $this->lexer->warn("Unknown function specified for map(): $f");
+            return 'false';
         }
         $f = "function_$f";
         $f = $this->$f('$arg');
@@ -2288,3 +1173,4577 @@ $varref_index = \$stack[count(\$stack)-1]++;";
         return "call_user_func('array_map', create_function('$arg', $f), self::merge_to_array(".implode(", ", $args)."))";
     }
 }
+
+/**
+ * Template exception classes
+ */
+class VMXTemplateException extends Exception {}
+
+/**
+ * State object
+ */
+class VMXTemplateState
+{
+    // Functions
+    var $functions = array();
+}
+
+/**
+ * Options class
+ */
+class VMXTemplateOptions
+{
+    var $begin_code    = '<!--';    // instruction start
+    var $end_code      = '-->';     // instruction end
+    var $begin_subst   = '{';       // substitution start (optional)
+    var $end_subst     = '}';       // substitution end (optional)
+    var $no_code_subst = false;     // do not substitute expressions in instructions
+    var $eat_code_line = true;      // remove the "extra" lines which contain instructions only
+    var $root          = '.';       // directory with templates
+    var $cache_dir     = false;     // compiled templates cache directory
+    var $reload        = 1;         // 0 means to not check for new versions of cached templates
+    var $filters       = array();   // filter to run on output of every template
+    var $use_utf8      = true;      // use UTF-8 for all string operations on template variables
+    var $raise_error   = false;     // die() on fatal template errors
+    var $log_error     = false;     // send errors to standard error output
+    var $print_error   = false;     // print fatal template errors
+    var $strict_end    = false;     // require block name in ending instructions for FOR, BEGIN, SET and FUNCTION <!-- END block -->
+    var $strip_space   = false;     // strip spaces from beginning and end of each line
+    var $compiletime_functions = array();   // custom compile-time functions (code generators)
+
+    // Logged errors (not an option)
+    var $input_filename;
+    var $errors;
+
+    function __construct($options = array())
+    {
+        $this->set($options);
+        $this->errors = array();
+    }
+
+    function set($options)
+    {
+        foreach ($options as $k => $v)
+        {
+            if (isset($this->$k))
+            {
+                $this->$k = $v;
+            }
+        }
+        if ($this->strip_space)
+        {
+            $this->filters[] = 'strip_space';
+        }
+        if (!$this->begin_subst || !$this->end_subst)
+        {
+            $this->begin_subst = false;
+            $this->end_subst = false;
+            $this->no_code_subst = false;
+        }
+        $this->cache_dir = preg_replace('!/*$!s', '/', $this->cache_dir);
+        if (!is_writable($this->cache_dir))
+        {
+            throw new VMXTemplateException('VMXTemplate: cache_dir='.$this->cache_dir.' is not writable');
+        }
+        $this->root = preg_replace('!/*$!s', '/', $this->root);
+    }
+
+    function __destruct()
+    {
+        if ($this->print_error && $this->errors && PHP_SAPI != 'cli')
+        {
+            print '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
+                'VMXTemplate errors:<ul><li>'.
+                implode('</li><li>', array_map('html_pbr', $this->errors)).
+                '</li></ul>';
+                $fp = fopen("php://stderr", 'a');
+                fprintf($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
+                fclose($fp);
+        }
+    }
+
+    /**
+     * Log an error or a warning
+     */
+    function error($e, $fatal = false)
+    {
+        $this->errors[] = $e;
+        if ($this->raise_error && $fatal)
+            die("VMXTemplate error: $e");
+        if ($this->log_error)
+            error_log("VMXTemplate error: $e");
+        elseif ($this->print_error && PHP_SAPI == 'cli')
+            print("VMXTemplate error: $e\n");
+    }
+}
+
+/**
+ * Lexical analyzer (~regexp)
+ */
+class VMXTemplateLexer
+{
+    var $options;
+
+    // Code (string) and current position inside it
+    var $code, $codelen, $pos, $lineno;
+
+    // Last directive start position, directive and substitution start/end counters
+    var $last_start, $last_start_line, $in_code, $in_subst, $force_literal = 0;
+
+    // Possible tokens consisting of special characters
+    static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] & .. || && == != <= >= =>';
+
+    // Reserved keywords
+    static $keywords_str = 'or xor and not if else elsif elseif end set for foreach function block macro';
+
+    var $nchar, $lens, $keywords;
+
+    function __construct(VMXTemplateOptions $options)
+    {
+        $this->options = $options;
+        $this->nchar = array();
+        foreach (explode(' ', self::$chartokens) as $t)
+        {
+            $this->nchar[strlen($t)][$t] = true;
+        }
+        // Add code fragment finishing tokens
+        $this->nchar[strlen($this->options->begin_code)][$this->options->begin_code] = true;
+        $this->nchar[strlen($this->options->end_code)][$this->options->end_code] = true;
+        if ($this->options->end_subst)
+        {
+            $this->nchar[strlen($this->options->begin_subst)][$this->options->begin_subst] = true;
+            $this->nchar[strlen($this->options->end_subst)][$this->options->end_subst] = true;
+        }
+        // Reverse-sort lengths
+        $this->lens = array_keys($this->nchar);
+        rsort($this->lens);
+        $this->keywords = array_flip(explode(' ', self::$keywords_str));
+    }
+
+    function feed($parser)
+    {
+        try
+        {
+            $parser->reset();
+            while ($t = $this->read_token())
+            {
+                $parser->eat($t[0], $t[1]);
+            }
+            $parser->eat_eof();
+        }
+        catch (parse_error $e)
+        {
+            $this->options->error($e->getMessage());
+        }
+    }
+
+    function set_code($code)
+    {
+        $this->code = $code;
+        $this->codelen = strlen($this->code);
+        $this->pos = $this->lineno = 0;
+    }
+
+    /**
+     * Get current token position
+     */
+    function tokpos($num = 0)
+    {
+        if (!$this->tok($num))
+        {
+            return false;
+        }
+        return array($this->tokpos[$this->ptr+$num], $this->tokline[$this->ptr+$num]);
+    }
+
+    function errorinfo()
+    {
+        $linestart = strrpos($this->code, "\n", $this->pos-$this->codelen-1) ?: -1;
+        $lineend = strpos($this->code, "\n", $this->pos) ?: $this->codelen;
+        $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
+        $line .= '^^^';
+        $line .= substr($this->code, $this->pos, $lineend-$this->pos);
+        return " in {$this->options->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
+    }
+
+    function warn($text)
+    {
+        $this->options->error($text.$this->errorinfo());
+    }
+
+    /**
+     * Skip whole current directive
+     */
+    function skip_error($e)
+    {
+        if (substr($e, 0, 21) !== 'error () not expected')
+        {
+            $this->warn($e);
+            if ($this->in_code > 0 || $this->in_subst > 0)
+            {
+                $this->in_code = $this->in_subst = 0;
+                $this->pos = $this->last_start;
+                $this->lineno = $this->last_start_line;
+                $this->force_literal = 1;
+            }
+        }
+    }
+
+    /**
+     * Read next token from the stream
+     * Returns array($token, $value) or false for EOF
+     */
+    function read_token()
+    {
+        if ($this->pos >= $this->codelen)
+        {
+            // End of code
+            return false;
+        }
+        if ($this->in_code <= 0 && $this->in_subst <= 0)
+        {
+            $code_pos = strpos($this->code, $this->options->begin_code, $this->pos+$this->force_literal);
+            $subst_pos = strpos($this->code, $this->options->begin_subst, $this->pos+$this->force_literal);
+            $this->force_literal = 0;
+            if ($code_pos === false && $subst_pos === false)
+            {
+                $r = array('literal', "'".addcslashes(substr($this->code, $this->pos), "'\\")."'");
+                $this->lineno += substr_count($r[1], "\n");
+                $this->pos = $this->codelen;
+            }
+            elseif ($subst_pos === false || $code_pos !== false && $subst_pos > $code_pos)
+            {
+                if ($code_pos > $this->pos)
+                {
+                    $r = array('literal', "'".addcslashes(substr($this->code, $this->pos, $code_pos-$this->pos), "'\\")."'");
+                    $this->lineno += substr_count($r[1], "\n");
+                    $this->pos = $code_pos;
+                }
+                else
+                {
+                    $r = array($this->options->begin_code, false);
+                    $this->last_start = $this->pos;
+                    $this->last_start_line = $this->lineno;
+                    $this->pos += 4;
+                    $this->in_code = 1;
+                }
+            }
+            else
+            {
+                if ($subst_pos > $this->pos)
+                {
+                    $r = array('literal', "'".addcslashes(substr($this->code, $this->pos, $subst_pos-$this->pos), "'\\")."'");
+                    $this->lineno += substr_count($r[1], "\n");
+                    $this->pos = $subst_pos;
+                }
+                else
+                {
+                    $r = array($this->options->begin_subst, false);
+                    $this->last_start = $this->pos;
+                    $this->last_start_line = $this->lineno;
+                    $this->pos++;
+                    $this->in_subst = 1;
+                }
+            }
+            return $r;
+        }
+        while ($this->pos < $this->codelen)
+        {
+            // Skip whitespace
+            $t = $this->code{$this->pos};
+            if ($t == "\n")
+                $this->lineno++;
+            elseif ($t != "\t" && $t != ' ')
+                break;
+            $this->pos++;
+        }
+        if ($this->pos >= $this->codelen)
+        {
+            // End of code
+            return false;
+        }
+        if (preg_match('#[a-z_][a-z0-9_]*#Ais', $this->code, $m, 0, $this->pos))
+        {
+            $this->pos += strlen($m[0]);
+            if (isset($this->keywords[$l = strtolower($m[0])]))
+            {
+                // Keyword
+                return array($l, false);
+            }
+            // Identifier
+            return array('name', $m[0]);
+        }
+        elseif (preg_match(
+            '/((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\''.
+            '|0\d+|\d+(\.\d+)?|0x\d+)/Ais', $this->code, $m, 0, $this->pos))
+        {
+            // String or numeric non-negative literal
+            $t = $m[1];
+            if (isset($m[2]))
+            {
+                $t = str_replace('$', '\\$', $t);
+            }
+            $this->pos += strlen($m[0]);
+            return array('literal', $t);
+        }
+        else
+        {
+            // Special characters
+            foreach ($this->lens as $l)
+            {
+                $a = $this->nchar[$l];
+                $t = substr($this->code, $this->pos, $l);
+                if (isset($a[$t]))
+                {
+                    if ($this->in_code)
+                    {
+                        $this->in_code += ($t === $this->options->begin_code);
+                        $this->in_code -= ($t === $this->options->end_code);
+                    }
+                    if ($this->in_subst)
+                    {
+                        $this->in_subst += ($t === $this->options->begin_subst);
+                        $this->in_subst -= ($t === $this->options->end_subst);
+                    }
+                    $this->pos += $l;
+                    return array($t, false);
+                }
+            }
+            // Unknown character
+            $this->skip_error(
+                "Unexpected character '".$this->code{$this->pos}."'"
+            );
+            return array('error', false);
+        }
+    }
+}
+
+/**
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Library General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ */
+
+define('LIME_CALL_PROTOCOL', '$tokens, &$result');
+
+abstract class lime_parser {
+}
+
+/**
+ * The input doesn't match the grammar
+ */
+class parse_error extends Exception {
+}
+
+/**
+ * Bug, I made a mistake
+ */
+class parse_bug extends Exception {
+}
+
+class parse_unexpected_token extends parse_error {
+	public function __construct($type, $state) {
+		parent::__construct("Unexpected token of type {$type}");
+
+		$this->type = $type;
+		$this->state = $state;
+	}
+}
+
+class parse_premature_eof extends parse_error {
+	public function __construct(array $expect) {
+		parent::__construct('Premature EOF');
+	}
+}
+
+class parse_stack {
+	public $q;
+	public $qs = array();
+	/**
+	 * Stack of semantic actions
+	 */
+	public $ss = array();
+
+	public function __construct($qi) {
+		$this->q = $qi;
+	}
+
+	public function shift($q, $semantic) {
+		$this->ss[] = $semantic;
+		$this->qs[] = $this->q;
+
+		$this->q = $q;
+
+		// echo "Shift $q -- $semantic\n";
+	}
+
+	public function top_n($n) {
+		if (!$n) {
+			return array();
+		}
+
+		return array_slice($this->ss, 0 - $n);
+	}
+
+	public function pop_n($n) {
+		if (!$n) {
+			return array();
+		}
+
+		$qq = array_splice($this->qs, 0 - $n);
+		$this->q = $qq[0];
+
+		return array_splice($this->ss, 0 - $n);
+	}
+
+	public function occupied() {
+		return !empty($this->ss);
+	}
+
+	public function index($n) {
+		if ($n) {
+			$this->q = $this->qs[count($this->qs) - $n];
+		}
+	}
+
+	public function text() {
+		return $this->q . ' : ' . implode(' . ', array_reverse($this->qs));
+	}
+}
+
+class parse_engine {
+	public $debug = false;
+
+	public $parser;
+	public $qi;
+	public $rule;
+	public $step;
+	public $descr;
+	/**
+	 * @var boolean
+	 */
+	public $accept;
+	/**
+	 * @var parse_stack
+	 */
+	public $stack;
+
+	public function __construct($parser) {
+		$this->parser = $parser;
+		$this->qi = $parser->qi;
+		$this->rule = $parser->a;
+		$this->step = $parser->i;
+		$this->descr = $parser->d;
+
+		$this->reset();
+	}
+
+	public function reset() {
+		$this->accept = false;
+		$this->stack = new parse_stack($this->qi);
+		$this->parser->errors = array();
+	}
+
+	private function enter_error_tolerant_state() {
+		while ($this->stack->occupied()) {
+			if ($this->has_step_for('error')) {
+				return true;
+			}
+
+			if ($this->debug) echo "Dropped an item from the stack, {" . implode(', ', $this->get_steps()) . "} left\n";
+			if ($this->debug) echo 'Currently in state ' . $this->state() . "\n";
+
+			$this->drop();
+		}
+
+		return false;
+	}
+
+	private function drop() {
+		$this->stack->pop_n(1);
+	}
+
+	/*
+	 * So that I don't get any brilliant misguided ideas:
+	 *
+	 * The "accept" step happens when we try to eat a start symbol.
+	 * That happens because the reductions up the stack at the end
+	 * finally (and symetrically) tell the parser to eat a symbol
+	 * representing what they've just shifted off the end of the stack
+	 * and reduced. However, that doesn't put the parser into any
+	 * special different state. Therefore, it's back at the start
+	 * state.
+	 *
+	 * That being said, the parser is ready to reduce an EOF to the
+	 * empty program, if given a grammar that allows them.
+	 *
+	 * So anyway, if you literally tell the parser to eat an EOF
+	 * symbol, then after it's done reducing and accepting the prior
+	 * program, it's going to think it has another symbol to deal with.
+	 * That is the EOF symbol, which means to reduce the empty program,
+	 * accept it, and then continue trying to eat the terminal EOF.
+	 *
+	 * This infinte loop quickly runs out of memory.
+	 *
+	 * That's why the real EOF algorithm doesn't try to pretend that
+	 * EOF is a terminal. Like the invented start symbol, it's special.
+	 *
+	 * Instead, we pretend to want to eat EOF, but never actually
+	 * try to get it into the parse stack. (It won't fit.) In short,
+	 * we look up what reduction is indicated at each step in the
+	 * process of rolling up the parse stack.
+	 *
+	 * The repetition is because one reduction is not guaranteed to
+	 * cascade into another and clean up the entire parse stack.
+	 * Rather, it will instead shift each partial production as it
+	 * is forced to completion by the EOF lookahead.
+	 */
+	public function eat_eof() {
+		// We must reduce as if having read the EOF symbol
+		do {
+			// and we have to try at least once, because if nothing
+			// has ever been shifted, then the stack will be empty
+			// at the start.
+			list($opcode, $operand) = $this->step_for('#');
+
+			switch ($opcode) {
+			case 'r':
+				$this->reduce($operand);
+				break;
+			case 'e':
+				$this->premature_eof();
+				break;
+			default:
+				throw new parse_bug();
+			}
+		} while ($this->stack->occupied());
+
+		// If the sentence is well-formed according to the grammar, then
+		// this will eventually result in eating a start symbol, which
+		// causes the "accept" instruction to fire. Otherwise, the
+		// step('#') method will indicate an error in the syntax, which
+		// here means a premature EOF.
+		//
+		// Incidentally, some tremendous amount of voodoo with the parse
+		// stack might help find the beginning of some unfinished
+		// production that the sentence was cut off during, but as a
+		// general rule that would require deeper knowledge.
+		if (!$this->accept) {
+			throw new parse_bug();
+		}
+
+		return $this->semantic;
+	}
+
+	private function premature_eof() {
+		$seen = array();
+
+		$expect = $this->get_steps();
+
+		while ($this->enter_error_tolerant_state() || $this->has_step_for('error')) {
+			if (isset($seen[$this->state()])) {
+				// This means that it's pointless to try here.
+				// We're guaranteed that the stack is occupied.
+				$this->drop();
+				continue;
+			}
+
+			$seen[$this->state()] = true;
+
+			$this->eat('error', 'Premature EOF');
+
+			if ($this->has_step_for('#')) {
+				// Good. We can continue as normal.
+				return;
+			} else {
+				// That attempt to resolve the error condition
+				// did not work. There's no point trying to
+				// figure out how much to slice off the stack.
+				// The rest of the algorithm will make it happen.
+			}
+		}
+
+		throw new parse_premature_eof($expect);
+	}
+
+	private function current_row() {
+		return $this->step[$this->state()];
+	}
+
+	private function step_for($type) {
+		$row = $this->current_row();
+		if (!isset($row[$type])) {
+			return array('e', $this->stack->q);
+		}
+
+		return explode(' ', $row[$type]);
+	}
+
+	private function get_steps() {
+		$out = array();
+		foreach($this->current_row() as $type => $row) {
+			foreach($this->rule as $rule) {
+				if ($rule['symbol'] == $type) {
+					continue 2;
+				}
+			}
+
+			list($opcode) = explode(' ', $row, 2);
+			if ($opcode != 'e') {
+				$out[] = $type;
+			}
+		}
+
+		return $out;
+	}
+
+	private function has_step_for($type) {
+		$row = $this->current_row();
+		return isset($row[$type]);
+	}
+
+	private function state() {
+		return $this->stack->q;
+	}
+
+	function eat($type, $semantic) {
+		// assert('$type == trim($type)');
+		if ($this->debug) echo "Trying to eat a ($type)\n";
+		list($opcode, $operand) = $this->step_for($type);
+
+		switch ($opcode) {
+		case 's':
+			if ($this->debug) echo "shift $type to state $operand\n";
+			$this->stack->shift($operand, $semantic);
+			// echo $this->stack->text()." shift $type<br/>\n";
+			break;
+		case 'r':
+			if ($this->debug) echo "Reducing $type via rule $operand\n";
+			$this->reduce($operand);
+			$this->eat($type, $semantic);
+			// Yes, this is tail-recursive. It's also the simplest way.
+			break;
+		case 'a':
+			if ($this->stack->occupied()) {
+				throw new parse_bug('Accept should happen with empty stack.');
+			}
+
+			$this->accept = true;
+			if ($this->debug) echo ("Accept\n\n");
+			$this->semantic = $semantic;
+			break;
+		case 'e':
+			// This is thought to be the uncommon, exceptional path, so
+			// it's OK that this algorithm will cause the stack to
+			// flutter while the parse engine waits for an edible token.
+			if ($this->debug) echo "($type) causes a problem.\n";
+
+			// get these before doing anything
+			$expected = $this->get_steps();
+
+			$this->parser->errors[] = $this->descr($type, $semantic) . ' not expected, expected {' . implode(', ', $expected) . '}';
+
+			if ($this->debug) echo "Possibilities before error fixing: {" . implode(', ', $expected) . "}\n";
+
+			if ($this->enter_error_tolerant_state() || $this->has_step_for('error')) {
+				$this->eat('error', end($this->parser->errors));
+				if ($this->has_step_for($type)) {
+					$this->eat($type, $semantic);
+				}
+			} else {
+				// If that didn't work, give up:
+				throw new parse_error('Parse Error: ' . $this->descr($type, $semantic) . ' not expected, expected {' . implode(', ', $expected) . '}');
+			}
+			break;
+		default:
+			throw new parse_bug("Bad parse table instruction " . htmlspecialchars($opcode));
+		}
+	}
+
+	private function descr($type, $semantic) {
+		if (isset($this->descr[$type])) {
+			return $this->descr[$type];
+		} else {
+			return $type . ' (' . $semantic . ')';
+		}
+	}
+
+	private function reduce($rule_id) {
+		$rule = $this->rule[$rule_id];
+		$len = $rule['len'];
+		$semantic = $this->perform_action($rule_id, $this->stack->top_n($len));
+
+		//echo $semantic.br();
+		if ($rule['replace']) {
+			$this->stack->pop_n($len);
+		} else {
+			$this->stack->index($len);
+		}
+
+		$this->eat($rule['symbol'], $semantic);
+	}
+
+	private function perform_action($rule_id, $slice) {
+		// we have this weird calling convention....
+		$result = null;
+		$method = $this->parser->method[$rule_id];
+
+		//if ($this->debug) echo "rule $id: $method\n";
+		$this->parser->$method($slice, $result);
+
+		return $result;
+	}
+}
+
+/*
+ *** DON'T EDIT THIS FILE! ***
+ *
+ * This file was automatically generated by the Lime parser generator.
+ * The real source code you should be looking at is in one or more
+ * grammar files in the Lime format.
+ *
+ * THE ONLY REASON TO LOOK AT THIS FILE is to see where in the grammar
+ * file that your error happened, because there are enough comments to
+ * help you debug your grammar.
+
+ * If you ignore this warning, you're shooting yourself in the brain,
+ * not the foot.
+ */
+class VMXTemplateParser extends lime_parser {
+  public $qi = 0;
+  public $i = array(
+    array(
+      'chunks' => 's 1',
+      'chunk' => 's 108',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151',
+      'template' => 's 173',
+      "'start'" => "a 'start'"
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151',
+      '#' => 'r 0'
+    ),
+    array(
+      'literal' => 'r 2',
+      '<!--' => 'r 2',
+      '{' => 'r 2',
+      '#' => 'r 2'
+    ),
+    array(
+      'literal' => 'r 3',
+      '<!--' => 'r 3',
+      '{' => 'r 3',
+      '#' => 'r 3'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 's 6'
+    ),
+    array(
+      'literal' => 'r 4',
+      '<!--' => 'r 4',
+      '{' => 'r 4',
+      '#' => 'r 4'
+    ),
+    array(
+      '-->' => 'r 7'
+    ),
+    array(
+      '-->' => 'r 8'
+    ),
+    array(
+      '-->' => 'r 9'
+    ),
+    array(
+      '-->' => 'r 10'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 11'
+    ),
+    array(
+      'exp' => 's 13',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 31',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 31',
+      ')' => 'r 31',
+      ']' => 'r 31',
+      '=>' => 'r 31',
+      ',' => 'r 31',
+      '}' => 'r 31'
+    ),
+    array(
+      'exp' => 's 15',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 32',
+      '||' => 'r 32',
+      'or' => 'r 32',
+      'xor' => 'r 32',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 32',
+      ')' => 'r 32',
+      ']' => 'r 32',
+      '=>' => 'r 32',
+      ',' => 'r 32',
+      '}' => 'r 32'
+    ),
+    array(
+      'exp' => 's 17',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 33',
+      '||' => 'r 33',
+      'or' => 'r 33',
+      'xor' => 'r 33',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 33',
+      ')' => 'r 33',
+      ']' => 'r 33',
+      '=>' => 'r 33',
+      ',' => 'r 33',
+      '}' => 'r 33'
+    ),
+    array(
+      'exp' => 's 19',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 34',
+      '||' => 'r 34',
+      'or' => 'r 34',
+      'xor' => 'r 34',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 34',
+      ')' => 'r 34',
+      ']' => 'r 34',
+      '=>' => 'r 34',
+      ',' => 'r 34',
+      '}' => 'r 34'
+    ),
+    array(
+      'exp' => 's 21',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 35',
+      '||' => 'r 35',
+      'or' => 'r 35',
+      'xor' => 'r 35',
+      '&&' => 'r 35',
+      'and' => 'r 35',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 35',
+      ')' => 'r 35',
+      ']' => 'r 35',
+      '=>' => 'r 35',
+      ',' => 'r 35',
+      '}' => 'r 35'
+    ),
+    array(
+      'exp' => 's 23',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 36',
+      '||' => 'r 36',
+      'or' => 'r 36',
+      'xor' => 'r 36',
+      '&&' => 'r 36',
+      'and' => 'r 36',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 36',
+      ')' => 'r 36',
+      ']' => 'r 36',
+      '=>' => 'r 36',
+      ',' => 'r 36',
+      '}' => 'r 36'
+    ),
+    array(
+      'exp' => 's 25',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 37',
+      '||' => 'r 37',
+      'or' => 'r 37',
+      'xor' => 'r 37',
+      '&&' => 'r 37',
+      'and' => 'r 37',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 37',
+      ')' => 'r 37',
+      ']' => 'r 37',
+      '=>' => 'r 37',
+      ',' => 'r 37',
+      '}' => 'r 37'
+    ),
+    array(
+      'exp' => 's 27',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 38',
+      '||' => 'r 38',
+      'or' => 'r 38',
+      'xor' => 'r 38',
+      '&&' => 'r 38',
+      'and' => 'r 38',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 38',
+      ')' => 'r 38',
+      ']' => 'r 38',
+      '=>' => 'r 38',
+      ',' => 'r 38',
+      '}' => 'r 38'
+    ),
+    array(
+      'exp' => 's 29',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 39',
+      '||' => 'r 39',
+      'or' => 'r 39',
+      'xor' => 'r 39',
+      '&&' => 'r 39',
+      'and' => 'r 39',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 39',
+      ')' => 'r 39',
+      ']' => 'r 39',
+      '=>' => 'r 39',
+      ',' => 'r 39',
+      '}' => 'r 39'
+    ),
+    array(
+      'exp' => 's 31',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 40',
+      '||' => 'r 40',
+      'or' => 'r 40',
+      'xor' => 'r 40',
+      '&&' => 'r 40',
+      'and' => 'r 40',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 40',
+      ')' => 'r 40',
+      ']' => 'r 40',
+      '=>' => 'r 40',
+      ',' => 'r 40',
+      '}' => 'r 40'
+    ),
+    array(
+      'exp' => 's 33',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 41',
+      '||' => 'r 41',
+      'or' => 'r 41',
+      'xor' => 'r 41',
+      '&&' => 'r 41',
+      'and' => 'r 41',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 41',
+      ')' => 'r 41',
+      ']' => 'r 41',
+      '=>' => 'r 41',
+      ',' => 'r 41',
+      '}' => 'r 41'
+    ),
+    array(
+      'exp' => 's 35',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 42',
+      '||' => 'r 42',
+      'or' => 'r 42',
+      'xor' => 'r 42',
+      '&&' => 'r 42',
+      'and' => 'r 42',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 42',
+      ')' => 'r 42',
+      ']' => 'r 42',
+      '=>' => 'r 42',
+      ',' => 'r 42',
+      '}' => 'r 42'
+    ),
+    array(
+      'exp' => 's 37',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 43',
+      '||' => 'r 43',
+      'or' => 'r 43',
+      'xor' => 'r 43',
+      '&&' => 'r 43',
+      'and' => 'r 43',
+      '==' => 'r 43',
+      '!=' => 'r 43',
+      '<' => 'r 43',
+      '>' => 'r 43',
+      '<=' => 'r 43',
+      '>=' => 'r 43',
+      '+' => 'r 43',
+      '-' => 'r 43',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 43',
+      ')' => 'r 43',
+      ']' => 'r 43',
+      '=>' => 'r 43',
+      ',' => 'r 43',
+      '}' => 'r 43'
+    ),
+    array(
+      'exp' => 's 39',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 44',
+      '||' => 'r 44',
+      'or' => 'r 44',
+      'xor' => 'r 44',
+      '&&' => 'r 44',
+      'and' => 'r 44',
+      '==' => 'r 44',
+      '!=' => 'r 44',
+      '<' => 'r 44',
+      '>' => 'r 44',
+      '<=' => 'r 44',
+      '>=' => 'r 44',
+      '+' => 'r 44',
+      '-' => 'r 44',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 44',
+      ')' => 'r 44',
+      ']' => 'r 44',
+      '=>' => 'r 44',
+      ',' => 'r 44',
+      '}' => 'r 44'
+    ),
+    array(
+      'exp' => 's 41',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 45',
+      '||' => 'r 45',
+      'or' => 'r 45',
+      'xor' => 'r 45',
+      '&&' => 'r 45',
+      'and' => 'r 45',
+      '==' => 'r 45',
+      '!=' => 'r 45',
+      '<' => 'r 45',
+      '>' => 'r 45',
+      '<=' => 'r 45',
+      '>=' => 'r 45',
+      '+' => 'r 45',
+      '-' => 'r 45',
+      '&' => 'r 45',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 45',
+      ')' => 'r 45',
+      ']' => 'r 45',
+      '=>' => 'r 45',
+      ',' => 'r 45',
+      '}' => 'r 45'
+    ),
+    array(
+      'exp' => 's 43',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 46',
+      '||' => 'r 46',
+      'or' => 'r 46',
+      'xor' => 'r 46',
+      '&&' => 'r 46',
+      'and' => 'r 46',
+      '==' => 'r 46',
+      '!=' => 'r 46',
+      '<' => 'r 46',
+      '>' => 'r 46',
+      '<=' => 'r 46',
+      '>=' => 'r 46',
+      '+' => 'r 46',
+      '-' => 'r 46',
+      '&' => 'r 46',
+      '*' => 'r 46',
+      '/' => 'r 46',
+      '%' => 'r 46',
+      '-->' => 'r 46',
+      ')' => 'r 46',
+      ']' => 'r 46',
+      '=>' => 'r 46',
+      ',' => 'r 46',
+      '}' => 'r 46'
+    ),
+    array(
+      'exp' => 's 45',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 47',
+      '||' => 'r 47',
+      'or' => 'r 47',
+      'xor' => 'r 47',
+      '&&' => 'r 47',
+      'and' => 'r 47',
+      '==' => 'r 47',
+      '!=' => 'r 47',
+      '<' => 'r 47',
+      '>' => 'r 47',
+      '<=' => 'r 47',
+      '>=' => 'r 47',
+      '+' => 'r 47',
+      '-' => 'r 47',
+      '&' => 'r 47',
+      '*' => 'r 47',
+      '/' => 'r 47',
+      '%' => 'r 47',
+      '-->' => 'r 47',
+      ')' => 'r 47',
+      ']' => 'r 47',
+      '=>' => 'r 47',
+      ',' => 'r 47',
+      '}' => 'r 47'
+    ),
+    array(
+      'exp' => 's 47',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 'r 48',
+      '||' => 'r 48',
+      'or' => 'r 48',
+      'xor' => 'r 48',
+      '&&' => 'r 48',
+      'and' => 'r 48',
+      '==' => 'r 48',
+      '!=' => 'r 48',
+      '<' => 'r 48',
+      '>' => 'r 48',
+      '<=' => 'r 48',
+      '>=' => 'r 48',
+      '+' => 'r 48',
+      '-' => 'r 48',
+      '&' => 'r 48',
+      '*' => 'r 48',
+      '/' => 'r 48',
+      '%' => 'r 48',
+      '-->' => 'r 48',
+      ')' => 'r 48',
+      ']' => 'r 48',
+      '=>' => 'r 48',
+      ',' => 'r 48',
+      '}' => 'r 48'
+    ),
+    array(
+      '%' => 'r 49',
+      '/' => 'r 49',
+      '*' => 'r 49',
+      '&' => 'r 49',
+      '-' => 'r 49',
+      '+' => 'r 49',
+      '>=' => 'r 49',
+      '<=' => 'r 49',
+      '>' => 'r 49',
+      '<' => 'r 49',
+      '!=' => 'r 49',
+      '==' => 'r 49',
+      'and' => 'r 49',
+      '&&' => 'r 49',
+      'xor' => 'r 49',
+      'or' => 'r 49',
+      '||' => 'r 49',
+      '..' => 'r 49',
+      '-->' => 'r 49',
+      ')' => 'r 49',
+      ']' => 'r 49',
+      '=>' => 'r 49',
+      ',' => 'r 49',
+      '}' => 'r 49'
+    ),
+    array(
+      '%' => 'r 50',
+      '/' => 'r 50',
+      '*' => 'r 50',
+      '&' => 'r 50',
+      '-' => 'r 50',
+      '+' => 'r 50',
+      '>=' => 'r 50',
+      '<=' => 'r 50',
+      '>' => 'r 50',
+      '<' => 'r 50',
+      '!=' => 'r 50',
+      '==' => 'r 50',
+      'and' => 'r 50',
+      '&&' => 'r 50',
+      'xor' => 'r 50',
+      'or' => 'r 50',
+      '||' => 'r 50',
+      '..' => 'r 50',
+      '-->' => 'r 50',
+      ')' => 'r 50',
+      ']' => 'r 50',
+      '=>' => 'r 50',
+      ',' => 'r 50',
+      '}' => 'r 50'
+    ),
+    array(
+      'p11' => 's 51',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '%' => 'r 51',
+      '/' => 'r 51',
+      '*' => 'r 51',
+      '&' => 'r 51',
+      '-' => 'r 51',
+      '+' => 'r 51',
+      '>=' => 'r 51',
+      '<=' => 'r 51',
+      '>' => 'r 51',
+      '<' => 'r 51',
+      '!=' => 'r 51',
+      '==' => 'r 51',
+      'and' => 'r 51',
+      '&&' => 'r 51',
+      'xor' => 'r 51',
+      'or' => 'r 51',
+      '||' => 'r 51',
+      '..' => 'r 51',
+      '-->' => 'r 51',
+      ')' => 'r 51',
+      ']' => 'r 51',
+      '=>' => 'r 51',
+      ',' => 'r 51',
+      '}' => 'r 51'
+    ),
+    array(
+      '%' => 'r 52',
+      '/' => 'r 52',
+      '*' => 'r 52',
+      '&' => 'r 52',
+      '-' => 'r 52',
+      '+' => 'r 52',
+      '>=' => 'r 52',
+      '<=' => 'r 52',
+      '>' => 'r 52',
+      '<' => 'r 52',
+      '!=' => 'r 52',
+      '==' => 'r 52',
+      'and' => 'r 52',
+      '&&' => 'r 52',
+      'xor' => 'r 52',
+      'or' => 'r 52',
+      '||' => 'r 52',
+      '..' => 'r 52',
+      '-->' => 'r 52',
+      ')' => 'r 52',
+      ']' => 'r 52',
+      '=>' => 'r 52',
+      ',' => 'r 52',
+      '}' => 'r 52'
+    ),
+    array(
+      'exp' => 's 54',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ')' => 's 55'
+    ),
+    array(
+      'varpath' => 's 56',
+      '.' => 'r 83',
+      '[' => 'r 83',
+      '%' => 'r 83',
+      '/' => 'r 83',
+      '*' => 'r 83',
+      '&' => 'r 83',
+      '-' => 'r 83',
+      '+' => 'r 83',
+      '>=' => 'r 83',
+      '<=' => 'r 83',
+      '>' => 'r 83',
+      '<' => 'r 83',
+      '!=' => 'r 83',
+      '==' => 'r 83',
+      'and' => 'r 83',
+      '&&' => 'r 83',
+      'xor' => 'r 83',
+      'or' => 'r 83',
+      '||' => 'r 83',
+      '..' => 'r 83',
+      '-->' => 'r 83',
+      ')' => 'r 83',
+      ']' => 'r 83',
+      '=>' => 'r 83',
+      ',' => 'r 83',
+      '}' => 'r 83'
+    ),
+    array(
+      '.' => 's 57',
+      '[' => 's 59',
+      'varpart' => 's 104',
+      '%' => 'r 53',
+      '/' => 'r 53',
+      '*' => 'r 53',
+      '&' => 'r 53',
+      '-' => 'r 53',
+      '+' => 'r 53',
+      '>=' => 'r 53',
+      '<=' => 'r 53',
+      '>' => 'r 53',
+      '<' => 'r 53',
+      '!=' => 'r 53',
+      '==' => 'r 53',
+      'and' => 'r 53',
+      '&&' => 'r 53',
+      'xor' => 'r 53',
+      'or' => 'r 53',
+      '||' => 'r 53',
+      '..' => 'r 53',
+      '-->' => 'r 53',
+      ')' => 'r 53',
+      ']' => 'r 53',
+      '=>' => 'r 53',
+      ',' => 'r 53',
+      '}' => 'r 53'
+    ),
+    array(
+      'name' => 's 58'
+    ),
+    array(
+      '-->' => 'r 81',
+      '.' => 'r 81',
+      '[' => 'r 81',
+      '=' => 'r 81',
+      '%' => 'r 81',
+      '/' => 'r 81',
+      '*' => 'r 81',
+      '&' => 'r 81',
+      '-' => 'r 81',
+      '+' => 'r 81',
+      '>=' => 'r 81',
+      '<=' => 'r 81',
+      '>' => 'r 81',
+      '<' => 'r 81',
+      '!=' => 'r 81',
+      '==' => 'r 81',
+      'and' => 'r 81',
+      '&&' => 'r 81',
+      'xor' => 'r 81',
+      'or' => 'r 81',
+      '||' => 'r 81',
+      '..' => 'r 81',
+      ')' => 'r 81',
+      ']' => 'r 81',
+      '=>' => 'r 81',
+      ',' => 'r 81',
+      '}' => 'r 81'
+    ),
+    array(
+      'exp' => 's 60',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ']' => 's 61'
+    ),
+    array(
+      '.' => 'r 82',
+      '[' => 'r 82',
+      '%' => 'r 82',
+      '/' => 'r 82',
+      '*' => 'r 82',
+      '&' => 'r 82',
+      '-' => 'r 82',
+      '+' => 'r 82',
+      '>=' => 'r 82',
+      '<=' => 'r 82',
+      '>' => 'r 82',
+      '<' => 'r 82',
+      '!=' => 'r 82',
+      '==' => 'r 82',
+      'and' => 'r 82',
+      '&&' => 'r 82',
+      'xor' => 'r 82',
+      'or' => 'r 82',
+      '||' => 'r 82',
+      '..' => 'r 82',
+      '-->' => 'r 82',
+      ')' => 'r 82',
+      ']' => 'r 82',
+      '=>' => 'r 82',
+      ',' => 'r 82',
+      '=' => 'r 82',
+      '}' => 'r 82'
+    ),
+    array(
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'p11' => 's 63',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '%' => 'r 54',
+      '/' => 'r 54',
+      '*' => 'r 54',
+      '&' => 'r 54',
+      '-' => 'r 54',
+      '+' => 'r 54',
+      '>=' => 'r 54',
+      '<=' => 'r 54',
+      '>' => 'r 54',
+      '<' => 'r 54',
+      '!=' => 'r 54',
+      '==' => 'r 54',
+      'and' => 'r 54',
+      '&&' => 'r 54',
+      'xor' => 'r 54',
+      'or' => 'r 54',
+      '||' => 'r 54',
+      '..' => 'r 54',
+      '-->' => 'r 54',
+      ')' => 'r 54',
+      ']' => 'r 54',
+      '=>' => 'r 54',
+      ',' => 'r 54',
+      '}' => 'r 54'
+    ),
+    array(
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      'p11' => 's 65',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '%' => 'r 55',
+      '/' => 'r 55',
+      '*' => 'r 55',
+      '&' => 'r 55',
+      '-' => 'r 55',
+      '+' => 'r 55',
+      '>=' => 'r 55',
+      '<=' => 'r 55',
+      '>' => 'r 55',
+      '<' => 'r 55',
+      '!=' => 'r 55',
+      '==' => 'r 55',
+      'and' => 'r 55',
+      '&&' => 'r 55',
+      'xor' => 'r 55',
+      'or' => 'r 55',
+      '||' => 'r 55',
+      '..' => 'r 55',
+      '-->' => 'r 55',
+      ')' => 'r 55',
+      ']' => 'r 55',
+      '=>' => 'r 55',
+      ',' => 'r 55',
+      '}' => 'r 55'
+    ),
+    array(
+      'exp' => 's 67',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'hash' => 's 98',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80',
+      'pair' => 's 100',
+      'gtpair' => 's 103',
+      '}' => 'r 73'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ',' => 's 68',
+      '=>' => 's 86'
+    ),
+    array(
+      'exp' => 's 69',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ',' => 'r 76',
+      '}' => 'r 76'
+    ),
+    array(
+      '%' => 'r 57',
+      '/' => 'r 57',
+      '*' => 'r 57',
+      '&' => 'r 57',
+      '-' => 'r 57',
+      '+' => 'r 57',
+      '>=' => 'r 57',
+      '<=' => 'r 57',
+      '>' => 'r 57',
+      '<' => 'r 57',
+      '!=' => 'r 57',
+      '==' => 'r 57',
+      'and' => 'r 57',
+      '&&' => 'r 57',
+      'xor' => 'r 57',
+      'or' => 'r 57',
+      '||' => 'r 57',
+      '..' => 'r 57',
+      '-->' => 'r 57',
+      ')' => 'r 57',
+      ']' => 'r 57',
+      '=>' => 'r 57',
+      ',' => 'r 57',
+      '}' => 'r 57'
+    ),
+    array(
+      '.' => 's 72',
+      'varpart' => 's 74',
+      '[' => 's 59',
+      '%' => 'r 58',
+      '/' => 'r 58',
+      '*' => 'r 58',
+      '&' => 'r 58',
+      '-' => 'r 58',
+      '+' => 'r 58',
+      '>=' => 'r 58',
+      '<=' => 'r 58',
+      '>' => 'r 58',
+      '<' => 'r 58',
+      '!=' => 'r 58',
+      '==' => 'r 58',
+      'and' => 'r 58',
+      '&&' => 'r 58',
+      'xor' => 'r 58',
+      'or' => 'r 58',
+      '||' => 'r 58',
+      '..' => 'r 58',
+      '-->' => 'r 58',
+      ')' => 'r 58',
+      ']' => 'r 58',
+      '=>' => 'r 58',
+      ',' => 'r 58',
+      '}' => 'r 58'
+    ),
+    array(
+      'name' => 's 73'
+    ),
+    array(
+      '(' => 'r 65',
+      '.' => 'r 81',
+      '[' => 'r 81',
+      '%' => 'r 81',
+      '/' => 'r 81',
+      '*' => 'r 81',
+      '&' => 'r 81',
+      '-' => 'r 81',
+      '+' => 'r 81',
+      '>=' => 'r 81',
+      '<=' => 'r 81',
+      '>' => 'r 81',
+      '<' => 'r 81',
+      '!=' => 'r 81',
+      '==' => 'r 81',
+      'and' => 'r 81',
+      '&&' => 'r 81',
+      'xor' => 'r 81',
+      'or' => 'r 81',
+      '||' => 'r 81',
+      '..' => 'r 81',
+      '-->' => 'r 81',
+      ')' => 'r 81',
+      ']' => 'r 81',
+      '=>' => 'r 81',
+      ',' => 'r 81',
+      '}' => 'r 81'
+    ),
+    array(
+      '.' => 'r 80',
+      '[' => 'r 80',
+      '%' => 'r 80',
+      '/' => 'r 80',
+      '*' => 'r 80',
+      '&' => 'r 80',
+      '-' => 'r 80',
+      '+' => 'r 80',
+      '>=' => 'r 80',
+      '<=' => 'r 80',
+      '>' => 'r 80',
+      '<' => 'r 80',
+      '!=' => 'r 80',
+      '==' => 'r 80',
+      'and' => 'r 80',
+      '&&' => 'r 80',
+      'xor' => 'r 80',
+      'or' => 'r 80',
+      '||' => 'r 80',
+      '..' => 'r 80',
+      '-->' => 'r 80',
+      ')' => 'r 80',
+      ']' => 'r 80',
+      '=>' => 'r 80',
+      ',' => 'r 80',
+      '=' => 'r 80',
+      '}' => 'r 80'
+    ),
+    array(
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      '(' => 's 76',
+      'nonbrace' => 's 97',
+      'method' => 's 80',
+      '.' => 'r 79',
+      '[' => 'r 79',
+      '%' => 'r 79',
+      '/' => 'r 79',
+      '*' => 'r 79',
+      '&' => 'r 79',
+      '-' => 'r 79',
+      '+' => 'r 79',
+      '>=' => 'r 79',
+      '<=' => 'r 79',
+      '>' => 'r 79',
+      '<' => 'r 79',
+      '!=' => 'r 79',
+      '==' => 'r 79',
+      'and' => 'r 79',
+      '&&' => 'r 79',
+      'xor' => 'r 79',
+      'or' => 'r 79',
+      '||' => 'r 79',
+      '..' => 'r 79',
+      '-->' => 'r 79',
+      ')' => 'r 79',
+      ']' => 'r 79',
+      '=>' => 'r 79',
+      ',' => 'r 79',
+      '}' => 'r 79'
+    ),
+    array(
+      'exp' => 's 77',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      ')' => 's 88',
+      'list' => 's 89',
+      'gthash' => 's 91',
+      'method' => 's 80',
+      'gtpair' => 's 93'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ',' => 's 78',
+      '=>' => 's 86',
+      ')' => 'r 66'
+    ),
+    array(
+      'exp' => 's 79',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80',
+      'list' => 's 85'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ',' => 's 78',
+      ')' => 'r 66'
+    ),
+    array(
+      '(' => 's 81'
+    ),
+    array(
+      'exp' => 's 79',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80',
+      ')' => 's 82',
+      'list' => 's 83'
+    ),
+    array(
+      '%' => 'r 63',
+      '/' => 'r 63',
+      '*' => 'r 63',
+      '&' => 'r 63',
+      '-' => 'r 63',
+      '+' => 'r 63',
+      '>=' => 'r 63',
+      '<=' => 'r 63',
+      '>' => 'r 63',
+      '<' => 'r 63',
+      '!=' => 'r 63',
+      '==' => 'r 63',
+      'and' => 'r 63',
+      '&&' => 'r 63',
+      'xor' => 'r 63',
+      'or' => 'r 63',
+      '||' => 'r 63',
+      '..' => 'r 63',
+      '-->' => 'r 63',
+      ')' => 'r 63',
+      ']' => 'r 63',
+      '=>' => 'r 63',
+      ',' => 'r 63',
+      '}' => 'r 63'
+    ),
+    array(
+      ')' => 's 84'
+    ),
+    array(
+      '%' => 'r 64',
+      '/' => 'r 64',
+      '*' => 'r 64',
+      '&' => 'r 64',
+      '-' => 'r 64',
+      '+' => 'r 64',
+      '>=' => 'r 64',
+      '<=' => 'r 64',
+      '>' => 'r 64',
+      '<' => 'r 64',
+      '!=' => 'r 64',
+      '==' => 'r 64',
+      'and' => 'r 64',
+      '&&' => 'r 64',
+      'xor' => 'r 64',
+      'or' => 'r 64',
+      '||' => 'r 64',
+      '..' => 'r 64',
+      '-->' => 'r 64',
+      ')' => 'r 64',
+      ']' => 'r 64',
+      '=>' => 'r 64',
+      ',' => 'r 64',
+      '}' => 'r 64'
+    ),
+    array(
+      ')' => 'r 67'
+    ),
+    array(
+      'exp' => 's 87',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      ',' => 'r 78',
+      '}' => 'r 78',
+      ')' => 'r 78'
+    ),
+    array(
+      '%' => 'r 59',
+      '/' => 'r 59',
+      '*' => 'r 59',
+      '&' => 'r 59',
+      '-' => 'r 59',
+      '+' => 'r 59',
+      '>=' => 'r 59',
+      '<=' => 'r 59',
+      '>' => 'r 59',
+      '<' => 'r 59',
+      '!=' => 'r 59',
+      '==' => 'r 59',
+      'and' => 'r 59',
+      '&&' => 'r 59',
+      'xor' => 'r 59',
+      'or' => 'r 59',
+      '||' => 'r 59',
+      '..' => 'r 59',
+      '-->' => 'r 59',
+      ')' => 'r 59',
+      ']' => 'r 59',
+      '=>' => 'r 59',
+      ',' => 'r 59',
+      '}' => 'r 59'
+    ),
+    array(
+      ')' => 's 90'
+    ),
+    array(
+      '%' => 'r 60',
+      '/' => 'r 60',
+      '*' => 'r 60',
+      '&' => 'r 60',
+      '-' => 'r 60',
+      '+' => 'r 60',
+      '>=' => 'r 60',
+      '<=' => 'r 60',
+      '>' => 'r 60',
+      '<' => 'r 60',
+      '!=' => 'r 60',
+      '==' => 'r 60',
+      'and' => 'r 60',
+      '&&' => 'r 60',
+      'xor' => 'r 60',
+      'or' => 'r 60',
+      '||' => 'r 60',
+      '..' => 'r 60',
+      '-->' => 'r 60',
+      ')' => 'r 60',
+      ']' => 'r 60',
+      '=>' => 'r 60',
+      ',' => 'r 60',
+      '}' => 'r 60'
+    ),
+    array(
+      ')' => 's 92'
+    ),
+    array(
+      '%' => 'r 61',
+      '/' => 'r 61',
+      '*' => 'r 61',
+      '&' => 'r 61',
+      '-' => 'r 61',
+      '+' => 'r 61',
+      '>=' => 'r 61',
+      '<=' => 'r 61',
+      '>' => 'r 61',
+      '<' => 'r 61',
+      '!=' => 'r 61',
+      '==' => 'r 61',
+      'and' => 'r 61',
+      '&&' => 'r 61',
+      'xor' => 'r 61',
+      'or' => 'r 61',
+      '||' => 'r 61',
+      '..' => 'r 61',
+      '-->' => 'r 61',
+      ')' => 'r 61',
+      ']' => 'r 61',
+      '=>' => 'r 61',
+      ',' => 'r 61',
+      '}' => 'r 61'
+    ),
+    array(
+      ',' => 's 94',
+      ')' => 'r 74'
+    ),
+    array(
+      'exp' => 's 95',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80',
+      'gtpair' => 's 93',
+      'gthash' => 's 96'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '=>' => 's 86'
+    ),
+    array(
+      ')' => 'r 75'
+    ),
+    array(
+      '%' => 'r 62',
+      '/' => 'r 62',
+      '*' => 'r 62',
+      '&' => 'r 62',
+      '-' => 'r 62',
+      '+' => 'r 62',
+      '>=' => 'r 62',
+      '<=' => 'r 62',
+      '>' => 'r 62',
+      '<' => 'r 62',
+      '!=' => 'r 62',
+      '==' => 'r 62',
+      'and' => 'r 62',
+      '&&' => 'r 62',
+      'xor' => 'r 62',
+      'or' => 'r 62',
+      '||' => 'r 62',
+      '..' => 'r 62',
+      '-->' => 'r 62',
+      ')' => 'r 62',
+      ']' => 'r 62',
+      '=>' => 'r 62',
+      ',' => 'r 62',
+      '}' => 'r 62'
+    ),
+    array(
+      '}' => 's 99'
+    ),
+    array(
+      '%' => 'r 56',
+      '/' => 'r 56',
+      '*' => 'r 56',
+      '&' => 'r 56',
+      '-' => 'r 56',
+      '+' => 'r 56',
+      '>=' => 'r 56',
+      '<=' => 'r 56',
+      '>' => 'r 56',
+      '<' => 'r 56',
+      '!=' => 'r 56',
+      '==' => 'r 56',
+      'and' => 'r 56',
+      '&&' => 'r 56',
+      'xor' => 'r 56',
+      'or' => 'r 56',
+      '||' => 'r 56',
+      '..' => 'r 56',
+      '-->' => 'r 56',
+      ')' => 'r 56',
+      ']' => 'r 56',
+      '=>' => 'r 56',
+      ',' => 'r 56',
+      '}' => 'r 56'
+    ),
+    array(
+      ',' => 's 101',
+      '}' => 'r 71'
+    ),
+    array(
+      'exp' => 's 67',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80',
+      'pair' => 's 100',
+      'hash' => 's 102',
+      'gtpair' => 's 103',
+      '}' => 'r 73'
+    ),
+    array(
+      '}' => 'r 72'
+    ),
+    array(
+      ',' => 'r 77',
+      '}' => 'r 77'
+    ),
+    array(
+      '.' => 'r 84',
+      '[' => 'r 84',
+      '%' => 'r 84',
+      '/' => 'r 84',
+      '*' => 'r 84',
+      '&' => 'r 84',
+      '-' => 'r 84',
+      '+' => 'r 84',
+      '>=' => 'r 84',
+      '<=' => 'r 84',
+      '>' => 'r 84',
+      '<' => 'r 84',
+      '!=' => 'r 84',
+      '==' => 'r 84',
+      'and' => 'r 84',
+      '&&' => 'r 84',
+      'xor' => 'r 84',
+      'or' => 'r 84',
+      '||' => 'r 84',
+      '..' => 'r 84',
+      '-->' => 'r 84',
+      ')' => 'r 84',
+      ']' => 'r 84',
+      '=>' => 'r 84',
+      ',' => 'r 84',
+      '}' => 'r 84'
+    ),
+    array(
+      'exp' => 's 106',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 's 107',
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 109',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{' => 'r 1',
+      '#' => 'r 1'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 110',
+      '{' => 's 148',
+      'error' => 's 151',
+      'c_elseifs' => 's 161'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'end' => 's 111',
+      'else' => 's 112',
+      'elseif' => 's 157',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'elsif' => 's 160',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 12'
+    ),
+    array(
+      '-->' => 's 113',
+      'if' => 's 156'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 114',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 115',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'end' => 's 116',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 13'
+    ),
+    array(
+      'varref' => 's 118',
+      'name' => 's 152'
+    ),
+    array(
+      '=' => 's 119',
+      '-->' => 's 121',
+      'varpart' => 's 74',
+      '.' => 's 57',
+      '[' => 's 59'
+    ),
+    array(
+      'exp' => 's 120',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 18'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 122',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 123',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'set' => 's 117',
+      'end' => 's 124',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 19'
+    ),
+    array(
+      'name' => 's 126'
+    ),
+    array(
+      '(' => 's 127'
+    ),
+    array(
+      'arglist' => 's 128',
+      'name' => 's 153',
+      ')' => 'r 70'
+    ),
+    array(
+      ')' => 's 129'
+    ),
+    array(
+      '=' => 's 130',
+      '-->' => 's 132'
+    ),
+    array(
+      'exp' => 's 131',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46',
+      '-->' => 'r 20'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 133',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 134',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'end' => 's 135',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 21'
+    ),
+    array(
+      'varref' => 's 137',
+      'name' => 's 152'
+    ),
+    array(
+      '=' => 's 138',
+      'varpart' => 's 74',
+      '.' => 's 57',
+      '[' => 's 59'
+    ),
+    array(
+      'exp' => 's 139',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 's 140',
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 141',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 142',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'end' => 's 143',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 22'
+    ),
+    array(
+      'name' => 'r 23'
+    ),
+    array(
+      'name' => 'r 24'
+    ),
+    array(
+      'name' => 'r 25'
+    ),
+    array(
+      'name' => 'r 27'
+    ),
+    array(
+      'exp' => 's 149',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '}' => 's 150',
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46'
+    ),
+    array(
+      'literal' => 'r 5',
+      '<!--' => 'r 5',
+      '{' => 'r 5',
+      '#' => 'r 5'
+    ),
+    array(
+      'literal' => 'r 6',
+      '<!--' => 'r 6',
+      '{' => 'r 6',
+      '#' => 'r 6'
+    ),
+    array(
+      '.' => 'r 79',
+      '[' => 'r 79',
+      '-->' => 'r 79',
+      '=' => 'r 79'
+    ),
+    array(
+      ',' => 's 154',
+      ')' => 'r 68'
+    ),
+    array(
+      'name' => 's 153',
+      'arglist' => 's 155',
+      ')' => 'r 70'
+    ),
+    array(
+      ')' => 'r 69'
+    ),
+    array(
+      '-' => 'r 28',
+      '(' => 'r 28',
+      '!' => 'r 28',
+      'not' => 'r 28',
+      '{' => 'r 28',
+      'literal' => 'r 28',
+      'name' => 'r 28'
+    ),
+    array(
+      'exp' => 's 158',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 's 159',
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46'
+    ),
+    array(
+      'literal' => 'r 16',
+      '<!--' => 'r 16',
+      '{' => 'r 16'
+    ),
+    array(
+      '-' => 'r 29',
+      '(' => 'r 29',
+      '!' => 'r 29',
+      'not' => 'r 29',
+      '{' => 'r 29',
+      'literal' => 'r 29',
+      'name' => 'r 29'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 162',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 163',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'end' => 's 164',
+      'else' => 's 165',
+      'elseif' => 's 170',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'elsif' => 's 160',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 14'
+    ),
+    array(
+      '-->' => 's 166',
+      'if' => 's 156'
+    ),
+    array(
+      'chunk' => 's 108',
+      'chunks' => 's 167',
+      'literal' => 's 3',
+      '<!--' => 's 4',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'chunk' => 's 2',
+      'literal' => 's 3',
+      '<!--' => 's 168',
+      '{' => 's 148',
+      'error' => 's 151'
+    ),
+    array(
+      'code_chunk' => 's 5',
+      'c_if' => 's 7',
+      'c_set' => 's 8',
+      'c_fn' => 's 9',
+      'c_for' => 's 10',
+      'exp' => 's 11',
+      'if' => 's 105',
+      'end' => 's 169',
+      'set' => 's 117',
+      'fn' => 's 125',
+      'for' => 's 136',
+      'function' => 's 144',
+      'block' => 's 145',
+      'macro' => 's 146',
+      'foreach' => 's 147',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 'r 15'
+    ),
+    array(
+      'exp' => 's 171',
+      'p10' => 's 48',
+      'p11' => 's 49',
+      '-' => 's 50',
+      'nonbrace' => 's 52',
+      '(' => 's 53',
+      '!' => 's 62',
+      'not' => 's 64',
+      '{' => 's 66',
+      'literal' => 's 70',
+      'varref' => 's 71',
+      'name' => 's 75',
+      'method' => 's 80'
+    ),
+    array(
+      '-->' => 's 172',
+      '..' => 's 12',
+      '||' => 's 14',
+      'or' => 's 16',
+      'xor' => 's 18',
+      '&&' => 's 20',
+      'and' => 's 22',
+      '==' => 's 24',
+      '!=' => 's 26',
+      '<' => 's 28',
+      '>' => 's 30',
+      '<=' => 's 32',
+      '>=' => 's 34',
+      '+' => 's 36',
+      '-' => 's 38',
+      '&' => 's 40',
+      '*' => 's 42',
+      '/' => 's 44',
+      '%' => 's 46'
+    ),
+    array(
+      'literal' => 'r 17',
+      '<!--' => 'r 17',
+      '{' => 'r 17'
+    ),
+    array(
+      '#' => 'r 85'
+    )
+  );
+  public $d = array(
+    '..' => "concatenation operator '..'",
+    '||' => "OR operator '||'",
+    'or' => "OR operator 'OR'",
+    'xor' => "XOR operator 'XOR'",
+    'and' => "AND operator 'AND'",
+    '&&' => "AND operator '&&'",
+    '&' => "bitwise AND operator '&'",
+    '==' => "equality operator '=='",
+    '!=' => "non-equality operator '!='",
+    '<' => "less than operator '<'",
+    '>' => "greater than operator '>'",
+    '<=' => "less or equal operator '<='",
+    '>=' => "greater or equal operator '>='",
+    '+' => "plus operator '+'",
+    '-' => "minus operator '-'",
+    '*' => "multiply operator '*'",
+    '/' => "divide operator '/'",
+    '%' => "mod operator '%'",
+    '(' => "left round brace '('",
+    ')' => "right round brace '('",
+    '!' => "NOT operator '!'",
+    'not' => "NOT operator 'NOT'",
+    '{' => "left curly brace '{'",
+    '}' => "right curly brace '}'",
+    ',' => "comma ','",
+    '=>' => "hash item operator '=>'",
+    '[' => "left square brace '['",
+    ']' => "right square brace ']'",
+    '<!--' => "directive begin '<!--'",
+    '-->' => "directive end '-->'"
+  );
+  public $errors = array();
+  function reduce_0_template_1($tokens, &$result) {
+    // (0) template :=  chunks
+    $result = reset($tokens);
+
+    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$tokens[0]."\nreturn \$t;\n}\n";
+    $result = '';
+  }
+
+  function reduce_1_chunks_1($tokens, &$result) {
+    // (1) chunks :=  chunk
+    $result = reset($tokens);
+
+    $result = $tokens[0];
+  }
+
+  function reduce_2_chunks_2($tokens, &$result) {
+    // (2) chunks :=  chunks  chunk
+    $result = reset($tokens);
+
+    $result = $tokens[0] . $tokens[1];
+  }
+
+  function reduce_3_chunk_1($tokens, &$result) {
+    // (3) chunk :=  literal
+    $result = reset($tokens);
+
+    $result = '$t .= ' . $tokens[0] . ";\n";
+  }
+
+  function reduce_4_chunk_2($tokens, &$result) {
+    // (4) chunk :=  <!--  code_chunk  -->
+    $result = reset($tokens);
+    $c = &$tokens[1];
+
+    $result = $c;
+  }
+
+  function reduce_5_chunk_3($tokens, &$result) {
+    // (5) chunk :=  {  exp  }
+    $result = reset($tokens);
+    $e = &$tokens[1];
+
+    $result = '$t .= ' . $e . ";\n";
+  }
+
+  function reduce_6_chunk_4($tokens, &$result) {
+    // (6) chunk :=  error
+    $result = reset($tokens);
+    $e = &$tokens[0];
+
+    $this->template->lexer->skip_error($e);
+    $result = '';
+  }
+
+  function reduce_7_code_chunk_1($tokens, &$result) {
+    // (7) code_chunk :=  c_if
+    $result = $tokens[0];
+  }
+
+  function reduce_8_code_chunk_2($tokens, &$result) {
+    // (8) code_chunk :=  c_set
+    $result = $tokens[0];
+  }
+
+  function reduce_9_code_chunk_3($tokens, &$result) {
+    // (9) code_chunk :=  c_fn
+    $result = $tokens[0];
+  }
+
+  function reduce_10_code_chunk_4($tokens, &$result) {
+    // (10) code_chunk :=  c_for
+    $result = $tokens[0];
+  }
+
+  function reduce_11_code_chunk_5($tokens, &$result) {
+    // (11) code_chunk :=  exp
+    $result = reset($tokens);
+
+    $result = '$t .= ' . $tokens[0] . ";\n";
+  }
+
+  function reduce_12_c_if_1($tokens, &$result) {
+    // (12) c_if :=  if  exp  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $e = &$tokens[1];
+    $if = &$tokens[3];
+
+    $result = "if (" . $e . ") {\n" . $if . "}\n";
+  }
+
+  function reduce_13_c_if_2($tokens, &$result) {
+    // (13) c_if :=  if  exp  -->  chunks  <!--  else  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $e = &$tokens[1];
+    $if = &$tokens[3];
+    $else = &$tokens[7];
+
+    $result = "if (" . $e . ") {\n" . $if . "} else {\n" . $else . "}\n";
+  }
+
+  function reduce_14_c_if_3($tokens, &$result) {
+    // (14) c_if :=  if  exp  -->  chunks  c_elseifs  chunks  <!--  end
+    $result = reset($tokens);
+    $e = &$tokens[1];
+    $if = &$tokens[3];
+    $ei = &$tokens[4];
+    $ec = &$tokens[5];
+
+    $result = "if (" . $e . ") {\n" . $if . $ei . $ec . "}\n";
+  }
+
+  function reduce_15_c_if_4($tokens, &$result) {
+    // (15) c_if :=  if  exp  -->  chunks  c_elseifs  chunks  <!--  else  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $e = &$tokens[1];
+    $if = &$tokens[3];
+    $ei = &$tokens[4];
+    $ec = &$tokens[5];
+    $else = &$tokens[9];
+
+    $result = "if (" . $e . ") {\n" . $if . $ei . $ec . "} else {\n" . $else . "}\n";
+  }
+
+  function reduce_16_c_elseifs_1($tokens, &$result) {
+    // (16) c_elseifs :=  <!--  elseif  exp  -->
+    $result = reset($tokens);
+    $e = &$tokens[2];
+
+    $result = "} elseif (" . $e . ") {\n";
+  }
+
+  function reduce_17_c_elseifs_2($tokens, &$result) {
+    // (17) c_elseifs :=  c_elseifs  chunks  <!--  elseif  exp  -->
+    $result = reset($tokens);
+    $p = &$tokens[0];
+    $cs = &$tokens[1];
+    $e = &$tokens[4];
+
+    $result = $p . $cs . "} elseif (" . $e . ") {\n";
+  }
+
+  function reduce_18_c_set_1($tokens, &$result) {
+    // (18) c_set :=  set  varref  =  exp
+    $result = reset($tokens);
+    $v = &$tokens[1];
+    $e = &$tokens[3];
+
+    $result = $v . ' = ' . $e . ";\n";
+  }
+
+  function reduce_19_c_set_2($tokens, &$result) {
+    // (19) c_set :=  set  varref  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $v = &$tokens[1];
+    $cs = &$tokens[3];
+
+    $result = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
+  }
+
+  function reduce_20_c_fn_1($tokens, &$result) {
+    // (20) c_fn :=  fn  name  (  arglist  )  =  exp
+    $result = reset($tokens);
+    $name = &$tokens[1];
+    $args = &$tokens[3];
+    $exp = &$tokens[6];
+
+    $this->template->st->functions[$name] = array(
+      'name' => $name,
+      'args' => $args,
+      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
+      //'line' => $line, Ой, я чо - аргументы не юзаю?
+      //'pos' => $pos,
+    );
+    $result = '';
+  }
+
+  function reduce_21_c_fn_2($tokens, &$result) {
+    // (21) c_fn :=  fn  name  (  arglist  )  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $name = &$tokens[1];
+    $args = &$tokens[3];
+    $cs = &$tokens[6];
+
+    $this->template->st->functions[$name] = array(
+      'name' => $name,
+      'args' => $args,
+      'body' => 'function fn_'.$name." () {\$stack = array();\n\$t = '';\n".$cs."\nreturn \$t;\n}\n",
+      //'line' => $line,
+      //'pos' => $pos,
+    );
+    $result = '';
+  }
+
+  function reduce_22_c_for_1($tokens, &$result) {
+    // (22) c_for :=  for  varref  =  exp  -->  chunks  <!--  end
+    $result = reset($tokens);
+    $varref = &$tokens[1];
+    $exp = &$tokens[3];
+    $cs = &$tokens[5];
+
+        $varref_index = substr($varref, 0, -1) . ".'_index']";
+        $result = "\$stack[] = ".$varref.";
+    \$stack[] = ".$varref_index.";
+    \$stack[] = 0;
+    foreach (self::array1($exp) as \$item) {
+    ".$varref." = \$item;
+    ".$varref_index." = \$stack[count(\$stack)-1]++;
+    ".$cs."}
+    array_pop(\$stack);
+    ".$varref_index." = array_pop(\$stack);
+    ".$varref." = array_pop(\$stack);
+    ";
+  }
+
+  function reduce_23_fn_1($tokens, &$result) {
+    // (23) fn :=  function
+    $result = reset($tokens);
+  }
+
+  function reduce_24_fn_2($tokens, &$result) {
+    // (24) fn :=  block
+    $result = reset($tokens);
+  }
+
+  function reduce_25_fn_3($tokens, &$result) {
+    // (25) fn :=  macro
+    $result = reset($tokens);
+  }
+
+  function reduce_26_for_1($tokens, &$result) {
+    // (26) for :=  for
+    $result = reset($tokens);
+  }
+
+  function reduce_27_for_2($tokens, &$result) {
+    // (27) for :=  foreach
+    $result = reset($tokens);
+  }
+
+  function reduce_28_elseif_1($tokens, &$result) {
+    // (28) elseif :=  else  if
+    $result = reset($tokens);
+  }
+
+  function reduce_29_elseif_2($tokens, &$result) {
+    // (29) elseif :=  elsif
+    $result = reset($tokens);
+  }
+
+  function reduce_30_elseif_3($tokens, &$result) {
+    // (30) elseif :=  elseif
+    $result = reset($tokens);
+  }
+
+  function reduce_31_exp_1($tokens, &$result) {
+    // (31) exp :=  exp  ..  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' . ' . $b . ')';
+  }
+
+  function reduce_32_exp_2($tokens, &$result) {
+    // (32) exp :=  exp  ||  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = 'self::perlish_or(' . $a . ', ' . $b . ')';
+  }
+
+  function reduce_33_exp_3($tokens, &$result) {
+    // (33) exp :=  exp  or  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = 'self::perlish_or(' . $a . ', ' . $b . ')';
+  }
+
+  function reduce_34_exp_4($tokens, &$result) {
+    // (34) exp :=  exp  xor  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' XOR ' . $b . ')';
+  }
+
+  function reduce_35_exp_5($tokens, &$result) {
+    // (35) exp :=  exp  &&  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' && ' . $b . ')';
+  }
+
+  function reduce_36_exp_6($tokens, &$result) {
+    // (36) exp :=  exp  and  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' && ' . $b . ')';
+  }
+
+  function reduce_37_exp_7($tokens, &$result) {
+    // (37) exp :=  exp  ==  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' == ' . $b . ')';
+  }
+
+  function reduce_38_exp_8($tokens, &$result) {
+    // (38) exp :=  exp  !=  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' != ' . $b . ')';
+  }
+
+  function reduce_39_exp_9($tokens, &$result) {
+    // (39) exp :=  exp  <  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' < ' . $b . ')';
+  }
+
+  function reduce_40_exp_10($tokens, &$result) {
+    // (40) exp :=  exp  >  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' > ' . $b . ')';
+  }
+
+  function reduce_41_exp_11($tokens, &$result) {
+    // (41) exp :=  exp  <=  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' <= ' . $b . ')';
+  }
+
+  function reduce_42_exp_12($tokens, &$result) {
+    // (42) exp :=  exp  >=  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' >= ' . $b . ')';
+  }
+
+  function reduce_43_exp_13($tokens, &$result) {
+    // (43) exp :=  exp  +  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' + ' . $b . ')';
+  }
+
+  function reduce_44_exp_14($tokens, &$result) {
+    // (44) exp :=  exp  -  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' - ' . $b . ')';
+  }
+
+  function reduce_45_exp_15($tokens, &$result) {
+    // (45) exp :=  exp  &  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' & ' . $b . ')';
+  }
+
+  function reduce_46_exp_16($tokens, &$result) {
+    // (46) exp :=  exp  *  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' * ' . $b . ')';
+  }
+
+  function reduce_47_exp_17($tokens, &$result) {
+    // (47) exp :=  exp  /  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' / ' . $b . ')';
+  }
+
+  function reduce_48_exp_18($tokens, &$result) {
+    // (48) exp :=  exp  %  exp
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $b = &$tokens[2];
+
+    $result = '(' . $a . ' % ' . $b . ')';
+  }
+
+  function reduce_49_exp_19($tokens, &$result) {
+    // (49) exp :=  p10
+    $result = $tokens[0];
+  }
+
+  function reduce_50_p10_1($tokens, &$result) {
+    // (50) p10 :=  p11
+    $result = $tokens[0];
+  }
+
+  function reduce_51_p10_2($tokens, &$result) {
+    // (51) p10 :=  -  p11
+    $result = reset($tokens);
+    $a = &$tokens[1];
+
+    $result = '(-'.$a.')';
+  }
+
+  function reduce_52_p11_1($tokens, &$result) {
+    // (52) p11 :=  nonbrace
+    $result = reset($tokens);
+  }
+
+  function reduce_53_p11_2($tokens, &$result) {
+    // (53) p11 :=  (  exp  )  varpath
+    $result = reset($tokens);
+    $e = &$tokens[1];
+    $p = &$tokens[3];
+
+    $result = '('.$e.')'.$p;
+  }
+
+  function reduce_54_p11_3($tokens, &$result) {
+    // (54) p11 :=  !  p11
+    $result = reset($tokens);
+    $a = &$tokens[1];
+
+    $result = '(!'.$a.')';
+  }
+
+  function reduce_55_p11_4($tokens, &$result) {
+    // (55) p11 :=  not  p11
+    $result = reset($tokens);
+    $a = &$tokens[1];
+
+    $result = '(!'.$a.')';
+  }
+
+  function reduce_56_nonbrace_1($tokens, &$result) {
+    // (56) nonbrace :=  {  hash  }
+    $result = reset($tokens);
+    $h = &$tokens[1];
+
+    $result = 'array(' . $h . ')';
+  }
+
+  function reduce_57_nonbrace_2($tokens, &$result) {
+    // (57) nonbrace :=  literal
+    $result = $tokens[0];
+  }
+
+  function reduce_58_nonbrace_3($tokens, &$result) {
+    // (58) nonbrace :=  varref
+    $result = $tokens[0];
+  }
+
+  function reduce_59_nonbrace_4($tokens, &$result) {
+    // (59) nonbrace :=  name  (  )
+    $result = reset($tokens);
+    $f = &$tokens[0];
+
+    $result = $this->template->compile_function($f, []);
+  }
+
+  function reduce_60_nonbrace_5($tokens, &$result) {
+    // (60) nonbrace :=  name  (  list  )
+    $result = reset($tokens);
+    $f = &$tokens[0];
+    $args = &$tokens[2];
+
+    $result = $this->template->compile_function($f, $args);
+  }
+
+  function reduce_61_nonbrace_6($tokens, &$result) {
+    // (61) nonbrace :=  name  (  gthash  )
+    $result = reset($tokens);
+    $f = &$tokens[0];
+    $args = &$tokens[2];
+
+    $result = "\$this->parent->call_block('".addcslashes($f, "'\\")."', array(".$args."), '".addcslashes($this->template->lexer->errorinfo(), "'\\")."')";
+  }
+
+  function reduce_62_nonbrace_7($tokens, &$result) {
+    // (62) nonbrace :=  name  nonbrace
+    $result = reset($tokens);
+    $f = &$tokens[0];
+    $arg = &$tokens[1];
+
+    $result = $this->template->compile_function($f, [ $arg ]);
+  }
+
+  function reduce_63_nonbrace_8($tokens, &$result) {
+    // (63) nonbrace :=  method  (  )
+    $result = reset($tokens);
+    $f = &$tokens[0];
+
+    $result = $f.'()';
+  }
+
+  function reduce_64_nonbrace_9($tokens, &$result) {
+    // (64) nonbrace :=  method  (  list  )
+    $result = reset($tokens);
+    $f = &$tokens[0];
+    $args = &$tokens[2];
+
+    $result = $f.'('.implode(', ', $args).')';
+  }
+
+  function reduce_65_method_1($tokens, &$result) {
+    // (65) method :=  varref  .  name
+    $result = reset($tokens);
+    $v = &$tokens[0];
+    $m = &$tokens[2];
+
+    $result = $v.'->'.$m;
+  }
+
+  function reduce_66_list_1($tokens, &$result) {
+    // (66) list :=  exp
+    $result = reset($tokens);
+    $e = &$tokens[0];
+
+    $result = [ $e ];
+  }
+
+  function reduce_67_list_2($tokens, &$result) {
+    // (67) list :=  exp  ,  list
+    $result = reset($tokens);
+    $e = &$tokens[0];
+    $l = &$tokens[2];
+
+    $result = $l;
+    array_unshift($result, $e);
+  }
+
+  function reduce_68_arglist_1($tokens, &$result) {
+    // (68) arglist :=  name
+    $result = reset($tokens);
+    $n = &$tokens[0];
+
+    $result = [ $n ];
+  }
+
+  function reduce_69_arglist_2($tokens, &$result) {
+    // (69) arglist :=  name  ,  arglist
+    $result = reset($tokens);
+    $n = &$tokens[0];
+    $args = &$tokens[2];
+
+    $result = $args;
+    array_unshift($result, $n);
+  }
+
+  function reduce_70_arglist_3($tokens, &$result) {
+    // (70) arglist :=  ε
+    $result = reset($tokens);
+
+    $result = [];
+  }
+
+  function reduce_71_hash_1($tokens, &$result) {
+    // (71) hash :=  pair
+    $result = $tokens[0];
+  }
+
+  function reduce_72_hash_2($tokens, &$result) {
+    // (72) hash :=  pair  ,  hash
+    $result = reset($tokens);
+    $p = &$tokens[0];
+    $h = &$tokens[2];
+
+    $result = $p . ', ' . $h;
+  }
+
+  function reduce_73_hash_3($tokens, &$result) {
+    // (73) hash :=  ε
+    $result = reset($tokens);
+
+    $result = '';
+  }
+
+  function reduce_74_gthash_1($tokens, &$result) {
+    // (74) gthash :=  gtpair
+    $result = reset($tokens);
+    $p = &$tokens[0];
+
+    $result = $p;
+  }
+
+  function reduce_75_gthash_2($tokens, &$result) {
+    // (75) gthash :=  gtpair  ,  gthash
+    $result = reset($tokens);
+    $p = &$tokens[0];
+    $h = &$tokens[2];
+
+    $result = $p . ', ' . $h;
+  }
+
+  function reduce_76_pair_1($tokens, &$result) {
+    // (76) pair :=  exp  ,  exp
+    $result = reset($tokens);
+    $k = &$tokens[0];
+    $v = &$tokens[2];
+
+    $result = $k . ' => ' . $v;
+  }
+
+  function reduce_77_pair_2($tokens, &$result) {
+    // (77) pair :=  gtpair
+    $result = $tokens[0];
+  }
+
+  function reduce_78_gtpair_1($tokens, &$result) {
+    // (78) gtpair :=  exp  =>  exp
+    $result = reset($tokens);
+    $k = &$tokens[0];
+    $v = &$tokens[2];
+
+    $result = $k . ' => ' . $v;
+  }
+
+  function reduce_79_varref_1($tokens, &$result) {
+    // (79) varref :=  name
+    $result = reset($tokens);
+    $n = &$tokens[0];
+
+    $result = "\$this->tpldata['".addcslashes($n, "\\\'")."']";
+  }
+
+  function reduce_80_varref_2($tokens, &$result) {
+    // (80) varref :=  varref  varpart
+    $result = reset($tokens);
+    $v = &$tokens[0];
+    $p = &$tokens[1];
+
+    $result = $v . $p;
+  }
+
+  function reduce_81_varpart_1($tokens, &$result) {
+    // (81) varpart :=  .  name
+    $result = reset($tokens);
+    $n = &$tokens[1];
+
+    $result = "['".addcslashes($n, "\\\'")."']";
+  }
+
+  function reduce_82_varpart_2($tokens, &$result) {
+    // (82) varpart :=  [  exp  ]
+    $result = reset($tokens);
+    $e = &$tokens[1];
+
+    $result = '['.$e.']';
+  }
+
+  function reduce_83_varpath_1($tokens, &$result) {
+    // (83) varpath :=  ε
+    $result = reset($tokens);
+
+    $result = '';
+  }
+
+  function reduce_84_varpath_2($tokens, &$result) {
+    // (84) varpath :=  varpath  varpart
+    $result = reset($tokens);
+    $a = &$tokens[0];
+    $p = &$tokens[1];
+
+    $result = $a . $p;
+  }
+
+  function reduce_85_start_1($tokens, &$result) {
+    // (85) 'start' :=  template
+    $result = reset($tokens);
+  }
+
+  public $method = array(
+    'reduce_0_template_1',
+    'reduce_1_chunks_1',
+    'reduce_2_chunks_2',
+    'reduce_3_chunk_1',
+    'reduce_4_chunk_2',
+    'reduce_5_chunk_3',
+    'reduce_6_chunk_4',
+    'reduce_7_code_chunk_1',
+    'reduce_8_code_chunk_2',
+    'reduce_9_code_chunk_3',
+    'reduce_10_code_chunk_4',
+    'reduce_11_code_chunk_5',
+    'reduce_12_c_if_1',
+    'reduce_13_c_if_2',
+    'reduce_14_c_if_3',
+    'reduce_15_c_if_4',
+    'reduce_16_c_elseifs_1',
+    'reduce_17_c_elseifs_2',
+    'reduce_18_c_set_1',
+    'reduce_19_c_set_2',
+    'reduce_20_c_fn_1',
+    'reduce_21_c_fn_2',
+    'reduce_22_c_for_1',
+    'reduce_23_fn_1',
+    'reduce_24_fn_2',
+    'reduce_25_fn_3',
+    'reduce_26_for_1',
+    'reduce_27_for_2',
+    'reduce_28_elseif_1',
+    'reduce_29_elseif_2',
+    'reduce_30_elseif_3',
+    'reduce_31_exp_1',
+    'reduce_32_exp_2',
+    'reduce_33_exp_3',
+    'reduce_34_exp_4',
+    'reduce_35_exp_5',
+    'reduce_36_exp_6',
+    'reduce_37_exp_7',
+    'reduce_38_exp_8',
+    'reduce_39_exp_9',
+    'reduce_40_exp_10',
+    'reduce_41_exp_11',
+    'reduce_42_exp_12',
+    'reduce_43_exp_13',
+    'reduce_44_exp_14',
+    'reduce_45_exp_15',
+    'reduce_46_exp_16',
+    'reduce_47_exp_17',
+    'reduce_48_exp_18',
+    'reduce_49_exp_19',
+    'reduce_50_p10_1',
+    'reduce_51_p10_2',
+    'reduce_52_p11_1',
+    'reduce_53_p11_2',
+    'reduce_54_p11_3',
+    'reduce_55_p11_4',
+    'reduce_56_nonbrace_1',
+    'reduce_57_nonbrace_2',
+    'reduce_58_nonbrace_3',
+    'reduce_59_nonbrace_4',
+    'reduce_60_nonbrace_5',
+    'reduce_61_nonbrace_6',
+    'reduce_62_nonbrace_7',
+    'reduce_63_nonbrace_8',
+    'reduce_64_nonbrace_9',
+    'reduce_65_method_1',
+    'reduce_66_list_1',
+    'reduce_67_list_2',
+    'reduce_68_arglist_1',
+    'reduce_69_arglist_2',
+    'reduce_70_arglist_3',
+    'reduce_71_hash_1',
+    'reduce_72_hash_2',
+    'reduce_73_hash_3',
+    'reduce_74_gthash_1',
+    'reduce_75_gthash_2',
+    'reduce_76_pair_1',
+    'reduce_77_pair_2',
+    'reduce_78_gtpair_1',
+    'reduce_79_varref_1',
+    'reduce_80_varref_2',
+    'reduce_81_varpart_1',
+    'reduce_82_varpart_2',
+    'reduce_83_varpath_1',
+    'reduce_84_varpath_2',
+    'reduce_85_start_1'
+  );
+  public $a = array(
+    array(
+      'symbol' => 'template',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunks',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunks',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunk',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunk',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'code_chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'code_chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'code_chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'code_chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'code_chunk',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_if',
+      'len' => 6,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_if',
+      'len' => 10,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_if',
+      'len' => 8,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_if',
+      'len' => 12,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_elseifs',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_elseifs',
+      'len' => 6,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_set',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_set',
+      'len' => 6,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_fn',
+      'len' => 7,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_fn',
+      'len' => 9,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'c_for',
+      'len' => 8,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'fn',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'fn',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'fn',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'for',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'for',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'elseif',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'elseif',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'elseif',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'exp',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p10',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p10',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p11',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p11',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p11',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'p11',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'nonbrace',
+      'len' => 4,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'method',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'list',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'list',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'arglist',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'arglist',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'arglist',
+      'len' => 0,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'hash',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'hash',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'hash',
+      'len' => 0,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'gthash',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'gthash',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'pair',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'pair',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'gtpair',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varref',
+      'len' => 1,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varref',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varpart',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varpart',
+      'len' => 3,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varpath',
+      'len' => 0,
+      'replace' => true
+    ),
+    array(
+      'symbol' => 'varpath',
+      'len' => 2,
+      'replace' => true
+    ),
+    array(
+      'symbol' => "'start'",
+      'len' => 1,
+      'replace' => true
+    )
+  );
+}
+
+// Time: 3,68658304214 seconds
+// Memory: 11308464 bytes
