@@ -1,18 +1,50 @@
-// Контекстно-свободная грамматика шаблонизатора
-
-// Подразумевается, что лексический анализатор зависим от работы синтаксического,
-// знает о его состоянии и соответственно выдаёт либо лексемы "внутри" блоков кода,
-// либо литералы "вне" оных
-
-// Олдстайл BEGIN .. END ликвидирован
-
-// TODO foreach ... as key => value
+# Контекстно-свободная LIME-грамматика шаблонизатора
+#
+# ЗАМЕЧАНИЯ:
+# (!) Для разбора нужен патченый LIME, в котором лексема 'lit' подменена на 'str'.
+#     Это нужно, чтобы можно было юзать строковые лексемы типа '<!--'.
+# (*) Подразумевается, что лексический анализатор зависим от работы синтаксического,
+#     знает о его состоянии и соответственно выдаёт либо лексемы "внутри" блоков кода,
+#     либо литералы "вне" оных
+# (*) Олдстайл BEGIN .. END ликвидирован
+# (*) Возможно, нужно добавить в каком-то виде foreach ... as key => value
 
 %class VMXTemplateParser
 %start chunks
 
 %token literal
 %token name
+
+%token ".."     "concatenation operator (..)"
+%token "||"     "OR operator (||)"
+%token "or"     "OR operator (OR)"
+%token "xor"    "XOR operator (XOR)"
+%token "and"    "AND operator (AND)"
+%token "&&"     "AND operator (&&)"
+%token "&"      "bitwise AND operator (&)"
+%token "=="     "equality operator (==)"
+%token "!="     "non-equality operator (!=)"
+%token "<"      "less than operator (<)"
+%token ">"      "greater than operator (>)"
+%token "<="     "less or equal operator (<=)"
+%token ">="     "greater or equal operator (>=)"
+%token "+"      "plus operator (+)"
+%token "-"      "minus operator (-)"
+%token "*"      "multiply operator (*)"
+%token "/"      "divide operator (/)"
+%token "%"      "mod operator (%)"
+%token "("      "left round brace"
+%token ")"      "right round brace"
+%token "!"      "NOT operator (!)"
+%token "not"    "NOT operator (NOT)"
+%token "{"      "left curly brace"
+%token "}"      "right curly brace"
+%token ","      "comma"
+%token "=>"     "hash item operator (=>)"
+%token "["      "left square brace"
+%token "]"      "right square brace"
+%token "<!--"   "directive begin"
+%token "-->"    "directive end"
 
 %left ".."
 %left "||" "OR" "XOR"
@@ -22,7 +54,7 @@
 %left "&"
 %left "*" "/" "%"
 
-// Директивы
+# Директивы
 
 chunks = {
     $$ = '';
@@ -31,10 +63,7 @@ chunks = {
     $$ = $cs . $c;
   }
 .
-chunk = error/e {
-    
-  }
-| literal/l {
+chunk = literal/l {
     $$ = '$t .= ' . $l . ";\n";
   }
 | "<!--" code_chunk/c "-->" {
@@ -43,8 +72,11 @@ chunk = error/e {
 | "{" exp/e "}" {
     $$ = '$t .= ' . $e . ";\n";
   }
+| error {
+    $$ = $this->lexer->skip_error();
+  }
 .
-code_chunk = c_if | c_set | c_fn | c_for | exp
+code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp/$ .
 c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
     $$ = "if (" . $e . ") {\n" . $if . "}\n";
   }
@@ -76,21 +108,17 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     $this->functions[$name] = array(
       'name' => $name,
       'args' => $args,
-      'body' => 'function fn_'.$name." () {\n\$stack = array();\n\$t = '';\n",
-      //'line' => $line,
+      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
+      //'line' => $line, Ой, я чо - аргументы не юзаю?
       //'pos' => $pos,
     );
     $$ = '';
-            $code .= "function fn_".$f['name']." () {\n";
-            $code .= "\$stack = array();\n\$t = '';\n";
-            $code .= $f['body'];
-            $code .= "return \$t;\n}\n";
   }
 | fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
     $this->functions[$name] = array(
       'name' => $name,
       'args' => $args,
-      'body' => ,
+      'body' => 'function fn_'.$name." () {\$stack = array();\n\$t = '';\n".$cs."\nreturn \$t;\n}\n",
       //'line' => $line,
       //'pos' => $pos,
     );
@@ -112,11 +140,11 @@ array_pop(\$stack);
 ";
   }
 .
-fn = "FUNCTION" | "BLOCK" | "MACRO"
-for = "FOR" | "FOREACH"
-elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF"
+fn = "FUNCTION" | "BLOCK" | "MACRO" .
+for = "FOR" | "FOREACH" .
+elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF" .
 
-// Выражения
+# Выражения
 
 exp: exp/a ".." exp/b {
     $$ = '(' . $a . ' . ' . $b . ')';
@@ -172,9 +200,10 @@ exp: exp/a ".." exp/b {
 | exp/a "%" exp/b {
     $$ = '(' . $a . ' % ' . $b . ')';
   }
-| p10
+| p10/$
 .
-p10: p11 | '-' p11/a {
+p10: p11/$
+| '-' p11/a {
     $$ = '(-'.$a.')';
   }
 .
@@ -192,8 +221,8 @@ p11: nonbrace
 nonbrace: '{' hash/h '}' {
     $$ = 'array(' . $h . ')';
   }
-| literal
-| varref
+| literal/$
+| varref/$
 | name/f '(' ')' {
     $$ = $this->compile_function($f, []);
   }
@@ -225,19 +254,18 @@ list: exp/e {
     array_unshift($$, $e);
   }
 .
-arglist: name {
-    
+arglist: name/n {
+    $$ = [ $n ];
   }
-| name ',' arglist {
-    
+| name/n ',' arglist/args {
+    $$ = $args;
+    array_unshift($$, $n);
   }
 | {
-    
+    $$ = [];
   }
 .
-hash: pair/p {
-    $$ = $p;
-  }
+hash: pair/$
 | pair/p ',' hash/h {
     $$ = $p . ', ' . $h;
   }
@@ -255,9 +283,7 @@ gthash: gtpair/p {
 pair: exp/k ',' exp/v {
     $$ = $k . ' => ' . $v;
   }
-| gtpair/e {
-    $$ = $e;
-  }
+| gtpair/$
 .
 gtpair: exp/k "=>" exp/v {
     $$ = $k . ' => ' . $v;

@@ -5,8 +5,7 @@
 // либо литералы "вне" оных
 
 // Олдстайл BEGIN .. END ликвидирован
-
-// TODO foreach ... as key => value
+// Возможно, нужно сделать foreach ... as key => value
 
 %token literal
 %token name
