@@ -1,11 +1,15 @@
 # Контекстно-свободная LIME-грамматика шаблонизатора
 #
-# ЗАМЕЧАНИЯ:
-# (!) Для разбора нужен патченый LIME, в котором лексема 'lit' подменена на 'str'.
+# Для корректной работы нужен патченый LIME со следующими изменениями:
+# (*) Подменой лексемы 'lit' на 'str' в метаграмматике.
 #     Это нужно, чтобы можно было юзать строковые лексемы типа '<!--'.
-# (*) Подразумевается, что лексический анализатор зависим от работы синтаксического,
-#     знает о его состоянии и соответственно выдаёт либо лексемы "внутри" блоков кода,
-#     либо литералы "вне" оных
+# (*) Для корректной обработки ошибок нужно, чтобы метод eat() возвращал
+#     false при ошибке и true при успехе. Т.к. подразумевается, что лексический
+#     анализатор зависим от работы синтаксического, знает о его состоянии и
+#     соответственно выдаёт либо лексемы "внутри" блоков кода, либо литералы
+#     "вне" оных.
+#
+# Кстати:
 # (*) Олдстайл BEGIN .. END ликвидирован
 # (*) Возможно, нужно добавить в каком-то виде foreach ... as key => value
 
@@ -19,9 +23,9 @@
 
 %token ".."     "concatenation operator '..'"
 %token "||"     "OR operator '||'"
-%token "or"     "OR operator 'OR'"
-%token "xor"    "XOR operator 'XOR'"
-%token "and"    "AND operator 'AND'"
+%token "OR"     "OR operator 'OR'"
+%token "XOR"    "XOR operator 'XOR'"
+%token "AND"    "AND operator 'AND'"
 %token "&&"     "AND operator '&&'"
 %token "&"      "bitwise AND operator '&'"
 %token "=="     "equality operator '=='"
@@ -38,7 +42,7 @@
 %token "("      "left round brace '('"
 %token ")"      "right round brace '('"
 %token "!"      "NOT operator '!'"
-%token "not"    "NOT operator 'NOT'"
+%token "NOT"    "NOT operator 'NOT'"
 %token "{"      "left curly brace '{'"
 %token "}"      "right curly brace '}'"
 %token ","      "comma ','"
@@ -49,8 +53,8 @@
 %token "-->"    "directive end '-->'"
 
 %left ".."
-%left "||" "or" "xor"
-%left "&&" "and"
+%left "||" "OR" "XOR"
+%left "&&" "AND"
 %nonassoc "==" "!=" "<" ">" "<=" ">="
 %left "+" "-"
 %left "&"
@@ -80,7 +84,6 @@ chunk = literal {
     $$ = '$t .= ' . $e . ";\n";
   }
 | error/e {
-    $this->template->lexer->skip_error($e);
     $$ = '';
   }
 .
@@ -88,16 +91,16 @@ code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp {
     $$ = '$t .= ' . $1 . ";\n";
   }
 .
-c_if = "if" exp/e "-->" chunks/if "<!--" "end" {
+c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
     $$ = "if (" . $e . ") {\n" . $if . "}\n";
   }
-| "if" exp/e "-->" chunks/if "<!--" "else" "-->" chunks/else "<!--" "end" {
+| "IF" exp/e "-->" chunks/if "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
     $$ = "if (" . $e . ") {\n" . $if . "} else {\n" . $else . "}\n";
   }
-| "if" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "end" {
+| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "END" {
     $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "}\n";
   }
-| "if" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "else" "-->" chunks/else "<!--" "end" {
+| "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
     $$ = "if (" . $e . ") {\n" . $if . $ei . $ec . "} else {\n" . $else . "}\n";
   }
 .
@@ -108,10 +111,10 @@ c_elseifs = "<!--" elseif exp/e "-->" {
     $$ = $p . $cs . "} elseif (" . $e . ") {\n";
   }
 .
-c_set = "set" varref/v "=" exp/e {
+c_set = "SET" varref/v "=" exp/e {
     $$ = $v . ' = ' . $e . ";\n";
   }
-| "set" varref/v "-->" chunks/cs "<!--" "end" {
+| "SET" varref/v "-->" chunks/cs "<!--" "END" {
     $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
   }
 .
@@ -125,7 +128,7 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     );
     $$ = '';
   }
-| fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "end" {
+| fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
     $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
@@ -136,7 +139,7 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     $$ = '';
   }
 .
-c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "end" {
+c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "END" {
     $varref_index = substr($varref, 0, -1) . ".'_index']";
     $$ = "\$stack[] = ".$varref.";
 \$stack[] = ".$varref_index.";
@@ -151,9 +154,9 @@ array_pop(\$stack);
 ";
   }
 .
-fn = "function" | "block" | "macro" .
-for = "for" | "foreach" .
-elseif = "else" "if" | "elsif" | "elseif" .
+fn = "FUNCTION" | "BLOCK" | "MACRO" .
+for = "FOR" | "FOREACH" .
+elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF" .
 
 # Выражения
 
@@ -163,16 +166,16 @@ exp: exp/a ".." exp/b {
 | exp/a "||" exp/b {
     $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
   }
-| exp/a "or" exp/b {
+| exp/a "OR" exp/b {
     $$ = 'self::perlish_or(' . $a . ', ' . $b . ')';
   }
-| exp/a "xor" exp/b {
+| exp/a "XOR" exp/b {
     $$ = '(' . $a . ' XOR ' . $b . ')';
   }
 | exp/a "&&" exp/b {
     $$ = '(' . $a . ' && ' . $b . ')';
   }
-| exp/a "and" exp/b {
+| exp/a "AND" exp/b {
     $$ = '(' . $a . ' && ' . $b . ')';
   }
 | exp/a "==" exp/b {
@@ -225,7 +228,7 @@ p11: nonbrace
 | '!' p11/a {
     $$ = '(!'.$a.')';
   }
-| "not" p11/a {
+| "NOT" p11/a {
     $$ = '(!'.$a.')';
   }
 .

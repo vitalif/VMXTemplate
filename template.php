@@ -373,7 +373,7 @@ class VMXTemplate
     {
         $md5 = md5($code);
         $file = $this->options->cache_dir . 'tpl' . $md5 . '.php';
-        if (file_exists($file) && !$reload)
+        if (0 && file_exists($file) && !$reload)
         {
             return $file;
         }
@@ -1294,7 +1294,7 @@ class VMXTemplateLexer
     static $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] & .. || && == != <= >= =>';
 
     // Reserved keywords
-    static $keywords_str = 'or xor and not if else elsif elseif end set for foreach function block macro';
+    static $keywords_str = 'OR XOR AND NOT IF ELSE ELSIF ELSEIF END SET FOR FOREACH FUNCTION BLOCK MACRO';
 
     var $nchar, $lens, $keywords;
 
@@ -1327,7 +1327,11 @@ class VMXTemplateLexer
             $parser->reset();
             while ($t = $this->read_token())
             {
-                $parser->eat($t[0], $t[1]);
+                $success = $parser->eat($t[0], $t[1]);
+                if (!$success)
+                {
+                    $this->skip_error(end($parser->parser->errors));
+                }
             }
             $parser->eat_eof();
         }
@@ -1342,18 +1346,6 @@ class VMXTemplateLexer
         $this->code = $code;
         $this->codelen = strlen($this->code);
         $this->pos = $this->lineno = 0;
-    }
-
-    /**
-     * Get current token position
-     */
-    function tokpos($num = 0)
-    {
-        if (!$this->tok($num))
-        {
-            return false;
-        }
-        return array($this->tokpos[$this->ptr+$num], $this->tokline[$this->ptr+$num]);
     }
 
     function errorinfo()
@@ -1372,14 +1364,14 @@ class VMXTemplateLexer
     }
 
     /**
-     * Skip whole current directive
+     * Skip a directive
      */
     function skip_error($e)
     {
-        if (substr($e, 0, 21) !== 'error () not expected')
+        if (substr($e, 0, 18) !== 'error not expected')
         {
             $this->warn($e);
-            if ($this->in_code > 0 || $this->in_subst > 0)
+            if ($this->in_code || $this->in_subst)
             {
                 $this->in_code = $this->in_subst = 0;
                 $this->pos = $this->last_start;
@@ -1465,7 +1457,7 @@ class VMXTemplateLexer
         if (preg_match('#[a-z_][a-z0-9_]*#Ais', $this->code, $m, 0, $this->pos))
         {
             $this->pos += strlen($m[0]);
-            if (isset($this->keywords[$l = strtolower($m[0])]))
+            if (isset($this->keywords[$l = strtoupper($m[0])]))
             {
                 // Keyword
                 return array($l, false);
@@ -1782,11 +1774,13 @@ class parse_engine {
 
 	private function step_for($type) {
 		$row = $this->current_row();
-		if (!isset($row[$type])) {
-			return array('e', $this->stack->q);
+		if (isset($row[$type])) {
+			return explode(' ', $row[$type]);
 		}
-
-		return explode(' ', $row[$type]);
+		if (isset($row[''])) {
+			return explode(' ', $row['']);
+		}
+		return array('e', $this->stack->q);
 	}
 
 	private function get_steps() {
@@ -1800,7 +1794,7 @@ class parse_engine {
 
 			list($opcode) = explode(' ', $row, 2);
 			if ($opcode != 'e') {
-				$out[] = $type;
+				$out[] = $type === '' ? '$default' : $type;
 			}
 		}
 
@@ -1851,7 +1845,7 @@ class parse_engine {
 			// get these before doing anything
 			$expected = $this->get_steps();
 
-			$this->parser->errors[] = $this->descr($type, $semantic) . ' not expected, expected {' . implode(', ', $expected) . '}';
+			$this->parser->errors[] = $this->descr($type, $semantic) . ' not expected, expected one of ' . implode(', ', $expected);
 
 			if ($this->debug) echo "Possibilities before error fixing: {" . implode(', ', $expected) . "}\n";
 
@@ -1860,21 +1854,25 @@ class parse_engine {
 				if ($this->has_step_for($type)) {
 					$this->eat($type, $semantic);
 				}
+				return false;
 			} else {
 				// If that didn't work, give up:
-				throw new parse_error('Parse Error: ' . $this->descr($type, $semantic) . ' not expected, expected {' . implode(', ', $expected) . '}');
+				throw new parse_error('Parse Error: ' . $this->descr($type, $semantic) . ' not expected, expected one of ' . implode(', ', $expected));
 			}
 			break;
 		default:
 			throw new parse_bug("Bad parse table instruction " . htmlspecialchars($opcode));
 		}
+		return true;
 	}
 
 	private function descr($type, $semantic) {
 		if (isset($this->descr[$type])) {
 			return $this->descr[$type];
-		} else {
+		} elseif ("$semantic" !== "") {
 			return $type . ' (' . $semantic . ')';
+		} else {
+			return $type;
 		}
 	}
 
@@ -1927,30 +1925,24 @@ class VMXTemplateParser extends lime_parser {
       'chunk' => 's 108',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151',
-      'template' => 's 173',
+      '{' => 's 149',
+      'error' => 's 152',
+      'template' => 's 175',
       "'start'" => "a 'start'"
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151',
+      '{' => 's 149',
+      'error' => 's 152',
       '#' => 'r 0'
     ),
     array(
-      'literal' => 'r 2',
-      '<!--' => 'r 2',
-      '{' => 'r 2',
-      '#' => 'r 2'
+      '' => 'r 2'
     ),
     array(
-      'literal' => 'r 3',
-      '<!--' => 'r 3',
-      '{' => 'r 3',
-      '#' => 'r 3'
+      '' => 'r 3'
     ),
     array(
       'code_chunk' => 's 5',
@@ -1959,21 +1951,22 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -1984,30 +1977,27 @@ class VMXTemplateParser extends lime_parser {
       '-->' => 's 6'
     ),
     array(
-      'literal' => 'r 4',
-      '<!--' => 'r 4',
-      '{' => 'r 4',
-      '#' => 'r 4'
+      '' => 'r 4'
     ),
     array(
-      '-->' => 'r 7'
+      '' => 'r 7'
     ),
     array(
-      '-->' => 'r 8'
+      '' => 'r 8'
     ),
     array(
-      '-->' => 'r 9'
+      '' => 'r 9'
     ),
     array(
-      '-->' => 'r 10'
+      '' => 'r 10'
     ),
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2030,7 +2020,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2040,10 +2030,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 31',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2071,7 +2061,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2081,10 +2071,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 32',
       '||' => 'r 32',
-      'or' => 'r 32',
-      'xor' => 'r 32',
+      'OR' => 'r 32',
+      'XOR' => 'r 32',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2112,7 +2102,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2122,10 +2112,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 33',
       '||' => 'r 33',
-      'or' => 'r 33',
-      'xor' => 'r 33',
+      'OR' => 'r 33',
+      'XOR' => 'r 33',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2153,7 +2143,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2163,10 +2153,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 34',
       '||' => 'r 34',
-      'or' => 'r 34',
-      'xor' => 'r 34',
+      'OR' => 'r 34',
+      'XOR' => 'r 34',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2194,7 +2184,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2204,10 +2194,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 35',
       '||' => 'r 35',
-      'or' => 'r 35',
-      'xor' => 'r 35',
+      'OR' => 'r 35',
+      'XOR' => 'r 35',
       '&&' => 'r 35',
-      'and' => 'r 35',
+      'AND' => 'r 35',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2235,7 +2225,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2245,10 +2235,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 36',
       '||' => 'r 36',
-      'or' => 'r 36',
-      'xor' => 'r 36',
+      'OR' => 'r 36',
+      'XOR' => 'r 36',
       '&&' => 'r 36',
-      'and' => 'r 36',
+      'AND' => 'r 36',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2276,7 +2266,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2286,10 +2276,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 37',
       '||' => 'r 37',
-      'or' => 'r 37',
-      'xor' => 'r 37',
+      'OR' => 'r 37',
+      'XOR' => 'r 37',
       '&&' => 'r 37',
-      'and' => 'r 37',
+      'AND' => 'r 37',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2311,7 +2301,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2321,10 +2311,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 38',
       '||' => 'r 38',
-      'or' => 'r 38',
-      'xor' => 'r 38',
+      'OR' => 'r 38',
+      'XOR' => 'r 38',
       '&&' => 'r 38',
-      'and' => 'r 38',
+      'AND' => 'r 38',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2346,7 +2336,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2356,10 +2346,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 39',
       '||' => 'r 39',
-      'or' => 'r 39',
-      'xor' => 'r 39',
+      'OR' => 'r 39',
+      'XOR' => 'r 39',
       '&&' => 'r 39',
-      'and' => 'r 39',
+      'AND' => 'r 39',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2381,7 +2371,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2391,10 +2381,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 40',
       '||' => 'r 40',
-      'or' => 'r 40',
-      'xor' => 'r 40',
+      'OR' => 'r 40',
+      'XOR' => 'r 40',
       '&&' => 'r 40',
-      'and' => 'r 40',
+      'AND' => 'r 40',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2416,7 +2406,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2426,10 +2416,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 41',
       '||' => 'r 41',
-      'or' => 'r 41',
-      'xor' => 'r 41',
+      'OR' => 'r 41',
+      'XOR' => 'r 41',
       '&&' => 'r 41',
-      'and' => 'r 41',
+      'AND' => 'r 41',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2451,7 +2441,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2461,10 +2451,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 42',
       '||' => 'r 42',
-      'or' => 'r 42',
-      'xor' => 'r 42',
+      'OR' => 'r 42',
+      'XOR' => 'r 42',
       '&&' => 'r 42',
-      'and' => 'r 42',
+      'AND' => 'r 42',
       '+' => 's 36',
       '-' => 's 38',
       '&' => 's 40',
@@ -2486,7 +2476,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2496,10 +2486,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 43',
       '||' => 'r 43',
-      'or' => 'r 43',
-      'xor' => 'r 43',
+      'OR' => 'r 43',
+      'XOR' => 'r 43',
       '&&' => 'r 43',
-      'and' => 'r 43',
+      'AND' => 'r 43',
       '==' => 'r 43',
       '!=' => 'r 43',
       '<' => 'r 43',
@@ -2527,7 +2517,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2537,10 +2527,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 44',
       '||' => 'r 44',
-      'or' => 'r 44',
-      'xor' => 'r 44',
+      'OR' => 'r 44',
+      'XOR' => 'r 44',
       '&&' => 'r 44',
-      'and' => 'r 44',
+      'AND' => 'r 44',
       '==' => 'r 44',
       '!=' => 'r 44',
       '<' => 'r 44',
@@ -2568,7 +2558,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2578,10 +2568,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 'r 45',
       '||' => 'r 45',
-      'or' => 'r 45',
-      'xor' => 'r 45',
+      'OR' => 'r 45',
+      'XOR' => 'r 45',
       '&&' => 'r 45',
-      'and' => 'r 45',
+      'AND' => 'r 45',
       '==' => 'r 45',
       '!=' => 'r 45',
       '<' => 'r 45',
@@ -2609,7 +2599,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2617,30 +2607,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '..' => 'r 46',
-      '||' => 'r 46',
-      'or' => 'r 46',
-      'xor' => 'r 46',
-      '&&' => 'r 46',
-      'and' => 'r 46',
-      '==' => 'r 46',
-      '!=' => 'r 46',
-      '<' => 'r 46',
-      '>' => 'r 46',
-      '<=' => 'r 46',
-      '>=' => 'r 46',
-      '+' => 'r 46',
-      '-' => 'r 46',
-      '&' => 'r 46',
-      '*' => 'r 46',
-      '/' => 'r 46',
-      '%' => 'r 46',
-      '-->' => 'r 46',
-      ')' => 'r 46',
-      ']' => 'r 46',
-      '=>' => 'r 46',
-      ',' => 'r 46',
-      '}' => 'r 46'
+      '' => 'r 46'
     ),
     array(
       'exp' => 's 45',
@@ -2650,7 +2617,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2658,30 +2625,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '..' => 'r 47',
-      '||' => 'r 47',
-      'or' => 'r 47',
-      'xor' => 'r 47',
-      '&&' => 'r 47',
-      'and' => 'r 47',
-      '==' => 'r 47',
-      '!=' => 'r 47',
-      '<' => 'r 47',
-      '>' => 'r 47',
-      '<=' => 'r 47',
-      '>=' => 'r 47',
-      '+' => 'r 47',
-      '-' => 'r 47',
-      '&' => 'r 47',
-      '*' => 'r 47',
-      '/' => 'r 47',
-      '%' => 'r 47',
-      '-->' => 'r 47',
-      ')' => 'r 47',
-      ']' => 'r 47',
-      '=>' => 'r 47',
-      ',' => 'r 47',
-      '}' => 'r 47'
+      '' => 'r 47'
     ),
     array(
       'exp' => 's 47',
@@ -2691,7 +2635,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2699,89 +2643,20 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '..' => 'r 48',
-      '||' => 'r 48',
-      'or' => 'r 48',
-      'xor' => 'r 48',
-      '&&' => 'r 48',
-      'and' => 'r 48',
-      '==' => 'r 48',
-      '!=' => 'r 48',
-      '<' => 'r 48',
-      '>' => 'r 48',
-      '<=' => 'r 48',
-      '>=' => 'r 48',
-      '+' => 'r 48',
-      '-' => 'r 48',
-      '&' => 'r 48',
-      '*' => 'r 48',
-      '/' => 'r 48',
-      '%' => 'r 48',
-      '-->' => 'r 48',
-      ')' => 'r 48',
-      ']' => 'r 48',
-      '=>' => 'r 48',
-      ',' => 'r 48',
-      '}' => 'r 48'
+      '' => 'r 48'
     ),
     array(
-      '%' => 'r 49',
-      '/' => 'r 49',
-      '*' => 'r 49',
-      '&' => 'r 49',
-      '-' => 'r 49',
-      '+' => 'r 49',
-      '>=' => 'r 49',
-      '<=' => 'r 49',
-      '>' => 'r 49',
-      '<' => 'r 49',
-      '!=' => 'r 49',
-      '==' => 'r 49',
-      'and' => 'r 49',
-      '&&' => 'r 49',
-      'xor' => 'r 49',
-      'or' => 'r 49',
-      '||' => 'r 49',
-      '..' => 'r 49',
-      '-->' => 'r 49',
-      ')' => 'r 49',
-      ']' => 'r 49',
-      '=>' => 'r 49',
-      ',' => 'r 49',
-      '}' => 'r 49'
+      '' => 'r 49'
     ),
     array(
-      '%' => 'r 50',
-      '/' => 'r 50',
-      '*' => 'r 50',
-      '&' => 'r 50',
-      '-' => 'r 50',
-      '+' => 'r 50',
-      '>=' => 'r 50',
-      '<=' => 'r 50',
-      '>' => 'r 50',
-      '<' => 'r 50',
-      '!=' => 'r 50',
-      '==' => 'r 50',
-      'and' => 'r 50',
-      '&&' => 'r 50',
-      'xor' => 'r 50',
-      'or' => 'r 50',
-      '||' => 'r 50',
-      '..' => 'r 50',
-      '-->' => 'r 50',
-      ')' => 'r 50',
-      ']' => 'r 50',
-      '=>' => 'r 50',
-      ',' => 'r 50',
-      '}' => 'r 50'
+      '' => 'r 50'
     ),
     array(
       'p11' => 's 51',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2789,56 +2664,10 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '%' => 'r 51',
-      '/' => 'r 51',
-      '*' => 'r 51',
-      '&' => 'r 51',
-      '-' => 'r 51',
-      '+' => 'r 51',
-      '>=' => 'r 51',
-      '<=' => 'r 51',
-      '>' => 'r 51',
-      '<' => 'r 51',
-      '!=' => 'r 51',
-      '==' => 'r 51',
-      'and' => 'r 51',
-      '&&' => 'r 51',
-      'xor' => 'r 51',
-      'or' => 'r 51',
-      '||' => 'r 51',
-      '..' => 'r 51',
-      '-->' => 'r 51',
-      ')' => 'r 51',
-      ']' => 'r 51',
-      '=>' => 'r 51',
-      ',' => 'r 51',
-      '}' => 'r 51'
+      '' => 'r 51'
     ),
     array(
-      '%' => 'r 52',
-      '/' => 'r 52',
-      '*' => 'r 52',
-      '&' => 'r 52',
-      '-' => 'r 52',
-      '+' => 'r 52',
-      '>=' => 'r 52',
-      '<=' => 'r 52',
-      '>' => 'r 52',
-      '<' => 'r 52',
-      '!=' => 'r 52',
-      '==' => 'r 52',
-      'and' => 'r 52',
-      '&&' => 'r 52',
-      'xor' => 'r 52',
-      'or' => 'r 52',
-      '||' => 'r 52',
-      '..' => 'r 52',
-      '-->' => 'r 52',
-      ')' => 'r 52',
-      ']' => 'r 52',
-      '=>' => 'r 52',
-      ',' => 'r 52',
-      '}' => 'r 52'
+      '' => 'r 52'
     ),
     array(
       'exp' => 's 54',
@@ -2848,7 +2677,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2858,10 +2687,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -2892,10 +2721,10 @@ class VMXTemplateParser extends lime_parser {
       '<' => 'r 83',
       '!=' => 'r 83',
       '==' => 'r 83',
-      'and' => 'r 83',
+      'AND' => 'r 83',
       '&&' => 'r 83',
-      'xor' => 'r 83',
-      'or' => 'r 83',
+      'XOR' => 'r 83',
+      'OR' => 'r 83',
       '||' => 'r 83',
       '..' => 'r 83',
       '-->' => 'r 83',
@@ -2921,10 +2750,10 @@ class VMXTemplateParser extends lime_parser {
       '<' => 'r 53',
       '!=' => 'r 53',
       '==' => 'r 53',
-      'and' => 'r 53',
+      'AND' => 'r 53',
       '&&' => 'r 53',
-      'xor' => 'r 53',
-      'or' => 'r 53',
+      'XOR' => 'r 53',
+      'OR' => 'r 53',
       '||' => 'r 53',
       '..' => 'r 53',
       '-->' => 'r 53',
@@ -2938,33 +2767,7 @@ class VMXTemplateParser extends lime_parser {
       'name' => 's 58'
     ),
     array(
-      '-->' => 'r 81',
-      '.' => 'r 81',
-      '[' => 'r 81',
-      '=' => 'r 81',
-      '%' => 'r 81',
-      '/' => 'r 81',
-      '*' => 'r 81',
-      '&' => 'r 81',
-      '-' => 'r 81',
-      '+' => 'r 81',
-      '>=' => 'r 81',
-      '<=' => 'r 81',
-      '>' => 'r 81',
-      '<' => 'r 81',
-      '!=' => 'r 81',
-      '==' => 'r 81',
-      'and' => 'r 81',
-      '&&' => 'r 81',
-      'xor' => 'r 81',
-      'or' => 'r 81',
-      '||' => 'r 81',
-      '..' => 'r 81',
-      ')' => 'r 81',
-      ']' => 'r 81',
-      '=>' => 'r 81',
-      ',' => 'r 81',
-      '}' => 'r 81'
+      '' => 'r 81'
     ),
     array(
       'exp' => 's 60',
@@ -2974,7 +2777,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -2984,10 +2787,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3003,40 +2806,14 @@ class VMXTemplateParser extends lime_parser {
       ']' => 's 61'
     ),
     array(
-      '.' => 'r 82',
-      '[' => 'r 82',
-      '%' => 'r 82',
-      '/' => 'r 82',
-      '*' => 'r 82',
-      '&' => 'r 82',
-      '-' => 'r 82',
-      '+' => 'r 82',
-      '>=' => 'r 82',
-      '<=' => 'r 82',
-      '>' => 'r 82',
-      '<' => 'r 82',
-      '!=' => 'r 82',
-      '==' => 'r 82',
-      'and' => 'r 82',
-      '&&' => 'r 82',
-      'xor' => 'r 82',
-      'or' => 'r 82',
-      '||' => 'r 82',
-      '..' => 'r 82',
-      '-->' => 'r 82',
-      ')' => 'r 82',
-      ']' => 'r 82',
-      '=>' => 'r 82',
-      ',' => 'r 82',
-      '=' => 'r 82',
-      '}' => 'r 82'
+      '' => 'r 82'
     ),
     array(
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
       'p11' => 's 63',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3044,36 +2821,13 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '%' => 'r 54',
-      '/' => 'r 54',
-      '*' => 'r 54',
-      '&' => 'r 54',
-      '-' => 'r 54',
-      '+' => 'r 54',
-      '>=' => 'r 54',
-      '<=' => 'r 54',
-      '>' => 'r 54',
-      '<' => 'r 54',
-      '!=' => 'r 54',
-      '==' => 'r 54',
-      'and' => 'r 54',
-      '&&' => 'r 54',
-      'xor' => 'r 54',
-      'or' => 'r 54',
-      '||' => 'r 54',
-      '..' => 'r 54',
-      '-->' => 'r 54',
-      ')' => 'r 54',
-      ']' => 'r 54',
-      '=>' => 'r 54',
-      ',' => 'r 54',
-      '}' => 'r 54'
+      '' => 'r 54'
     ),
     array(
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       'p11' => 's 65',
       '{' => 's 66',
       'literal' => 's 70',
@@ -3082,30 +2836,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '%' => 'r 55',
-      '/' => 'r 55',
-      '*' => 'r 55',
-      '&' => 'r 55',
-      '-' => 'r 55',
-      '+' => 'r 55',
-      '>=' => 'r 55',
-      '<=' => 'r 55',
-      '>' => 'r 55',
-      '<' => 'r 55',
-      '!=' => 'r 55',
-      '==' => 'r 55',
-      'and' => 'r 55',
-      '&&' => 'r 55',
-      'xor' => 'r 55',
-      'or' => 'r 55',
-      '||' => 'r 55',
-      '..' => 'r 55',
-      '-->' => 'r 55',
-      ')' => 'r 55',
-      ']' => 'r 55',
-      '=>' => 'r 55',
-      ',' => 'r 55',
-      '}' => 'r 55'
+      '' => 'r 55'
     ),
     array(
       'exp' => 's 67',
@@ -3115,7 +2846,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'hash' => 's 98',
       'literal' => 's 70',
@@ -3129,10 +2860,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3156,7 +2887,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3166,10 +2897,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3186,30 +2917,7 @@ class VMXTemplateParser extends lime_parser {
       '}' => 'r 76'
     ),
     array(
-      '%' => 'r 57',
-      '/' => 'r 57',
-      '*' => 'r 57',
-      '&' => 'r 57',
-      '-' => 'r 57',
-      '+' => 'r 57',
-      '>=' => 'r 57',
-      '<=' => 'r 57',
-      '>' => 'r 57',
-      '<' => 'r 57',
-      '!=' => 'r 57',
-      '==' => 'r 57',
-      'and' => 'r 57',
-      '&&' => 'r 57',
-      'xor' => 'r 57',
-      'or' => 'r 57',
-      '||' => 'r 57',
-      '..' => 'r 57',
-      '-->' => 'r 57',
-      ')' => 'r 57',
-      ']' => 'r 57',
-      '=>' => 'r 57',
-      ',' => 'r 57',
-      '}' => 'r 57'
+      '' => 'r 57'
     ),
     array(
       '.' => 's 72',
@@ -3227,10 +2935,10 @@ class VMXTemplateParser extends lime_parser {
       '<' => 'r 58',
       '!=' => 'r 58',
       '==' => 'r 58',
-      'and' => 'r 58',
+      'AND' => 'r 58',
       '&&' => 'r 58',
-      'xor' => 'r 58',
-      'or' => 'r 58',
+      'XOR' => 'r 58',
+      'OR' => 'r 58',
       '||' => 'r 58',
       '..' => 'r 58',
       '-->' => 'r 58',
@@ -3259,10 +2967,10 @@ class VMXTemplateParser extends lime_parser {
       '<' => 'r 81',
       '!=' => 'r 81',
       '==' => 'r 81',
-      'and' => 'r 81',
+      'AND' => 'r 81',
       '&&' => 'r 81',
-      'xor' => 'r 81',
-      'or' => 'r 81',
+      'XOR' => 'r 81',
+      'OR' => 'r 81',
       '||' => 'r 81',
       '..' => 'r 81',
       '-->' => 'r 81',
@@ -3273,33 +2981,7 @@ class VMXTemplateParser extends lime_parser {
       '}' => 'r 81'
     ),
     array(
-      '.' => 'r 80',
-      '[' => 'r 80',
-      '%' => 'r 80',
-      '/' => 'r 80',
-      '*' => 'r 80',
-      '&' => 'r 80',
-      '-' => 'r 80',
-      '+' => 'r 80',
-      '>=' => 'r 80',
-      '<=' => 'r 80',
-      '>' => 'r 80',
-      '<' => 'r 80',
-      '!=' => 'r 80',
-      '==' => 'r 80',
-      'and' => 'r 80',
-      '&&' => 'r 80',
-      'xor' => 'r 80',
-      'or' => 'r 80',
-      '||' => 'r 80',
-      '..' => 'r 80',
-      '-->' => 'r 80',
-      ')' => 'r 80',
-      ']' => 'r 80',
-      '=>' => 'r 80',
-      ',' => 'r 80',
-      '=' => 'r 80',
-      '}' => 'r 80'
+      '' => 'r 80'
     ),
     array(
       '{' => 's 66',
@@ -3323,10 +3005,10 @@ class VMXTemplateParser extends lime_parser {
       '<' => 'r 79',
       '!=' => 'r 79',
       '==' => 'r 79',
-      'and' => 'r 79',
+      'AND' => 'r 79',
       '&&' => 'r 79',
-      'xor' => 'r 79',
-      'or' => 'r 79',
+      'XOR' => 'r 79',
+      'OR' => 'r 79',
       '||' => 'r 79',
       '..' => 'r 79',
       '-->' => 'r 79',
@@ -3344,7 +3026,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3358,10 +3040,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3386,7 +3068,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3397,10 +3079,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3427,7 +3109,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3437,62 +3119,16 @@ class VMXTemplateParser extends lime_parser {
       'list' => 's 83'
     ),
     array(
-      '%' => 'r 63',
-      '/' => 'r 63',
-      '*' => 'r 63',
-      '&' => 'r 63',
-      '-' => 'r 63',
-      '+' => 'r 63',
-      '>=' => 'r 63',
-      '<=' => 'r 63',
-      '>' => 'r 63',
-      '<' => 'r 63',
-      '!=' => 'r 63',
-      '==' => 'r 63',
-      'and' => 'r 63',
-      '&&' => 'r 63',
-      'xor' => 'r 63',
-      'or' => 'r 63',
-      '||' => 'r 63',
-      '..' => 'r 63',
-      '-->' => 'r 63',
-      ')' => 'r 63',
-      ']' => 'r 63',
-      '=>' => 'r 63',
-      ',' => 'r 63',
-      '}' => 'r 63'
+      '' => 'r 63'
     ),
     array(
       ')' => 's 84'
     ),
     array(
-      '%' => 'r 64',
-      '/' => 'r 64',
-      '*' => 'r 64',
-      '&' => 'r 64',
-      '-' => 'r 64',
-      '+' => 'r 64',
-      '>=' => 'r 64',
-      '<=' => 'r 64',
-      '>' => 'r 64',
-      '<' => 'r 64',
-      '!=' => 'r 64',
-      '==' => 'r 64',
-      'and' => 'r 64',
-      '&&' => 'r 64',
-      'xor' => 'r 64',
-      'or' => 'r 64',
-      '||' => 'r 64',
-      '..' => 'r 64',
-      '-->' => 'r 64',
-      ')' => 'r 64',
-      ']' => 'r 64',
-      '=>' => 'r 64',
-      ',' => 'r 64',
-      '}' => 'r 64'
+      '' => 'r 64'
     ),
     array(
-      ')' => 'r 67'
+      '' => 'r 67'
     ),
     array(
       'exp' => 's 87',
@@ -3502,7 +3138,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3512,10 +3148,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3533,88 +3169,19 @@ class VMXTemplateParser extends lime_parser {
       ')' => 'r 78'
     ),
     array(
-      '%' => 'r 59',
-      '/' => 'r 59',
-      '*' => 'r 59',
-      '&' => 'r 59',
-      '-' => 'r 59',
-      '+' => 'r 59',
-      '>=' => 'r 59',
-      '<=' => 'r 59',
-      '>' => 'r 59',
-      '<' => 'r 59',
-      '!=' => 'r 59',
-      '==' => 'r 59',
-      'and' => 'r 59',
-      '&&' => 'r 59',
-      'xor' => 'r 59',
-      'or' => 'r 59',
-      '||' => 'r 59',
-      '..' => 'r 59',
-      '-->' => 'r 59',
-      ')' => 'r 59',
-      ']' => 'r 59',
-      '=>' => 'r 59',
-      ',' => 'r 59',
-      '}' => 'r 59'
+      '' => 'r 59'
     ),
     array(
       ')' => 's 90'
     ),
     array(
-      '%' => 'r 60',
-      '/' => 'r 60',
-      '*' => 'r 60',
-      '&' => 'r 60',
-      '-' => 'r 60',
-      '+' => 'r 60',
-      '>=' => 'r 60',
-      '<=' => 'r 60',
-      '>' => 'r 60',
-      '<' => 'r 60',
-      '!=' => 'r 60',
-      '==' => 'r 60',
-      'and' => 'r 60',
-      '&&' => 'r 60',
-      'xor' => 'r 60',
-      'or' => 'r 60',
-      '||' => 'r 60',
-      '..' => 'r 60',
-      '-->' => 'r 60',
-      ')' => 'r 60',
-      ']' => 'r 60',
-      '=>' => 'r 60',
-      ',' => 'r 60',
-      '}' => 'r 60'
+      '' => 'r 60'
     ),
     array(
       ')' => 's 92'
     ),
     array(
-      '%' => 'r 61',
-      '/' => 'r 61',
-      '*' => 'r 61',
-      '&' => 'r 61',
-      '-' => 'r 61',
-      '+' => 'r 61',
-      '>=' => 'r 61',
-      '<=' => 'r 61',
-      '>' => 'r 61',
-      '<' => 'r 61',
-      '!=' => 'r 61',
-      '==' => 'r 61',
-      'and' => 'r 61',
-      '&&' => 'r 61',
-      'xor' => 'r 61',
-      'or' => 'r 61',
-      '||' => 'r 61',
-      '..' => 'r 61',
-      '-->' => 'r 61',
-      ')' => 'r 61',
-      ']' => 'r 61',
-      '=>' => 'r 61',
-      ',' => 'r 61',
-      '}' => 'r 61'
+      '' => 'r 61'
     ),
     array(
       ',' => 's 94',
@@ -3628,7 +3195,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3640,10 +3207,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3659,62 +3226,16 @@ class VMXTemplateParser extends lime_parser {
       '=>' => 's 86'
     ),
     array(
-      ')' => 'r 75'
+      '' => 'r 75'
     ),
     array(
-      '%' => 'r 62',
-      '/' => 'r 62',
-      '*' => 'r 62',
-      '&' => 'r 62',
-      '-' => 'r 62',
-      '+' => 'r 62',
-      '>=' => 'r 62',
-      '<=' => 'r 62',
-      '>' => 'r 62',
-      '<' => 'r 62',
-      '!=' => 'r 62',
-      '==' => 'r 62',
-      'and' => 'r 62',
-      '&&' => 'r 62',
-      'xor' => 'r 62',
-      'or' => 'r 62',
-      '||' => 'r 62',
-      '..' => 'r 62',
-      '-->' => 'r 62',
-      ')' => 'r 62',
-      ']' => 'r 62',
-      '=>' => 'r 62',
-      ',' => 'r 62',
-      '}' => 'r 62'
+      '' => 'r 62'
     ),
     array(
       '}' => 's 99'
     ),
     array(
-      '%' => 'r 56',
-      '/' => 'r 56',
-      '*' => 'r 56',
-      '&' => 'r 56',
-      '-' => 'r 56',
-      '+' => 'r 56',
-      '>=' => 'r 56',
-      '<=' => 'r 56',
-      '>' => 'r 56',
-      '<' => 'r 56',
-      '!=' => 'r 56',
-      '==' => 'r 56',
-      'and' => 'r 56',
-      '&&' => 'r 56',
-      'xor' => 'r 56',
-      'or' => 'r 56',
-      '||' => 'r 56',
-      '..' => 'r 56',
-      '-->' => 'r 56',
-      ')' => 'r 56',
-      ']' => 'r 56',
-      '=>' => 'r 56',
-      ',' => 'r 56',
-      '}' => 'r 56'
+      '' => 'r 56'
     ),
     array(
       ',' => 's 101',
@@ -3728,7 +3249,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3740,39 +3261,13 @@ class VMXTemplateParser extends lime_parser {
       '}' => 'r 73'
     ),
     array(
-      '}' => 'r 72'
+      '' => 'r 72'
     ),
     array(
-      ',' => 'r 77',
-      '}' => 'r 77'
+      '' => 'r 77'
     ),
     array(
-      '.' => 'r 84',
-      '[' => 'r 84',
-      '%' => 'r 84',
-      '/' => 'r 84',
-      '*' => 'r 84',
-      '&' => 'r 84',
-      '-' => 'r 84',
-      '+' => 'r 84',
-      '>=' => 'r 84',
-      '<=' => 'r 84',
-      '>' => 'r 84',
-      '<' => 'r 84',
-      '!=' => 'r 84',
-      '==' => 'r 84',
-      'and' => 'r 84',
-      '&&' => 'r 84',
-      'xor' => 'r 84',
-      'or' => 'r 84',
-      '||' => 'r 84',
-      '..' => 'r 84',
-      '-->' => 'r 84',
-      ')' => 'r 84',
-      ']' => 'r 84',
-      '=>' => 'r 84',
-      ',' => 'r 84',
-      '}' => 'r 84'
+      '' => 'r 84'
     ),
     array(
       'exp' => 's 106',
@@ -3782,7 +3277,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3793,10 +3288,10 @@ class VMXTemplateParser extends lime_parser {
       '-->' => 's 107',
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3815,22 +3310,19 @@ class VMXTemplateParser extends lime_parser {
       'chunks' => 's 109',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
-      'literal' => 'r 1',
-      '<!--' => 'r 1',
-      '{' => 'r 1',
-      '#' => 'r 1'
+      '' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 110',
-      '{' => 's 148',
-      'error' => 's 151',
-      'c_elseifs' => 's 161'
+      '{' => 's 149',
+      'error' => 's 152',
+      'c_elseifs' => 's 163'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3839,25 +3331,27 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'end' => 's 111',
-      'else' => 's 112',
-      'elseif' => 's 157',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'END' => 's 111',
+      'ELSE' => 's 112',
+      'elseif' => 's 158',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
-      'elsif' => 's 160',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
+      'ELSIF' => 's 161',
+      'ELSEIF' => 's 162',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3865,26 +3359,26 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 12'
+      '' => 'r 12'
     ),
     array(
       '-->' => 's 113',
-      'if' => 's 156'
+      'IF' => 's 157'
     ),
     array(
       'chunk' => 's 108',
       'chunks' => 's 114',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 115',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3893,22 +3387,23 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'end' => 's 116',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'END' => 's 116',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3916,11 +3411,11 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 13'
+      '' => 'r 13'
     ),
     array(
       'varref' => 's 118',
-      'name' => 's 152'
+      'name' => 's 153'
     ),
     array(
       '=' => 's 119',
@@ -3937,7 +3432,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -3947,10 +3442,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -3970,15 +3465,15 @@ class VMXTemplateParser extends lime_parser {
       'chunks' => 's 122',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 123',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3987,22 +3482,23 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'set' => 's 117',
-      'end' => 's 124',
+      'IF' => 's 105',
+      'SET' => 's 117',
+      'END' => 's 124',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4010,7 +3506,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 19'
+      '' => 'r 19'
     ),
     array(
       'name' => 's 126'
@@ -4020,7 +3516,7 @@ class VMXTemplateParser extends lime_parser {
     ),
     array(
       'arglist' => 's 128',
-      'name' => 's 153',
+      'name' => 's 154',
       ')' => 'r 70'
     ),
     array(
@@ -4038,7 +3534,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4048,10 +3544,10 @@ class VMXTemplateParser extends lime_parser {
     array(
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -4071,15 +3567,15 @@ class VMXTemplateParser extends lime_parser {
       'chunks' => 's 133',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 134',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -4088,22 +3584,23 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'SET' => 's 117',
       'fn' => 's 125',
-      'end' => 's 135',
+      'END' => 's 135',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4111,11 +3608,11 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 21'
+      '' => 'r 21'
     ),
     array(
       'varref' => 's 137',
-      'name' => 's 152'
+      'name' => 's 153'
     ),
     array(
       '=' => 's 138',
@@ -4131,7 +3628,7 @@ class VMXTemplateParser extends lime_parser {
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4142,10 +3639,10 @@ class VMXTemplateParser extends lime_parser {
       '-->' => 's 140',
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -4164,15 +3661,15 @@ class VMXTemplateParser extends lime_parser {
       'chunks' => 's 141',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 142',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -4181,22 +3678,23 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'end' => 's 143',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'END' => 's 143',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4204,29 +3702,32 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 22'
+      '' => 'r 22'
     ),
     array(
-      'name' => 'r 23'
+      '' => 'r 23'
     ),
     array(
-      'name' => 'r 24'
+      '' => 'r 24'
     ),
     array(
-      'name' => 'r 25'
+      '' => 'r 25'
     ),
     array(
-      'name' => 'r 27'
+      '' => 'r 26'
     ),
     array(
-      'exp' => 's 149',
+      '' => 'r 27'
+    ),
+    array(
+      'exp' => 's 150',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4234,13 +3735,13 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '}' => 's 150',
+      '}' => 's 151',
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -4255,53 +3756,38 @@ class VMXTemplateParser extends lime_parser {
       '%' => 's 46'
     ),
     array(
-      'literal' => 'r 5',
-      '<!--' => 'r 5',
-      '{' => 'r 5',
-      '#' => 'r 5'
+      '' => 'r 5'
     ),
     array(
-      'literal' => 'r 6',
-      '<!--' => 'r 6',
-      '{' => 'r 6',
-      '#' => 'r 6'
+      '' => 'r 6'
     ),
     array(
-      '.' => 'r 79',
-      '[' => 'r 79',
-      '-->' => 'r 79',
-      '=' => 'r 79'
+      '' => 'r 79'
     ),
     array(
-      ',' => 's 154',
+      ',' => 's 155',
       ')' => 'r 68'
     ),
     array(
-      'name' => 's 153',
-      'arglist' => 's 155',
+      'name' => 's 154',
+      'arglist' => 's 156',
       ')' => 'r 70'
     ),
     array(
-      ')' => 'r 69'
+      '' => 'r 69'
     ),
     array(
-      '-' => 'r 28',
-      '(' => 'r 28',
-      '!' => 'r 28',
-      'not' => 'r 28',
-      '{' => 'r 28',
-      'literal' => 'r 28',
-      'name' => 'r 28'
+      '' => 'r 28'
     ),
     array(
-      'exp' => 's 158',
+      'exp' => 's 159',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4309,13 +3795,13 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 's 159',
+      '-->' => 's 160',
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -4330,33 +3816,28 @@ class VMXTemplateParser extends lime_parser {
       '%' => 's 46'
     ),
     array(
-      'literal' => 'r 16',
-      '<!--' => 'r 16',
-      '{' => 'r 16'
+      '' => 'r 16'
     ),
     array(
-      '-' => 'r 29',
-      '(' => 'r 29',
-      '!' => 'r 29',
-      'not' => 'r 29',
-      '{' => 'r 29',
-      'literal' => 'r 29',
-      'name' => 'r 29'
+      '' => 'r 29'
+    ),
+    array(
+      '' => 'r 30'
     ),
     array(
       'chunk' => 's 108',
-      'chunks' => 's 162',
+      'chunks' => 's 164',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 163',
-      '{' => 's 148',
-      'error' => 's 151'
+      '<!--' => 's 165',
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -4365,25 +3846,27 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'end' => 's 164',
-      'else' => 's 165',
-      'elseif' => 's 170',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'END' => 's 166',
+      'ELSE' => 's 167',
+      'elseif' => 's 172',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
-      'elsif' => 's 160',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
+      'ELSIF' => 's 161',
+      'ELSEIF' => 's 162',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4391,26 +3874,26 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 14'
+      '' => 'r 14'
     ),
     array(
-      '-->' => 's 166',
-      'if' => 's 156'
+      '-->' => 's 168',
+      'IF' => 's 157'
     ),
     array(
       'chunk' => 's 108',
-      'chunks' => 's 167',
+      'chunks' => 's 169',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{' => 's 148',
-      'error' => 's 151'
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 168',
-      '{' => 's 148',
-      'error' => 's 151'
+      '<!--' => 's 170',
+      '{' => 's 149',
+      'error' => 's 152'
     ),
     array(
       'code_chunk' => 's 5',
@@ -4419,22 +3902,23 @@ class VMXTemplateParser extends lime_parser {
       'c_fn' => 's 9',
       'c_for' => 's 10',
       'exp' => 's 11',
-      'if' => 's 105',
-      'end' => 's 169',
-      'set' => 's 117',
+      'IF' => 's 105',
+      'END' => 's 171',
+      'SET' => 's 117',
       'fn' => 's 125',
       'for' => 's 136',
-      'function' => 's 144',
-      'block' => 's 145',
-      'macro' => 's 146',
-      'foreach' => 's 147',
+      'FUNCTION' => 's 144',
+      'BLOCK' => 's 145',
+      'MACRO' => 's 146',
+      'FOR' => 's 147',
+      'FOREACH' => 's 148',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4442,17 +3926,17 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 'r 15'
+      '' => 'r 15'
     ),
     array(
-      'exp' => 's 171',
+      'exp' => 's 173',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
       'nonbrace' => 's 52',
       '(' => 's 53',
       '!' => 's 62',
-      'not' => 's 64',
+      'NOT' => 's 64',
       '{' => 's 66',
       'literal' => 's 70',
       'varref' => 's 71',
@@ -4460,13 +3944,13 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 's 172',
+      '-->' => 's 174',
       '..' => 's 12',
       '||' => 's 14',
-      'or' => 's 16',
-      'xor' => 's 18',
+      'OR' => 's 16',
+      'XOR' => 's 18',
       '&&' => 's 20',
-      'and' => 's 22',
+      'AND' => 's 22',
       '==' => 's 24',
       '!=' => 's 26',
       '<' => 's 28',
@@ -4481,20 +3965,18 @@ class VMXTemplateParser extends lime_parser {
       '%' => 's 46'
     ),
     array(
-      'literal' => 'r 17',
-      '<!--' => 'r 17',
-      '{' => 'r 17'
+      '' => 'r 17'
     ),
     array(
-      '#' => 'r 85'
+      '' => 'r 85'
     )
   );
   public $d = array(
     '..' => "concatenation operator '..'",
     '||' => "OR operator '||'",
-    'or' => "OR operator 'OR'",
-    'xor' => "XOR operator 'XOR'",
-    'and' => "AND operator 'AND'",
+    'OR' => "OR operator 'OR'",
+    'XOR' => "XOR operator 'XOR'",
+    'AND' => "AND operator 'AND'",
     '&&' => "AND operator '&&'",
     '&' => "bitwise AND operator '&'",
     '==' => "equality operator '=='",
@@ -4511,7 +3993,7 @@ class VMXTemplateParser extends lime_parser {
     '(' => "left round brace '('",
     ')' => "right round brace '('",
     '!' => "NOT operator '!'",
-    'not' => "NOT operator 'NOT'",
+    'NOT' => "NOT operator 'NOT'",
     '{' => "left curly brace '{'",
     '}' => "right curly brace '}'",
     ',' => "comma ','",
@@ -4572,7 +4054,6 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[0];
 
-    $this->template->lexer->skip_error($e);
     $result = '';
   }
 
@@ -4604,7 +4085,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_12_c_if_1($tokens, &$result) {
-    // (12) c_if :=  if  exp  -->  chunks  <!--  end
+    // (12) c_if :=  IF  exp  -->  chunks  <!--  END
     $result = reset($tokens);
     $e = &$tokens[1];
     $if = &$tokens[3];
@@ -4613,7 +4094,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_13_c_if_2($tokens, &$result) {
-    // (13) c_if :=  if  exp  -->  chunks  <!--  else  -->  chunks  <!--  end
+    // (13) c_if :=  IF  exp  -->  chunks  <!--  ELSE  -->  chunks  <!--  END
     $result = reset($tokens);
     $e = &$tokens[1];
     $if = &$tokens[3];
@@ -4623,7 +4104,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_14_c_if_3($tokens, &$result) {
-    // (14) c_if :=  if  exp  -->  chunks  c_elseifs  chunks  <!--  end
+    // (14) c_if :=  IF  exp  -->  chunks  c_elseifs  chunks  <!--  END
     $result = reset($tokens);
     $e = &$tokens[1];
     $if = &$tokens[3];
@@ -4634,7 +4115,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_15_c_if_4($tokens, &$result) {
-    // (15) c_if :=  if  exp  -->  chunks  c_elseifs  chunks  <!--  else  -->  chunks  <!--  end
+    // (15) c_if :=  IF  exp  -->  chunks  c_elseifs  chunks  <!--  ELSE  -->  chunks  <!--  END
     $result = reset($tokens);
     $e = &$tokens[1];
     $if = &$tokens[3];
@@ -4664,7 +4145,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_18_c_set_1($tokens, &$result) {
-    // (18) c_set :=  set  varref  =  exp
+    // (18) c_set :=  SET  varref  =  exp
     $result = reset($tokens);
     $v = &$tokens[1];
     $e = &$tokens[3];
@@ -4673,7 +4154,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_19_c_set_2($tokens, &$result) {
-    // (19) c_set :=  set  varref  -->  chunks  <!--  end
+    // (19) c_set :=  SET  varref  -->  chunks  <!--  END
     $result = reset($tokens);
     $v = &$tokens[1];
     $cs = &$tokens[3];
@@ -4699,7 +4180,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_21_c_fn_2($tokens, &$result) {
-    // (21) c_fn :=  fn  name  (  arglist  )  -->  chunks  <!--  end
+    // (21) c_fn :=  fn  name  (  arglist  )  -->  chunks  <!--  END
     $result = reset($tokens);
     $name = &$tokens[1];
     $args = &$tokens[3];
@@ -4716,7 +4197,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_22_c_for_1($tokens, &$result) {
-    // (22) c_for :=  for  varref  =  exp  -->  chunks  <!--  end
+    // (22) c_for :=  for  varref  =  exp  -->  chunks  <!--  END
     $result = reset($tokens);
     $varref = &$tokens[1];
     $exp = &$tokens[3];
@@ -4737,42 +4218,42 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_23_fn_1($tokens, &$result) {
-    // (23) fn :=  function
+    // (23) fn :=  FUNCTION
     $result = reset($tokens);
   }
 
   function reduce_24_fn_2($tokens, &$result) {
-    // (24) fn :=  block
+    // (24) fn :=  BLOCK
     $result = reset($tokens);
   }
 
   function reduce_25_fn_3($tokens, &$result) {
-    // (25) fn :=  macro
+    // (25) fn :=  MACRO
     $result = reset($tokens);
   }
 
   function reduce_26_for_1($tokens, &$result) {
-    // (26) for :=  for
+    // (26) for :=  FOR
     $result = reset($tokens);
   }
 
   function reduce_27_for_2($tokens, &$result) {
-    // (27) for :=  foreach
+    // (27) for :=  FOREACH
     $result = reset($tokens);
   }
 
   function reduce_28_elseif_1($tokens, &$result) {
-    // (28) elseif :=  else  if
+    // (28) elseif :=  ELSE  IF
     $result = reset($tokens);
   }
 
   function reduce_29_elseif_2($tokens, &$result) {
-    // (29) elseif :=  elsif
+    // (29) elseif :=  ELSIF
     $result = reset($tokens);
   }
 
   function reduce_30_elseif_3($tokens, &$result) {
-    // (30) elseif :=  elseif
+    // (30) elseif :=  ELSEIF
     $result = reset($tokens);
   }
 
@@ -4795,7 +4276,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_33_exp_3($tokens, &$result) {
-    // (33) exp :=  exp  or  exp
+    // (33) exp :=  exp  OR  exp
     $result = reset($tokens);
     $a = &$tokens[0];
     $b = &$tokens[2];
@@ -4804,7 +4285,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_34_exp_4($tokens, &$result) {
-    // (34) exp :=  exp  xor  exp
+    // (34) exp :=  exp  XOR  exp
     $result = reset($tokens);
     $a = &$tokens[0];
     $b = &$tokens[2];
@@ -4822,7 +4303,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_36_exp_6($tokens, &$result) {
-    // (36) exp :=  exp  and  exp
+    // (36) exp :=  exp  AND  exp
     $result = reset($tokens);
     $a = &$tokens[0];
     $b = &$tokens[2];
@@ -4979,7 +4460,7 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_55_p11_4($tokens, &$result) {
-    // (55) p11 :=  not  p11
+    // (55) p11 :=  NOT  p11
     $result = reset($tokens);
     $a = &$tokens[1];
 
@@ -5745,5 +5226,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 3,68658304214 seconds
-// Memory: 11308464 bytes
+// Time: 1,91961789131 seconds
+// Memory: 11190620 bytes
