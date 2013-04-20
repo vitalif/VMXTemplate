@@ -12,6 +12,8 @@
 # TODO For perl version - rewrite it and prevent auto-vivification on a.b
 # TODO Split into runner and parser
 # TODO <!--# comments -->
+# TODO eat_code_line
+# TODO Allow to configure begin_code and end_code
 
 if (!defined('TS_UNIX'))
 {
