@@ -373,7 +373,7 @@ class VMXTemplate
     {
         $md5 = md5($code);
         $file = $this->options->cache_dir . 'tpl' . $md5 . '.php';
-        if (0 && file_exists($file) && !$reload)
+        if (file_exists($file) && !$reload)
         {
             return $file;
         }
@@ -4159,7 +4159,7 @@ class VMXTemplateParser extends lime_parser {
     $v = &$tokens[1];
     $cs = &$tokens[3];
 
-    $result = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
+    $result = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\n\$t = array_pop(\$stack);\n";
   }
 
   function reduce_20_c_fn_1($tokens, &$result) {
@@ -5226,5 +5226,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 1,91961789131 seconds
-// Memory: 11190620 bytes
+// Time: 3,58776307106 seconds
+// Memory: 11194096 bytes

@@ -115,7 +115,7 @@ c_set = "SET" varref/v "=" exp/e {
     $$ = $v . ' = ' . $e . ";\n";
   }
 | "SET" varref/v "-->" chunks/cs "<!--" "END" {
-    $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\narray_pop(\$stack);\n";
+    $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v . " = \$t;\n\$t = array_pop(\$stack);\n";
   }
 .
 c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
