@@ -11,9 +11,7 @@
 
 # TODO For perl version - rewrite it and prevent auto-vivification on a.b
 # TODO Split into runner and parser
-# TODO <!--# comments -->
-# TODO eat_code_line
-# TODO Allow to configure begin_code and end_code
+# TODO Allow to configure begin_code and end_code and turn on/off substs (can't configure them because of curly braces)
 
 if (!defined('TS_UNIX'))
 {
@@ -1409,16 +1407,33 @@ class VMXTemplateLexer
             {
                 if ($code_pos > $this->pos)
                 {
-                    $r = array('literal', "'".addcslashes(substr($this->code, $this->pos, $code_pos-$this->pos), "'\\")."'");
+                    $str = substr($this->code, $this->pos, $code_pos-$this->pos);
+                    if ($this->options->eat_code_line)
+                    {
+                        $str = preg_replace('/\n[ \t]*$/s', '', $str);
+                    }
+                    $r = array('literal', "'".addcslashes($str, "'\\")."'");
                     $this->lineno += substr_count($r[1], "\n");
                     $this->pos = $code_pos;
                 }
                 else
                 {
+                    $i = $this->pos+strlen($this->options->begin_code);
+                    while ($i < $this->codelen && (($c = $this->code{$i}) == ' ' || $c == "\t"))
+                    {
+                        $i++;
+                    }
+                    if ($i < $this->codelen && $this->code{$i} == '#')
+                    {
+                        // Strip comment
+                        $i = strpos($this->code, $this->options->end_code, $i);
+                        $this->pos = $i ? $i+strlen($this->options->end_code) : $this->codelen;
+                        return $this->read_token();
+                    }
                     $r = array($this->options->begin_code, false);
                     $this->last_start = $this->pos;
                     $this->last_start_line = $this->lineno;
-                    $this->pos += 4;
+                    $this->pos += strlen($this->options->begin_code);
                     $this->in_code = 1;
                 }
             }
@@ -1493,6 +1508,13 @@ class VMXTemplateLexer
                     {
                         $this->in_code += ($t === $this->options->begin_code);
                         $this->in_code -= ($t === $this->options->end_code);
+                        if (!$this->in_code && $this->options->eat_code_line)
+                        {
+                            while ($this->pos < $this->codelen && (($c = $this->code{$this->pos}) == ' ' || $c == "\t"))
+                            {
+                                $this->pos++;
+                            }
+                        }
                     }
                     if ($this->in_subst)
                     {
