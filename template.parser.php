@@ -554,13 +554,17 @@ class VMXTemplateLexer
         try
         {
             $parser->reset();
+            $in = false;
             while ($t = $this->read_token())
             {
                 $success = $parser->eat($t[0], $t[1]);
                 if (!$success)
                 {
-                    $this->skip_error(end($parser->parser->errors));
+                    // Pass $in from last step so we skip to the beginning
+                    // of directive even if it just ended and $this->in_* == 0
+                    $this->skip_error(end($parser->parser->errors), $in);
                 }
+                $in = $this->in_code || $this->in_subst;
             }
             $parser->eat_eof();
         }
@@ -595,12 +599,12 @@ class VMXTemplateLexer
     /**
      * Skip a directive
      */
-    function skip_error($e)
+    function skip_error($e, $force = false)
     {
         if (substr($e, 0, 18) !== 'error not expected')
         {
             $this->warn($e);
-            if ($this->in_code || $this->in_subst)
+            if ($this->in_code || $this->in_subst || $force)
             {
                 $this->in_code = $this->in_subst = 0;
                 $this->pos = $this->last_start;
@@ -745,7 +749,7 @@ class VMXTemplateLexer
                             }
                         }
                     }
-                    if ($this->in_subst)
+                    elseif ($this->in_subst)
                     {
                         $this->in_subst += ($t === $this->options->begin_subst);
                         $this->in_subst -= ($t === $this->options->end_subst);

@@ -770,7 +770,7 @@ class VMXTemplateOptions
                 implode('</li><li>', array_map('html_pbr', $this->errors)).
                 '</li></ul>';
                 $fp = fopen("php://stderr", 'a');
-                fprintf($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
+                fputs($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
                 fclose($fp);
         }
     }
