@@ -15,8 +15,24 @@
  * (2) template.parser.php - used only when compiling new templates
  */
 
+/**
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ * http://www.gnu.org/copyleft/gpl.html
+ */
+
 # TODO For perl version - rewrite it and prevent auto-vivification on a.b
-# TODO Allow to configure begin_code and end_code and turn on/off substs (can't configure them because of curly braces)
 
 if (!defined('TS_UNIX'))
 {
@@ -709,8 +725,8 @@ class VMXTemplateOptions
 {
     var $begin_code    = '<!--';    // instruction start
     var $end_code      = '-->';     // instruction end
-    var $begin_subst   = '{';       // substitution start (can only be '{' or false due to grammar)
-    var $end_subst     = '}';       // substitution end (can only be '}' or false due to grammar)
+    var $begin_subst   = '{';       // substitution start (may be turned off via false)
+    var $end_subst     = '}';       // substitution end (may be turned off via false)
     var $no_code_subst = false;     // do not substitute expressions in instructions
     var $eat_code_line = true;      // remove the "extra" lines which contain instructions only
     var $root          = '.';       // directory with templates

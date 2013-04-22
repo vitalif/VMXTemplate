@@ -10,6 +10,11 @@
 #     "вне" оных.
 # Взять таковой можно здесь: https://github.com/vitalif/lime
 #
+# {{ двойные скобки }} нужно исключительно чтобы маркеры начала и конца подстановки
+# были уникальны в грамматике. Вместо них обычно используются { одинарные }, а
+# выбор корректной лексемы - скобки или маркера - делает лексический анализатор.
+# Но зато вместо { фигурных скобок } можно выбрать себе любые другие маркеры!
+#
 # Кстати:
 # (*) Олдстайл BEGIN .. END ликвидирован
 # (*) Возможно, нужно добавить в каком-то виде foreach ... as key => value
@@ -50,8 +55,10 @@
 %token "=>"     "hash item operator '=>'"
 %token "["      "left square brace '['"
 %token "]"      "right square brace ']'"
-%token "<!--"   "directive begin '<!--'"
-%token "-->"    "directive end '-->'"
+%token "<!--"   "directive begin"
+%token "-->"    "directive end"
+%token "{{"     "substitution begin"
+%token "}}"     "substitution end"
 
 %left ".."
 %left "||" "OR" "XOR"
@@ -81,7 +88,7 @@ chunk = literal {
 | "<!--" code_chunk/c "-->" {
     $$ = $c;
   }
-| "{" exp/e "}" {
+| "{{" exp/e "}}" {
     $$ = '$t .= ' . $e . ";\n";
   }
 | error/e {
