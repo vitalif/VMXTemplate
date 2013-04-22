@@ -770,9 +770,19 @@ class VMXTemplateLexer
                         {
                             if ($this->options->eat_code_line)
                             {
-                                while ($this->pos < $this->codelen && (($c = $this->code{$this->pos}) == ' ' || $c == "\t"))
+                                $p = $this->pos;
+                                while ($p < $this->codelen && (($c = $this->code{$p}) == ' ' || $c == "\t" || $c == "\r"))
                                 {
-                                    $this->pos++;
+                                    $p++;
+                                }
+                                if ($p < $this->codelen && $this->code{$p} == "\n")
+                                {
+                                    $p++;
+                                    if ($p < $this->codelen && $this->code{$p} == "\r")
+                                    {
+                                        $p++;
+                                    }
+                                    $this->pos = $p;
                                 }
                             }
                             return array('-->', $t);
