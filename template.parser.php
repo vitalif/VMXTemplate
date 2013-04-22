@@ -667,7 +667,7 @@ class VMXTemplateLexer
                     $str = substr($this->code, $this->pos, $code_pos-$this->pos);
                     if ($this->options->eat_code_line)
                     {
-                        $str = preg_replace('/\n[ \t]*$/s', '', $str);
+                        $str = preg_replace('/\n[ \t]*$/s', "\n", $str);
                     }
                     $r = array('literal', "'".addcslashes($str, "'\\")."'");
                     $this->lineno += substr_count($r[1], "\n");
