@@ -656,7 +656,7 @@ class VMXTemplate
         elseif (preg_match('/^\D*(\d{4,})\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/s', $ts, $m))
         {
             // TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
-            $ts = mktime(0+$m[4], 0+$m[5], 0+$m[6], $m[2], $m[3], $m[1]);
+            $ts = mktime(0+@$m[4], 0+@$m[5], 0+@$m[6], $m[2], $m[3], $m[1]);
         }
         elseif (preg_match('/^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/s', $ts, $m))
         {
