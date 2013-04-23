@@ -82,7 +82,58 @@ class VMXTemplateCompiler
         'parse'             => true,
         'process_inline'    => true,
         'include_inline'    => true,
+        'exec'              => true,
+        'exec_from'         => true,
         'parse_inline'      => true,
+        'exec_from_inline'  => true,
+        'quote'             => true,
+        'and'               => true,
+        'not'               => true,
+        'add'               => true,
+        'sub'               => true,
+        'mul'               => true,
+        'div'               => true,
+        'mod'               => true,
+        'log'               => true,
+        'even'              => true,
+        'odd'               => true,
+        'eq'                => true,
+        'ne'                => true,
+        'gt'                => true,
+        'lt'                => true,
+        'ge'                => true,
+        'le'                => true,
+        'seq'               => true,
+        'sne'               => true,
+        'sgt'               => true,
+        'slt'               => true,
+        'sge'               => true,
+        'sle'               => true,
+        'neq'               => true,
+        'nne'               => true,
+        'ngt'               => true,
+        'nlt'               => true,
+        'nge'               => true,
+        'nle'               => true,
+        'strlen'            => true,
+        'strftime'          => true,
+        'hash'              => true,
+        'keys'              => true,
+        'values'            => true,
+        'sort'              => true,
+        'pairs'             => true,
+        'array'             => true,
+        'range'             => true,
+        'is_array'          => true,
+        'count'             => true,
+        'subarray'          => true,
+        'subarray_divmod'   => true,
+        'array_merge'       => true,
+        'void'              => true,
+        'json'              => true,
+        // TODO: yesno => $b && $c
+        // TODO: concat => all quoted
+        // TODO: set => should return empty value, quoted
     );
 
     var $options, $st, $lexer, $parser;
@@ -446,7 +497,6 @@ $code
 
     /* игнорирование результата (а-ля js) */
     function function_void($a)          { return "self::void($a)"; }
-    function void($a)                   { return ''; }
 
     /* дамп переменной */
     function function_dump($var)

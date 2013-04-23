@@ -612,6 +612,12 @@ class VMXTemplate
         return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
     }
 
+    // Ignore result
+    function void($a)
+    {
+        return '';
+    }
+
     // Select one of 3 plural forms for russian language
     static function plural_ru($count, $one, $few, $many)
     {
