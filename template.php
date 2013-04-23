@@ -515,16 +515,6 @@ class VMXTemplate
         return NULL;
     }
 
-    // Variable dump
-    static function exec_dump($var)
-    {
-        ob_start();
-        var_dump($var);
-        $var = ob_get_contents();
-        ob_end_clean();
-        return $var;
-    }
-
     // Extract values from an array by modulus of their indexes
     // exec_subarray_divmod([], 2)
     // exec_subarray_divmod([], 2, 1)
@@ -738,6 +728,8 @@ class VMXTemplateOptions
     var $log_error     = false;     // send errors to standard error output
     var $print_error   = false;     // print fatal template errors
     var $strip_space   = false;     // strip spaces from beginning and end of each line
+    var $auto_escape   = false;     // "safe mode" (try 's' for HTML) - automatically escapes substituted
+                                    // values via this functions if not escaped explicitly
     var $compiletime_functions = array();   // custom compile-time functions (code generators)
 
     // Logged errors (not an option)
