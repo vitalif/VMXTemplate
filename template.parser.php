@@ -64,76 +64,86 @@ class VMXTemplateCompiler
     );
 
     // Functions that do escape HTML, for safe mode
-    static $doesQuote = array(
-        'i'                 => true,
-        'int'               => true,
-        'intval'            => true,
-        'raw'               => true,
-        'htmlspecialchars'  => true,
-        'html'              => true,
-        's'                 => true,
-        'strip_tags'        => true,
-        'strip'             => true,
-        't'                 => true,
-        'strip_unsafe'      => true,
-        'h'                 => true,
-        'process'           => true,
-        'include'           => true,
-        'parse'             => true,
-        'process_inline'    => true,
-        'include_inline'    => true,
-        'exec'              => true,
-        'exec_from'         => true,
-        'parse_inline'      => true,
-        'exec_from_inline'  => true,
-        'quote'             => true,
-        'and'               => true,
-        'not'               => true,
-        'add'               => true,
-        'sub'               => true,
-        'mul'               => true,
-        'div'               => true,
-        'mod'               => true,
-        'log'               => true,
-        'even'              => true,
-        'odd'               => true,
-        'eq'                => true,
-        'ne'                => true,
-        'gt'                => true,
-        'lt'                => true,
-        'ge'                => true,
-        'le'                => true,
-        'seq'               => true,
-        'sne'               => true,
-        'sgt'               => true,
-        'slt'               => true,
-        'sge'               => true,
-        'sle'               => true,
-        'neq'               => true,
-        'nne'               => true,
-        'ngt'               => true,
-        'nlt'               => true,
-        'nge'               => true,
-        'nle'               => true,
-        'strlen'            => true,
-        'strftime'          => true,
-        'hash'              => true,
-        'keys'              => true,
-        'values'            => true,
-        'sort'              => true,
-        'pairs'             => true,
-        'array'             => true,
-        'range'             => true,
-        'is_array'          => true,
-        'count'             => true,
-        'subarray'          => true,
-        'subarray_divmod'   => true,
-        'array_merge'       => true,
-        'void'              => true,
-        'json'              => true,
-        // TODO: yesno => $b && $c
-        // TODO: concat => all quoted
-        // TODO: set => should return empty value, quoted
+    const Q_ALWAYS = -1;
+    const Q_IF_ALL = -2;
+    const Q_ALL_BUT_FIRST = -3;
+    static $functionSafeness = array(
+        'int'               => self::Q_ALWAYS,
+        'raw'               => self::Q_ALWAYS,
+        'html'              => self::Q_ALWAYS,
+        'strip'             => self::Q_ALWAYS,
+        'strip_unsafe'      => self::Q_ALWAYS,
+        'parse'             => self::Q_ALWAYS,
+        'parse_inline'      => self::Q_ALWAYS,
+        'exec'              => self::Q_ALWAYS,
+        'exec_from'         => self::Q_ALWAYS,
+        'exec_from_inline'  => self::Q_ALWAYS,
+        'quote'             => self::Q_ALWAYS,
+        'sql_quote'         => self::Q_ALWAYS,
+        'requote'           => self::Q_ALWAYS,
+        'urlencode'         => self::Q_ALWAYS,
+        'and'               => self::Q_ALWAYS,
+        'or'                => self::Q_IF_ALL,
+        'not'               => self::Q_ALWAYS,
+        'add'               => self::Q_ALWAYS,
+        'sub'               => self::Q_ALWAYS,
+        'mul'               => self::Q_ALWAYS,
+        'div'               => self::Q_ALWAYS,
+        'mod'               => self::Q_ALWAYS,
+        'log'               => self::Q_ALWAYS,
+        'even'              => self::Q_ALWAYS,
+        'odd'               => self::Q_ALWAYS,
+        'eq'                => self::Q_ALWAYS,
+        'ne'                => self::Q_ALWAYS,
+        'gt'                => self::Q_ALWAYS,
+        'lt'                => self::Q_ALWAYS,
+        'ge'                => self::Q_ALWAYS,
+        'le'                => self::Q_ALWAYS,
+        'seq'               => self::Q_ALWAYS,
+        'sne'               => self::Q_ALWAYS,
+        'sgt'               => self::Q_ALWAYS,
+        'slt'               => self::Q_ALWAYS,
+        'sge'               => self::Q_ALWAYS,
+        'sle'               => self::Q_ALWAYS,
+        'neq'               => self::Q_ALWAYS,
+        'nne'               => self::Q_ALWAYS,
+        'ngt'               => self::Q_ALWAYS,
+        'nlt'               => self::Q_ALWAYS,
+        'nge'               => self::Q_ALWAYS,
+        'nle'               => self::Q_ALWAYS,
+        'strlen'            => self::Q_ALWAYS,
+        'strftime'          => self::Q_ALWAYS,
+        'str_replace'       => self::Q_ALL_BUT_FIRST,
+        'substr'            => 1,   // parameter number to take safeness from
+        'trim'              => 1,
+        'split'             => 1,
+        'nl2br'             => 1,
+        'concat'            => self::Q_IF_ALL,
+        'join'              => self::Q_IF_ALL,
+        'subst'             => self::Q_IF_ALL,
+        'strlimit'          => 1,
+        'plural_ru'         => self::Q_ALL_BUT_FIRST,
+        'hash'              => self::Q_IF_ALL,
+        'keys'              => 1,
+        'values'            => 1,
+        'sort'              => 1,
+        'pairs'             => 1,
+        'array'             => self::Q_IF_ALL,
+        'range'             => self::Q_ALWAYS,
+        'is_array'          => self::Q_ALWAYS,
+        'count'             => self::Q_ALWAYS,
+        'subarray'          => 1,
+        'subarray_divmod'   => 1,
+        'set'               => 2,   // TODO: set(x, y) should return empty value
+        'array_merge'       => self::Q_IF_ALL,
+        'shift'             => 1,
+        'pop'               => 1,
+        'unshift'           => self::Q_ALWAYS,
+        'push'              => self::Q_ALWAYS,
+        'void'              => self::Q_ALWAYS,
+        'json'              => self::Q_ALWAYS,
+        'map'               => self::Q_ALL_BUT_FIRST,
+        'yesno'             => self::Q_ALL_BUT_FIRST,
     );
 
     var $options, $st, $lexer, $parser;
@@ -197,17 +207,35 @@ $code
     function compile_function($fn, $args)
     {
         $fn = strtolower($fn);
+        if (isset(self::$functions[$fn]))
+        {
+            // Function alias
+            $fn = self::$functions[$fn];
+        }
         $argv = [];
+        $q = @self::$functionSafeness[$fn];
+        if ($q > 0)
+        {
+            $q = isset($args[$q-1]) ? $args[$q-1][1] : true;
+        }
+        elseif ($q == self::Q_ALWAYS)
+        {
+            $q = true;
+        }
+        else
+        {
+            $q = true;
+            $n = count($args);
+            for ($i = ($q == self::Q_ALL_BUT_FIRST ? 1 : 0); $i < $n; $i++)
+            {
+                $q = $q && $args[$i][1];
+            }
+        }
         foreach ($args as $a)
         {
             $argv[] = $a[0];
         }
-        if (isset(self::$functions[$fn]))
-        {
-            // Builtin function call using alias
-            $r = call_user_func_array(array($this, 'function_'.self::$functions[$fn]), $argv);
-        }
-        elseif (method_exists($this, "function_$fn"))
+        if (method_exists($this, "function_$fn"))
         {
             // Builtin function call using name
             $r = call_user_func_array(array($this, "function_$fn"), $argv);
@@ -222,7 +250,7 @@ $code
             $this->lexer->warn("Unknown function: '$fn'");
             $r = "false";
         }
-        return [ $r, !empty(self::$doesQuote[$fn]) ];
+        return [ $r, $q ];
     }
 
     /*** Functions ***/
@@ -467,16 +495,14 @@ $code
     /* 0) получить "корневую" переменную по неконстантному ключу
        1) получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
           по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
-       2) получить элемент выражения-массива - ибо в PHP не работает (...expression...)['key'],
+       2) получить элемент выражения-массива - в PHP < 5.4 не работает (...expression...)['key'],
           к примеру не работает range(1,10)[0]
-          но у нас-то можно написать get(range(1,10), 0), поэтому мы должны это поддерживать
-          хотя это и не будет lvalue */
-    function function_get($a, $k=NULL)
+          но у нас-то это поддерживается... */
+    function function_get($a, $k = NULL)
     {
         if ($k === NULL)
             return "\$this->tpldata[$a]";
-        /* проверяем синтаксис выражения */
-        if (@eval('return true; '.$a.'[0];'))
+        if (PHP_VERSION_ID > 50400)
             return $a."[$k]";
         return "self::exec_get($a, $k)";
     }
@@ -3848,7 +3874,7 @@ class VMXTemplateParser extends lime_parser {
     $e = &$tokens[1];
     $p = &$tokens[3];
 
-    $result = [ '('.$e[0].')'.$p, false ];
+    $result = [ '('.$e[0].')'.$p, $e[1] ];
   }
 
   function reduce_54_p11_3($tokens, &$result) {
@@ -4632,5 +4658,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 5,67085003853 seconds
-// Memory: 11304440 bytes
+// Time: 1,94818210602 seconds
+// Memory: 11303052 bytes
