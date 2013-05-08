@@ -52,7 +52,7 @@ class VMXTemplate
     static $Mon, $mon, $Wday;
     static $cache_type  = NULL;
     static $cache       = array();
-    static $safe_tags   = '<div> <blockquote> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee>';
+    static $safe_tags   = '<div> <blockquote> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee> <cite>';
 
     // Timestamp format constants
     const TS_UNIX       = 0;
