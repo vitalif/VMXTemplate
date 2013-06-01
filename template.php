@@ -52,7 +52,7 @@ class VMXTemplate
     static $Mon, $mon, $Wday;
     static $cache_type  = NULL;
     static $cache       = array();
-    static $safe_tags   = '<div> <blockquote> <span> <a> <b> <i> <u> <p> <h1> <h2> <h3> <h4> <h5> <h6> <strike> <strong> <small> <big> <blink> <center> <ol> <pre> <sub> <sup> <font> <br> <table> <tr> <td> <th> <tbody> <tfoot> <thead> <tt> <ul> <li> <em> <img> <marquee> <cite>';
+    static $safe_tags   = 'div|blockquote|span|a|b|i|u|p|h1|h2|h3|h4|h5|h6|strike|strong|small|big|blink|center|ol|pre|sub|sup|font|br|table|tr|td|th|tbody|tfoot|thead|tt|ul|li|em|img|marquee|cite';
 
     // Timestamp format constants
     const TS_UNIX       = 0;
@@ -610,6 +610,13 @@ class VMXTemplate
     static function mb_ucfirst($str)
     {
         return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+    }
+
+    // Replace tags with whitespace
+    static function strip_tags($str, $allowed = false)
+    {
+        $allowed = $allowed ? '(?!/?('.$allowed.'))' : '';
+        return preg_replace('#(<'.$allowed.'/?[a-z][a-z0-9-]*(\s+[^<>]*)?>\s*)+#is', ' ', $str);
     }
 
     // Ignore result

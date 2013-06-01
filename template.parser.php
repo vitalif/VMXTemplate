@@ -375,11 +375,11 @@ $code
     function function_html($e)                  { return "htmlspecialchars($e,ENT_QUOTES)"; }
 
     /* удаление всех или заданных тегов */
-    function function_strip($e, $t='')          { return "strip_tags($e".($t?",$t":"").")"; }
+    function function_strip($e, $t='')          { return "self::strip_tags($e".($t?",$t":"").")"; }
 
     /* удаление "небезопасных" HTML-тегов */
     /* TODO: м.б исправлять некорректную разметку? */
-    function function_strip_unsafe($e)          { return "strip_tags($e, self::\$safe_tags)"; }
+    function function_strip_unsafe($e)          { return "self::strip_tags($e, self::\$safe_tags)"; }
 
     /* заменить \n на <br /> */
     function function_nl2br($s)                 { return "nl2br($s)"; }
