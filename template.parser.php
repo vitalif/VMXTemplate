@@ -178,6 +178,12 @@ class VMXTemplateCompiler
         $this->lexer->set_code($code);
         $this->lexer->feed($this->parser);
 
+        if ($this->st->functions['main']['body'] === '')
+        {
+            // Parse error
+            unset($this->st->functions['main']);
+        }
+
         // Generate code for functions
         $code = '';
         foreach ($this->st->functions as $f)

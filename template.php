@@ -297,6 +297,11 @@ class VMXTemplate
                 }
             }
         }
+        if (!isset($class::$functions[$func]))
+        {
+            $this->options->error("No function '$func' found in template $fn", true);
+            return NULL;
+        }
         $func = "fn_$func";
         $tpl = new $class($this);
         if ($vars)
