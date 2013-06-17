@@ -186,13 +186,15 @@ class VMXTemplateCompiler
 
         // Generate code for functions
         $code = '';
-        foreach ($this->st->functions as $f)
+        $functions = array();
+        foreach ($this->st->functions as $n => $f)
         {
             $code .= $f['body'];
+            $functions[$n] = true;
         }
 
         // Assemble the class code
-        $functions = var_export(array_keys($this->st->functions), true);
+        $functions = var_export($functions, true);
         $rfn = addcslashes($this->options->input_filename, '\\\'');
         $code = "<?php // {$this->options->input_filename}
 class Template_$func_ns extends VMXTemplate {

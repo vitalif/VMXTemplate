@@ -65,7 +65,7 @@ class VMXTemplate
     const TS_RFC822     = 7;
 
     // Version of code classes, saved into static $version
-    const CODE_VERSION  = 3;
+    const CODE_VERSION  = 4;
 
     // Data passed to the template
     var $tpldata = array();
@@ -285,11 +285,15 @@ class VMXTemplate
                 }
                 if (!class_exists($class) || !isset($class::$version) || $class::$version < self::CODE_VERSION)
                 {
-                    $this->options->error("MD5 collision :) file=$fn, cache=$file", true);
-                    $this->failed[$fn] = true;
+                    // Force recompile
+                    $file = $this->compile($text, $fn, true);
+                    $this->options->error(
+                        "Invalid or stale cache '$file' for template '$fn'. Caused by one of:".
+                        " template upgrade (error should go away on next run), two templates with same content (change or merge), or an MD5 collision :)", true
+                    );
                     return NULL;
                 }
-                foreach ($class::$functions as $loaded_function)
+                foreach ($class::$functions as $loaded_function => $true)
                 {
                     // FIXME Do it better
                     // Remember functions during file loading
@@ -299,7 +303,7 @@ class VMXTemplate
         }
         if (!isset($class::$functions[$func]))
         {
-            $this->options->error("No function '$func' found in template $fn", true);
+            $this->options->error("No function '$func' found in ".($fn ? "template $fn" : 'inline template'), true);
             return NULL;
         }
         $func = "fn_$func";
