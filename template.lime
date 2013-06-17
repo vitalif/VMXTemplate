@@ -84,8 +84,8 @@ template = chunks {
     $$ = '';
   }
 .
-chunks = chunk {
-    $$ = $1;
+chunks = {
+    $$ = '';
   }
 | chunks chunk {
     $$ = $1 . $2;

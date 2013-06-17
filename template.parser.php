@@ -1325,20 +1325,19 @@ class VMXTemplateParser extends lime_parser {
   public $i = array(
     array(
       'chunks' => 's 1',
-      'chunk' => 's 108',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152',
-      'template' => 's 175',
-      "'start'" => "a 'start'"
+      'template' => 's 174',
+      "'start'" => "a 'start'",
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1',
+      '#' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
       '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152',
+      '{{' => 's 148',
+      'error' => 's 151',
       '#' => 'r 0'
     ),
     array(
@@ -1355,14 +1354,14 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2729,23 +2728,18 @@ class VMXTemplateParser extends lime_parser {
       '%' => 's 46'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 109',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
-    ),
-    array(
-      '' => 'r 1'
+      'chunks' => 's 108',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 110',
-      '{{' => 's 149',
-      'error' => 's 152',
-      'c_elseifs' => 's 163'
+      '<!--' => 's 109',
+      '{{' => 's 148',
+      'error' => 's 151',
+      'c_elseifs' => 's 162'
     ),
     array(
       'code_chunk' => 's 5',
@@ -2755,19 +2749,19 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'END' => 's 111',
-      'ELSE' => 's 112',
-      'elseif' => 's 158',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
-      'ELSIF' => 's 161',
-      'ELSEIF' => 's 162',
+      'END' => 's 110',
+      'ELSE' => 's 111',
+      'elseif' => 's 157',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
+      'ELSIF' => 's 160',
+      'ELSEIF' => 's 161',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2785,23 +2779,21 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 12'
     ),
     array(
-      '-->' => 's 113',
-      'IF' => 's 157'
+      '-->' => 's 112',
+      'IF' => 's 156'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 114',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 113',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 115',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 114',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -2811,15 +2803,15 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'END' => 's 116',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'END' => 's 115',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2837,18 +2829,18 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 13'
     ),
     array(
-      'varref' => 's 118',
-      'name' => 's 153'
+      'varref' => 's 117',
+      'name' => 's 152'
     ),
     array(
-      '=' => 's 119',
-      '-->' => 's 121',
+      '=' => 's 118',
+      '-->' => 's 120',
       'varpart' => 's 74',
       '.' => 's 57',
       '[' => 's 59'
     ),
     array(
-      'exp' => 's 120',
+      'exp' => 's 119',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2884,19 +2876,17 @@ class VMXTemplateParser extends lime_parser {
       '-->' => 'r 18'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 122',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 121',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 123',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 122',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -2906,15 +2896,15 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'SET' => 's 117',
-      'END' => 's 124',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'SET' => 's 116',
+      'END' => 's 123',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2932,25 +2922,25 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 19'
     ),
     array(
-      'name' => 's 126'
+      'name' => 's 125'
     ),
     array(
-      '(' => 's 127'
+      '(' => 's 126'
     ),
     array(
-      'arglist' => 's 128',
-      'name' => 's 154',
+      'arglist' => 's 127',
+      'name' => 's 153',
       ')' => 'r 70'
     ),
     array(
-      ')' => 's 129'
+      ')' => 's 128'
     ),
     array(
-      '=' => 's 130',
-      '-->' => 's 132'
+      '=' => 's 129',
+      '-->' => 's 131'
     ),
     array(
-      'exp' => 's 131',
+      'exp' => 's 130',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -2986,19 +2976,17 @@ class VMXTemplateParser extends lime_parser {
       '-->' => 'r 20'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 133',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 132',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 134',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 133',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3008,15 +2996,15 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'END' => 's 135',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'END' => 's 134',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3034,17 +3022,17 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 21'
     ),
     array(
-      'varref' => 's 137',
-      'name' => 's 153'
+      'varref' => 's 136',
+      'name' => 's 152'
     ),
     array(
-      '=' => 's 138',
+      '=' => 's 137',
       'varpart' => 's 74',
       '.' => 's 57',
       '[' => 's 59'
     ),
     array(
-      'exp' => 's 139',
+      'exp' => 's 138',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3059,7 +3047,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 's 140',
+      '-->' => 's 139',
       '..' => 's 12',
       '||' => 's 14',
       'OR' => 's 16',
@@ -3080,19 +3068,17 @@ class VMXTemplateParser extends lime_parser {
       '%' => 's 46'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 141',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 140',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 142',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 141',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3102,15 +3088,15 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'END' => 's 143',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'END' => 's 142',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3143,7 +3129,7 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 27'
     ),
     array(
-      'exp' => 's 150',
+      'exp' => 's 149',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3158,7 +3144,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '}}' => 's 151',
+      '}}' => 's 150',
       '..' => 's 12',
       '||' => 's 14',
       'OR' => 's 16',
@@ -3188,12 +3174,12 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 79'
     ),
     array(
-      ',' => 's 155',
+      ',' => 's 154',
       ')' => 'r 68'
     ),
     array(
-      'name' => 's 154',
-      'arglist' => 's 156',
+      'name' => 's 153',
+      'arglist' => 's 155',
       ')' => 'r 70'
     ),
     array(
@@ -3203,7 +3189,7 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 28'
     ),
     array(
-      'exp' => 's 159',
+      'exp' => 's 158',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3218,7 +3204,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 's 160',
+      '-->' => 's 159',
       '..' => 's 12',
       '||' => 's 14',
       'OR' => 's 16',
@@ -3248,19 +3234,17 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 30'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 164',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 163',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 165',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 164',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3270,19 +3254,19 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'END' => 's 166',
-      'ELSE' => 's 167',
-      'elseif' => 's 172',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
-      'ELSIF' => 's 161',
-      'ELSEIF' => 's 162',
+      'END' => 's 165',
+      'ELSE' => 's 166',
+      'elseif' => 's 171',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
+      'ELSIF' => 's 160',
+      'ELSEIF' => 's 161',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3300,23 +3284,21 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 14'
     ),
     array(
-      '-->' => 's 168',
-      'IF' => 's 157'
+      '-->' => 's 167',
+      'IF' => 's 156'
     ),
     array(
-      'chunk' => 's 108',
-      'chunks' => 's 169',
-      'literal' => 's 3',
-      '<!--' => 's 4',
-      '{{' => 's 149',
-      'error' => 's 152'
+      'chunks' => 's 168',
+      'literal' => 'r 1',
+      '<!--' => 'r 1',
+      '{{' => 'r 1'
     ),
     array(
       'chunk' => 's 2',
       'literal' => 's 3',
-      '<!--' => 's 170',
-      '{{' => 's 149',
-      'error' => 's 152'
+      '<!--' => 's 169',
+      '{{' => 's 148',
+      'error' => 's 151'
     ),
     array(
       'code_chunk' => 's 5',
@@ -3326,15 +3308,15 @@ class VMXTemplateParser extends lime_parser {
       'c_for' => 's 10',
       'exp' => 's 11',
       'IF' => 's 105',
-      'END' => 's 171',
-      'SET' => 's 117',
-      'fn' => 's 125',
-      'for' => 's 136',
-      'FUNCTION' => 's 144',
-      'BLOCK' => 's 145',
-      'MACRO' => 's 146',
-      'FOR' => 's 147',
-      'FOREACH' => 's 148',
+      'END' => 's 170',
+      'SET' => 's 116',
+      'fn' => 's 124',
+      'for' => 's 135',
+      'FUNCTION' => 's 143',
+      'BLOCK' => 's 144',
+      'MACRO' => 's 145',
+      'FOR' => 's 146',
+      'FOREACH' => 's 147',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3352,7 +3334,7 @@ class VMXTemplateParser extends lime_parser {
       '' => 'r 15'
     ),
     array(
-      'exp' => 's 173',
+      'exp' => 's 172',
       'p10' => 's 48',
       'p11' => 's 49',
       '-' => 's 50',
@@ -3367,7 +3349,7 @@ class VMXTemplateParser extends lime_parser {
       'method' => 's 80'
     ),
     array(
-      '-->' => 's 174',
+      '-->' => 's 173',
       '..' => 's 12',
       '||' => 's 14',
       'OR' => 's 16',
@@ -3438,10 +3420,10 @@ class VMXTemplateParser extends lime_parser {
   }
 
   function reduce_1_chunks_1($tokens, &$result) {
-    // (1) chunks :=  chunk
+    // (1) chunks :=  ε
     $result = reset($tokens);
 
-    $result = $tokens[0];
+    $result = '';
   }
 
   function reduce_2_chunks_2($tokens, &$result) {
@@ -3874,7 +3856,7 @@ class VMXTemplateParser extends lime_parser {
     $e = &$tokens[1];
     $p = &$tokens[3];
 
-    $result = [ '('.$e[0].')'.$p, $e[1] ];
+    $result = [ '('.$e[0].')'.$p, false ];
   }
 
   function reduce_54_p11_3($tokens, &$result) {
@@ -4232,7 +4214,7 @@ class VMXTemplateParser extends lime_parser {
     ),
     array(
       'symbol' => 'chunks',
-      'len' => 1,
+      'len' => 0,
       'replace' => true
     ),
     array(
@@ -4658,5 +4640,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 1,94818210602 seconds
-// Memory: 11303052 bytes
+// Time: 2,08367991447 seconds
+// Memory: 11242844 bytes
