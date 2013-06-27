@@ -246,9 +246,12 @@ class VMXTemplate
             if (!strlen($inline))
                 return '';
             $class = 'Template_X'.md5($inline);
-            if (!($file = $this->compile($inline, '')))
-                return NULL;
-            include $file;
+            if (!class_exists($class))
+            {
+                if (!($file = $this->compile($inline, '')))
+                    return NULL;
+                include $file;
+            }
         }
         else
         {
