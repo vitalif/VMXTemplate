@@ -157,7 +157,7 @@ class VMXTemplate
             elseif (self::$cache_type == 'e')
                 self::$cache[$key] = eaccelerator_get($key);
         }
-        return self::$cache[$key];
+        return @self::$cache[$key];
     }
 
     static function cache_del($key)
