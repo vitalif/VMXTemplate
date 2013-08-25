@@ -9,6 +9,7 @@
 #     соответственно выдаёт либо лексемы "внутри" блоков кода, либо литералы
 #     "вне" оных.
 # Взять таковой можно здесь: https://github.com/vitalif/lime
+# Компилить так: php -d xdebug.max_nesting_level=200 lime.php template.lime > template.class
 #
 # {{ двойные скобки }} нужно исключительно чтобы маркеры начала и конца подстановки
 # были уникальны в грамматике. Вместо них обычно используются { одинарные }, а
@@ -279,7 +280,7 @@ nonbrace: '{' hash/h '}' {
     $$ = [ $f.'('.implode(', ', $argv).')', true ];
   }
 .
-method: varref/v '.' name/m {
+method: varref/v '.' namekw/m {
     $$ = $v[0].'->'.$m;
   }
 .
@@ -333,7 +334,7 @@ varref: name/n {
     $$ = [ $v[0] . $p, false ];
   }
 .
-varpart: '.' name/n {
+varpart: '.' namekw/n {
     $$ = "['".addcslashes($n, "\\\'")."']";
   }
 | '[' exp/e ']' {
@@ -346,4 +347,9 @@ varpath: {
 | varpath/a varpart/p {
     $$ = $a . $p;
   }
+.
+namekw: name
+| "IF" | "END" | "ELSE" | "ELSIF" | "ELSEIF"
+| "SET" | "OR" | "XOR" | "AND" | "NOT"
+| "FUNCTION" | "BLOCK" | "MACRO" | "FOR" | "FOREACH"
 .
