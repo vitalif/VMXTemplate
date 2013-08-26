@@ -774,8 +774,10 @@ class VMXTemplateLexer
             }
             elseif ($subst_pos === false || $code_pos !== false && $subst_pos > $code_pos)
             {
+                // Code starts closer
                 if ($code_pos > $this->pos)
                 {
+                    // We didn't yet reach the code beginning
                     $str = substr($this->code, $this->pos, $code_pos-$this->pos);
                     if ($this->options->eat_code_line)
                     {
@@ -785,8 +787,9 @@ class VMXTemplateLexer
                     $this->lineno += substr_count($r[1], "\n");
                     $this->pos = $code_pos;
                 }
-                else
+                elseif ($code_pos !== false)
                 {
+                    // We are at the code beginning ($this->pos == $code_pos)
                     $i = $this->pos+strlen($this->options->begin_code);
                     while ($i < $this->codelen && (($c = $this->code{$i}) == ' ' || $c == "\t"))
                     {
@@ -808,6 +811,7 @@ class VMXTemplateLexer
             }
             else
             {
+                // Substitution is closer
                 if ($subst_pos > $this->pos)
                 {
                     $r = array('literal', "'".addcslashes(substr($this->code, $this->pos, $subst_pos-$this->pos), "'\\")."'");
