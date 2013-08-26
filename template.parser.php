@@ -846,7 +846,7 @@ class VMXTemplateLexer
             if (isset($this->keywords[$l = strtoupper($m[0])]))
             {
                 // Keyword
-                return array($l, false);
+                return array($l, $m[0]);
             }
             // Identifier
             return array('name', $m[0]);
