@@ -1239,9 +1239,8 @@ class parse_engine {
 		case 'r':
 			if ($this->debug) echo "Reducing $type via rule $operand\n";
 			$this->reduce($operand);
-			$this->eat($type, $semantic);
 			// Yes, this is tail-recursive. It's also the simplest way.
-			break;
+			return $this->eat($type, $semantic);
 		case 'a':
 			if ($this->stack->occupied()) {
 				throw new parse_bug('Accept should happen with empty stack.');
