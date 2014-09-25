@@ -311,9 +311,7 @@ hash: pair/$
     $$ = '';
   }
 .
-gthash: gtpair/p {
-    $$ = $p;
-  }
+gthash: gtpair/$
 | gtpair/p ',' gthash/h {
     $$ = $p . ', ' . $h;
   }
