@@ -15,6 +15,10 @@
 #
 # P.S: Комментарии типа "#{" и "#}" служат, чтобы тупой Parse::Yapp понимал парные скобки
 
+%{
+VMXTemplate::Utils::import();
+%}
+
 %start template
 
 %token literal
@@ -255,7 +259,7 @@ nonbrace: '{' hash '}' {
     $_[0]->{template}->compile_function($_[1], $_[3]);
   }
 | name '(' gthash ')' {
-    [ "\$self->{parent}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{template}->{lexer}->errorinfo(), "'\\")."')", 1 ];
+    [ "\$self->{parent}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{__lexer}->errorinfo(), "'\\")."')", 1 ];
   }
 | name nonbrace {
     $_[0]->{template}->compile_function($_[1], [ $_[3] ]);
@@ -347,25 +351,23 @@ my $keywords_str = 'OR XOR AND NOT IF ELSE ELSIF ELSEIF END SET FOR FOREACH FUNC
 sub _Lexer
 {
     my ($parser) = shift;
-
-    if ($parser->YYEndOfInput)
-    {
-        $parser->{__lexer} = undef;
-    }
-    elsif (!$parser->{__lexer})
-    {
-        $parser->{__lexer} = new VMXTemplate::Lexer($parser, $parser->{YYInput}, $parser->{__options});
-    }
-
     return $parser->{__lexer}->read_token;
 }
 
 sub _error
 {
-    
+    my ($self) = @_;
+    $self->{__lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
+    $self->{__lexer}->skip_error;
 }
 
-__PACKAGE__->lexer(\&_Lexer);
+sub compile
+{
+    my ($self, $text) = @_;
+    $self->{__lexer} ||= new VMXTemplate::Lexer($self, $self->{__options});
+    $self->{__lexer}->set_code($text);
+    $self->YYParse(yylex => \&_Lexer, yyerror => \&_error);
+}
 
 package VMXTemplate::Lexer;
 
@@ -411,12 +413,22 @@ sub new
     return $self;
 }
 
+sub set_code
+{
+    my $self = shift;
+    my ($code) = @_;
+    $self->{code} = $code;
+    $self->{eaten} = '';
+    $self->{lineno} = $self->{in_code} = $self->{in_subst} = 0;
+    $self->{last_start} = $self->{last_start_line} = 0;
+}
+
 sub eat
 {
     my $self = shift;
     my ($len) = @_;
     my $str = substr($self->{code}, 0, $len, '');
-    $self->{done} .= $str;
+    $self->{eaten} .= $str;
     $self->{lineno} += ($str =~ tr/\n/\n/);
     return $str;
 }
@@ -600,4 +612,159 @@ sub warn
     my $self = shift;
     my ($text) = @_;
     $self->{options}->error($text.$self->errorinfo());
+}
+
+package VMXTemplate::Utils;
+
+use base qw(Exporter);
+our @EXPORT = qw(
+    TS_UNIX TS_DB TS_DB_DATE TS_MW TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
+    timestamp plural_ru strlimit strip_tags addcslashes
+);
+
+use constant {
+    TS_UNIX     => 0,
+    TS_DB       => 1,
+    TS_DB_DATE  => 2,
+    TS_MW       => 3,
+    TS_EXIF     => 4,
+    TS_ORACLE   => 5,
+    TS_ISO_8601 => 6,
+    TS_RFC822   => 7,
+};
+
+my @Mon = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+my %mon = qw(jan 0 feb 1 mar 2 apr 3 may 4 jun 5 jul 6 aug 7 sep 8 oct 9 nov 10 dec 11);
+my @Wday = qw(Sun Mon Tue Wed Thu Fri Sat);
+
+our $safe_tags = 'div|blockquote|span|a|b|i|u|p|h1|h2|h3|h4|h5|h6|strike|strong|small|big|blink|center|ol|pre|sub|sup|font|br|table|tr|td|th|tbody|tfoot|thead|tt|ul|li|em|img|marquee|cite';
+
+# ограниченная распознавалка дат
+sub timestamp
+{
+    my ($ts, $format) = @_;
+
+    require POSIX;
+    if (int($ts) eq $ts)
+    {
+        # TS_UNIX or Epoch
+        $ts = time if !$ts;
+    }
+
+    elsif ($ts =~ /^\D*(\d{4,}?)\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/so)
+    {
+        # TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
+        $ts = POSIX::mktime($6||0, $5||0, $4||0, $3, $2-1, $1-1900);
+    }
+    elsif ($ts =~ /^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/so)
+    {
+        # TS_ORACLE
+        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3 < 100 ? $3 : $3-1900);
+    }
+    elsif ($ts =~ /^\s*..., (\d\d?) (...) (\d{4,}) (\d\d):(\d\d):(\d\d)\s*([\+\- ]\d\d)\s*$/so)
+    {
+        # TS_RFC822
+        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3-1900);
+    }
+    else
+    {
+        # Bogus value, return undef
+        return undef;
+    }
+
+    if (!$format)
+    {
+        # TS_UNIX
+        return $ts;
+    }
+    elsif ($format == TS_MW)
+    {
+        return POSIX::strftime("%Y%m%d%H%M%S", localtime($ts));
+    }
+    elsif ($format == TS_DB)
+    {
+        return POSIX::strftime("%Y-%m-%d %H:%M:%S", localtime($ts));
+    }
+    elsif ($format == TS_DB_DATE)
+    {
+        return POSIX::strftime("%Y-%m-%d", localtime($ts));
+    }
+    elsif ($format == TS_ISO_8601)
+    {
+        return POSIX::strftime("%Y-%m-%dT%H:%M:%SZ", localtime($ts));
+    }
+    elsif ($format == TS_EXIF)
+    {
+        return POSIX::strftime("%Y:%m:%d %H:%M:%S", localtime($ts));
+    }
+    elsif ($format == TS_RFC822)
+    {
+        my @l = localtime($ts);
+        return POSIX::strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", @l);
+    }
+    elsif ($format == TS_ORACLE)
+    {
+        my @l = localtime($ts);
+        return POSIX::strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", @l);
+    }
+    return $ts;
+}
+
+# Select one of 3 plural forms for russian language
+sub plural_ru
+{
+    my ($count, $one, $few, $many) = @_;
+    my $sto = $count % 100;
+    if ($sto >= 10 && $sto <= 20)
+    {
+        return $many;
+    }
+    my $r = $count % 10;
+    if ($r == 1)
+    {
+        return $one;
+    }
+    elsif ($r >= 2 && $r <= 4)
+    {
+        return $few;
+    }
+    return $many;
+}
+
+# Limit string to $maxlen
+sub strlimit
+{
+    my ($str, $maxlen, $dots) = @_;
+    if (!$maxlen || $maxlen < 1 || length($str) <= $maxlen)
+    {
+        return $str;
+    }
+    $str = substr($str, 0, $maxlen);
+    my $p = rindex($str, ' ');
+    if ($p < 0 || (my $pt = rindex($str, "\t")) > $p)
+    {
+        $p = $pt;
+    }
+    if ($p > 0)
+    {
+        $str = substr($str, 0, $p);
+    }
+    return $str . (defined $dots ? $dots : '...');
+}
+
+# Replace (some) tags with whitespace
+sub strip_tags
+{
+    my ($str, $allowed) = @_;
+    my $allowed = $allowed ? '(?!/?('.$allowed.'))' : '';
+    $str =~ s/(<$allowed\/?[a-z][a-z0-9-]*(\s+[^<>]*)?>\s*)+/ /gis;
+    return $str;
+}
+
+# Add '\' before specified chars
+sub addcslashes
+{
+    my ($str, $escape) = @_;
+    $str =~ s/([$escape])/\\$1/gs;
+    return $str;
 }
