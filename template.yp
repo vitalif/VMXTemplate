@@ -1,15 +1,5 @@
 # Контекстно-свободная Parse::Yapp-грамматика шаблонизатора
 #
-# Для корректной работы нужен патченый LIME со следующими изменениями:
-# (*) Подменой лексемы 'lit' на 'str' в метаграмматике.
-#     Это нужно, чтобы можно было юзать строковые лексемы типа '<!--'.
-# (*) Для корректной обработки ошибок нужно, чтобы метод eat() возвращал
-#     false при ошибке и true при успехе. Т.к. подразумевается, что лексический
-#     анализатор зависим от работы синтаксического, знает о его состоянии и
-#     соответственно выдаёт либо лексемы "внутри" блоков кода, либо литералы
-#     "вне" оных.
-# Взять таковой можно здесь: https://github.com/vitalif/lime
-#
 # {{ двойные скобки }} нужно исключительно чтобы маркеры начала и конца подстановки
 # были уникальны в грамматике. Вместо них обычно используются { одинарные }, а
 # выбор корректной лексемы - скобки или маркера - делает лексический анализатор.
@@ -22,6 +12,8 @@
 # Кстати:
 # * Олдстайл BEGIN .. END ликвидирован
 # * Возможно, нужно добавить в каком-то виде foreach ... as key => value
+#
+# P.S: Комментарии типа "#{" и "#}" служат, чтобы тупой Parse::Yapp понимал парные скобки
 
 %start template
 
@@ -92,14 +84,14 @@ chunk: literal {
     $_[2];
   }
 | '{{' exp '}}' {
-    '$t .= ' . ($_[2][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[2][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[2] ])[0]) . ";\n";
+    '$t .= ' . ($_[2][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[2][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
   }
 | error {
     '';
   }
 ;
 code_chunk: c_if | c_set | c_fn | c_for | exp {
-    '$t .= ' . ($_[1][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[1][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[1] ])[0]) . ";\n";
+    '$t .= ' . ($_[1][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[1][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
   }
 ;
 c_if: 'IF' exp '-->' chunks '<!--' 'END' {
@@ -138,8 +130,8 @@ c_fn: fn name '(' arglist ')' '=' exp {
       'name' => $_[2],
       'args' => $_[4],
       'body' => 'sub fn_'.$_[2]." () {\nreturn ".$_[7].";\n}\n",
-      //'line' => $line, Ой, я чо - аргументы не юзаю?
-      //'pos' => $pos,
+      #'line' => $line, Ой, я чо - аргументы не юзаю?
+      #'pos' => $pos,
     };
     '';
   }
@@ -148,8 +140,8 @@ c_fn: fn name '(' arglist ')' '=' exp {
       'name' => $_[2],
       'args' => $_[4],
       'body' => 'sub fn_'.$_[2]." () {\nmy \$stack = [];\nmy \$t = '';\n".$_[7]."\nreturn \$t;\n}\n",
-      //'line' => $line,
-      //'pos' => $pos,
+      #'line' => $line,
+      #'pos' => $pos,
     };
     '';
   }
@@ -263,7 +255,7 @@ nonbrace: '{' hash '}' {
     $_[0]->{template}->compile_function($_[1], $_[3]);
   }
 | name '(' gthash ')' {
-    [ "\$self->{parent}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($this->template->lexer->errorinfo(), "'\\")."')", 1 ];
+    [ "\$self->{parent}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{template}->{lexer}->errorinfo(), "'\\")."')", 1 ];
   }
 | name nonbrace {
     $_[0]->{template}->compile_function($_[1], [ $_[3] ]);
@@ -358,295 +350,254 @@ sub _Lexer
 
     if ($parser->YYEndOfInput)
     {
-        my $input = <STDIN>;
-        return('', undef) unless $input;
-        $parser->input($input);
-        my $lex = $parser->{__lexer} = {
-            options => {} ???,
-
-            # Current position in code
-            codelen => strlen($input),
-            pos => 0,
-            lineno => 0,
-
-            # Preprocessed keyword tokens
-            nchar => {},
-            lens => [],
-            keywords => { map { $_ => 1 } split / /, $keywords_str },
-
-            # Last directive start position, directive and substitution start/end counters
-            last_start => 0,
-            last_start_line => 0,
-            in_code => 0,
-            in_subst => 0,
-            force_literal => 0,
-        };
-        foreach (split(/ /, $chartokens))
-        {
-            $lex->{nchar}{strlen($_)}{$_} = 1;
-        }
-        # Add code fragment finishing tokens
-        $lex->{nchar}{strlen($lex->{options}->{end_code})}{$lex->{options}->{end_code}} = 1;
-        if ($this->options->end_subst)
-        {
-            $lex->{nchar}{strlen($lex->{options}->{end_subst})}{$lex->{options}->{end_subst}} = 1;
-        }
-        # Reverse-sort lengths
-        $lex->{lens} = [ sort { $b <=> $a } keys %{$lex->{nchar}} ];
+        $parser->{__lexer} = undef;
     }
-
-    my $lex = $parser->{__lexer};
-
-    for (${$parser->YYInput})
+    elsif (!$parser->{__lexer})
     {
-        m/\G[ \t]*/gc;
-        m/\G([0-9]+(?:\.[0-9]+)?)/gc and return('NUM',$1);
-        m/\G([A-Za-z][A-Za-z0-9_]*)/gc and return('VAR',$1);
-        m/\G(.)/gcs and return($1,$1);
-        return('', undef);
+        $parser->{__lexer} = new VMXTemplate::Lexer($parser, $parser->{YYInput}, $parser->{__options});
     }
+
+    return $parser->{__lexer}->read_token;
+}
+
+sub _error
+{
+    
 }
 
 __PACKAGE__->lexer(\&_Lexer);
 
-class VMXTemplateLexer
+package VMXTemplate::Lexer;
+
+sub new
 {
-    function feed($parser)
+    my $class = shift;
+    $class = ref($class) || $class;
+    my ($options) = @_;
+
+    my $self = bless {
+        options => $options,
+
+        # Input
+        code => '',
+        eaten => '',
+        lineno => 0,
+
+        # Preprocessed keyword tokens
+        nchar => {},
+        lens => [],
+        keywords => { map { $_ => 1 } split / /, $keywords_str },
+
+        # Last directive start position, directive and substitution start/end counters
+        last_start => 0,
+        last_start_line => 0,
+        in_code => 0,
+        in_subst => 0,
+    }, $class;
+
+    foreach (split(/ /, $chartokens))
     {
-        try
+        $self->{nchar}{length($_)}{$_} = 1;
+    }
+    # Add code fragment finishing tokens
+    $self->{nchar}{length($self->{options}->{end_code})}{$self->{options}->{end_code}} = 1;
+    if ($self->{options}->{end_subst})
+    {
+        $self->{nchar}{length($self->{options}->{end_subst})}{$self->{options}->{end_subst}} = 1;
+    }
+    # Reverse-sort lengths
+    $self->{lens} = [ sort { $b <=> $a } keys %{$self->{nchar}} ];
+
+    return $self;
+}
+
+sub eat
+{
+    my $self = shift;
+    my ($len) = @_;
+    my $str = substr($self->{code}, 0, $len, '');
+    $self->{done} .= $str;
+    $self->{lineno} += ($str =~ tr/\n/\n/);
+    return $str;
+}
+
+sub skip_error
+{
+    my ($self) = @_;
+    $self->{code} = substr($self->{eaten}, $self->{last_start}+1, length($self->{eaten}), '') . $self->{code};
+    $self->{lineno} = $self->{last_start_line};
+    $self->{in_code} = $self->{in_subst} = 0;
+}
+
+sub read_token
+{
+    my $self = shift;
+    if (!length $self->{code})
+    {
+        # End of code
+        return;
+    }
+    if ($self->{in_code} <= 0 && $self->{in_subst} <= 0)
+    {
+        my $r;
+        my $code_pos = index($self->{code}, $self->{options}->{begin_code});
+        my $subst_pos = index($self->{code}, $self->{options}->{begin_subst});
+        if ($code_pos == -1 && $subst_pos == -1)
         {
-            $parser->reset();
-            $in = false;
-            while ($t = $this->read_token())
+            # No more directives
+            $r = [ 'literal', "'".addcslashes($self->eat(length $self->{code}), "'\\")."'" ];
+        }
+        elsif ($subst_pos == -1 || $code_pos >= 0 && $subst_pos > $code_pos)
+        {
+            # Code starts closer
+            if ($code_pos > 0)
             {
-                $success = $parser->eat($t[0], $t[1]);
-                if (!$success)
+                # We didn't yet reach the code beginning
+                my $str = $self->eat($code_pos);
+                if ($self->{options}->{eat_code_line})
                 {
-                    // Pass $in from last step so we skip to the beginning
-                    // of directive even if it just ended and $this->in_* == 0
-                    $this->skip_error(end($parser->parser->errors), $in);
+                    $str =~ s/\n[ \t]*$/\n/s;
                 }
-                $in = $this->in_code || $this->in_subst;
-            }
-            $parser->eat_eof();
-        }
-        catch (parse_error $e)
-        {
-            $this->options->error($e->getMessage());
-        }
-    }
-
-    function set_code($code)
-    {
-        $this->code = $code;
-        $this->codelen = strlen($this->code);
-        $this->pos = $this->lineno = 0;
-    }
-
-    function errorinfo()
-    {
-        $linestart = strrpos($this->code, "\n", $this->pos-$this->codelen-1) ?: -1;
-        $lineend = strpos($this->code, "\n", $this->pos) ?: $this->codelen;
-        $line = substr($this->code, $linestart+1, $this->pos-$linestart-1);
-        $line .= '^^^';
-        $line .= substr($this->code, $this->pos, $lineend-$this->pos);
-        return " in {$this->options->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
-    }
-
-    function warn($text)
-    {
-        $this->options->error($text.$this->errorinfo());
-    }
-
-    /**
-     * Skip a directive
-     */
-    function skip_error($e, $force = false)
-    {
-        if (substr($e, 0, 18) !== 'error not expected')
-        {
-            $this->warn($e);
-            if ($this->in_code || $this->in_subst || $force)
-            {
-                $this->in_code = $this->in_subst = 0;
-                $this->pos = $this->last_start;
-                $this->lineno = $this->last_start_line;
-                $this->force_literal = 1;
-            }
-        }
-    }
-
-    /**
-     * Read next token from the stream
-     * Returns array($token, $value) or false for EOF
-     */
-    sub _Lexer
-    {
-        if ($this->pos >= $this->codelen)
-        {
-            // End of code
-            return false;
-        }
-        if ($this->in_code <= 0 && $this->in_subst <= 0)
-        {
-            $code_pos = strpos($this->code, $this->options->begin_code, $this->pos+$this->force_literal);
-            $subst_pos = strpos($this->code, $this->options->begin_subst, $this->pos+$this->force_literal);
-            $this->force_literal = 0;
-            if ($code_pos === false && $subst_pos === false)
-            {
-                $r = array('literal', "'".addcslashes(substr($this->code, $this->pos), "'\\")."'");
-                $this->lineno += substr_count($r[1], "\n");
-                $this->pos = $this->codelen;
-            }
-            elseif ($subst_pos === false || $code_pos !== false && $subst_pos > $code_pos)
-            {
-                // Code starts closer
-                if ($code_pos > $this->pos)
-                {
-                    // We didn't yet reach the code beginning
-                    $str = substr($this->code, $this->pos, $code_pos-$this->pos);
-                    if ($this->options->eat_code_line)
-                    {
-                        $str = preg_replace('/\n[ \t]*$/s', "\n", $str);
-                    }
-                    $r = array('literal', "'".addcslashes($str, "'\\")."'");
-                    $this->lineno += substr_count($r[1], "\n");
-                    $this->pos = $code_pos;
-                }
-                elseif ($code_pos !== false)
-                {
-                    // We are at the code beginning ($this->pos == $code_pos)
-                    $i = $this->pos+strlen($this->options->begin_code);
-                    while ($i < $this->codelen && (($c = $this->code{$i}) == ' ' || $c == "\t"))
-                    {
-                        $i++;
-                    }
-                    if ($i < $this->codelen && $this->code{$i} == '#')
-                    {
-                        // Strip comment
-                        $i = strpos($this->code, $this->options->end_code, $i);
-                        $this->pos = $i ? $i+strlen($this->options->end_code) : $this->codelen;
-                        return $this->read_token();
-                    }
-                    $r = array('<!--', $this->options->begin_code);
-                    $this->last_start = $this->pos;
-                    $this->last_start_line = $this->lineno;
-                    $this->pos += strlen($this->options->begin_code);
-                    $this->in_code = 1;
-                }
+                $r = [ 'literal', "'".addcslashes($str, "'\\")."'" ];
             }
             else
             {
-                // Substitution is closer
-                if ($subst_pos > $this->pos)
+                # We are at the code beginning
+                my $i = length $self->{options}->{begin_code};
+                if ($self->{code} =~ /^.{$i}([ \t]+)/s)
                 {
-                    $r = array('literal', "'".addcslashes(substr($this->code, $this->pos, $subst_pos-$this->pos), "'\\")."'");
-                    $this->lineno += substr_count($r[1], "\n");
-                    $this->pos = $subst_pos;
+                    $i += length $1;
                 }
-                else
+                if ($i < length($self->{code}) && substr($self->{code}, $i, 1) eq '#')
                 {
-                    $r = array('{{', $this->options->begin_subst);
-                    $this->last_start = $this->pos;
-                    $this->last_start_line = $this->lineno;
-                    $this->pos++;
-                    $this->in_subst = 1;
+                    # Strip comment and retry
+                    $i = index($self->{code}, $self->{options}->{end_code}, $i);
+                    $i = $i >= 0 ? $i+length($self->{options}->{end_code}) : length $self->{code};
+                    $self->eat($i);
+                    return $self->read_token();
                 }
+                $r = [ '<!--', $self->{options}->{begin_code} ];
+                $self->{last_start} = length $self->{eaten};
+                $self->{last_start_line} = $self->{lineno};
+                $self->eat(length $self->{options}->{begin_code});
+                $self->{in_code} = 1;
             }
-            return $r;
-        }
-        while ($this->pos < $this->codelen)
-        {
-            // Skip whitespace
-            $t = $this->code{$this->pos};
-            if ($t == "\n")
-                $this->lineno++;
-            elseif ($t != "\t" && $t != ' ')
-                break;
-            $this->pos++;
-        }
-        if ($this->pos >= $this->codelen)
-        {
-            // End of code
-            return false;
-        }
-        if (preg_match('#[a-z_][a-z0-9_]*#Ais', $this->code, $m, 0, $this->pos))
-        {
-            $this->pos += strlen($m[0]);
-            if (isset($this->keywords[$l = strtoupper($m[0])]))
-            {
-                // Keyword
-                return array($l, $m[0]);
-            }
-            // Identifier
-            return array('name', $m[0]);
-        }
-        elseif (preg_match(
-            '/((\")(?:[^\"\\\\]+|\\\\.)*\"|\'(?:[^\'\\\\]+|\\\\.)*\''.
-            '|0\d+|\d+(\.\d+)?|0x\d+)/Ais', $this->code, $m, 0, $this->pos))
-        {
-            // String or numeric non-negative literal
-            $t = $m[1];
-            if (isset($m[2]))
-            {
-                $t = str_replace('$', '\\$', $t);
-            }
-            $this->pos += strlen($m[0]);
-            return array('literal', $t);
         }
         else
         {
-            // Special characters
-            foreach ($this->lens as $l)
+            # Substitution is closer
+            if ($subst_pos > 0)
             {
-                $a = $this->nchar[$l];
-                $t = substr($this->code, $this->pos, $l);
-                if (isset($a[$t]))
-                {
-                    $this->pos += $l;
-                    if ($this->in_code)
-                    {
-                        $this->in_code += ($t === $this->options->begin_code);
-                        $this->in_code -= ($t === $this->options->end_code);
-                        if (!$this->in_code)
-                        {
-                            if ($this->options->eat_code_line)
-                            {
-                                $p = $this->pos;
-                                while ($p < $this->codelen && (($c = $this->code{$p}) == ' ' || $c == "\t" || $c == "\r"))
-                                {
-                                    $p++;
-                                }
-                                if ($p < $this->codelen && $this->code{$p} == "\n")
-                                {
-                                    $p++;
-                                    if ($p < $this->codelen && $this->code{$p} == "\r")
-                                    {
-                                        $p++;
-                                    }
-                                    $this->pos = $p;
-                                }
-                            }
-                            return array('-->', $t);
-                        }
-                    }
-                    elseif ($this->in_subst)
-                    {
-                        $this->in_subst += ($t === $this->options->begin_subst);
-                        $this->in_subst -= ($t === $this->options->end_subst);
-                        if (!$this->in_subst)
-                        {
-                            return array('}}', $t);
-                        }
-                    }
-                    return array($t, false);
-                }
+                $r = [ 'literal', "'".addcslashes($self->eat($subst_pos), "'\\")."'" ];
             }
-            // Unknown character
-            $this->skip_error(
-                "Unexpected character '".$this->code{$this->pos}."'"
-            );
-            return array('error', false);
+            else
+            {
+                $r = [ '{{', $self->{options}->{begin_subst} ];
+                $self->{last_start} = length $self->{eaten};
+                $self->{last_start_line} = $self->{lineno};
+                $self->eat(length $self->{options}->{begin_subst});
+                $self->{in_subst} = 1;
+            }
         }
+        return @$r;
     }
+    # Skip whitespace
+    if ($self->{code} =~ /^(\s+)/)
+    {
+        $self->eat(length $1);
+    }
+    if (!length $self->{code})
+    {
+        # End of code
+        return;
+    }
+    if ($self->{code} =~ /^([a-z_][a-z0-9_]*)/is)
+    {
+        my $l = $1;
+        $self->eat(length $l);
+        if (exists $self->{keywords}->{uc $l})
+        {
+            # Keyword
+            return (uc $l, $l);
+        }
+        # Identifier
+        return ('name', $l);
+    }
+    elsif ($self->{code} =~ /^(
+        (\")(?:[^\"\\\\]+|\\\\.)*\" |
+        \'(?:[^\'\\\\]+|\\\\.)*\' |
+        0\d+ | \d+(\.\d+)? | 0x\d+)/xis)
+    {
+        # String or numeric non-negative literal
+        my $t = $1;
+        $self->eat(length $t);
+        if ($2)
+        {
+            $t =~ s/\$/\\\$/gso;
+        }
+        return ('literal', $t);
+    }
+    else
+    {
+        # Special characters
+        foreach my $l (@{$self->{lens}})
+        {
+            my $a = $self->{nchar}->{$l};
+            my $t = substr($self->{code}, 0, $l);
+            if (exists $a->{$t})
+            {
+                $self->eat($l);
+                if ($self->{in_code})
+                {
+                    $self->{in_code}++ if $t eq $self->{options}->{begin_code};
+                    $self->{in_code}-- if $t eq $self->{options}->{end_code};
+                    if (!$self->{in_code})
+                    {
+                        if ($self->{options}->{eat_code_line} &&
+                            $self->{code} =~ /^([ \t\r]+\n\r?)/so)
+                        {
+                            $self->eat(length $1);
+                        }
+                        return ('-->', $t);
+                    }
+                }
+                elsif ($self->{in_subst})
+                {
+                    $self->{in_subst}++ if $t eq $self->{options}->{begin_subst};
+                    $self->{in_subst}-- if $t eq $self->{options}->{end_subst};
+                    if (!$self->{in_subst})
+                    {
+                        return ('}}', $t);
+                    }
+                }
+                return ($t, undef);
+            }
+        }
+        # Unknown character
+        $self->warn("Unexpected character '".substr($self->{code}, 0, 1)."'");
+        return ('error', undef);
+    }
+}
+
+sub errorinfo
+{
+    my $self = shift;
+    my $linestart = rindex($self->{eaten}, "\n");
+    my $lineend = index($self->{code}, "\n");
+    $lineend = length($self->{code}) if $lineend < 0;
+    my $line = substr($self->{eaten}, $linestart+1) . '^^^' . substr($self->{code}, 0, $lineend);
+    my $charpos;
+    {
+        use bytes;
+        $charpos = length $self->{eaten};
+    }
+    return ' in '.$self->{options}->{input_filename}.', line '.($self->{lineno}+1).
+        ', character '.$charpos.', marked by ^^^ in '.$line;
+}
+
+sub warn
+{
+    my $self = shift;
+    my ($text) = @_;
+    $self->{options}->error($text.$self->errorinfo());
 }
