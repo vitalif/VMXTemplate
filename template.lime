@@ -338,6 +338,16 @@ varpart: '.' namekw/n {
 | '[' exp/e ']' {
     $$ = '['.$e[0].']';
   }
+| '.' name/n '(' ')' {
+    $$ = '->'.$n.'()';
+  }
+| '.' name/n '(' list/l ')' {
+    $argv = [];
+    foreach ($args as $a) {
+      $argv[] = $a[0];
+    }
+    $$ = '->'.$n.'('.implode(', ', $argv).')';
+  }
 .
 varpath: {
     $$ = '';
