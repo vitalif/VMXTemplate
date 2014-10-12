@@ -776,7 +776,7 @@ class VMXTemplateOptions
                 $this->$k = $v;
             }
         }
-        if ($this->strip_space)
+        if ($this->strip_space && array_search('strip_space', $this->filters) === false)
         {
             $this->filters[] = 'strip_space';
         }
