@@ -1190,22 +1190,25 @@ sub function_map
 
 ## Template inclusion
 
-# Include another template: parse('file.tpl'[, args])
+# Include another template: parse('file.tpl'[, <args>])
+# In all inclusion functions <args> may be a hash ref of a list of key+value pairs
+# All modifications to <args> (or to current global "template vars") done
+# by the included template are preserved after processing it!
 sub function_parse
 {
     my $self = shift;
     my $file = shift;
-    my $args = @_ > 1 ? { @_ } : $_[0];
-    return "\$self->{template}->parse_discard($file, undef, 'main', $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
+    return "\$self->{template}->parse_real($file, undef, 'main', $args)";
 }
 
-# Run block from current template: exec('block'[, args])
+# Run block from current template: exec('block'[, <args>])
 sub function_exec
 {
     my $self = shift;
     my $block = shift;
-    my $args = @_ > 1 ? { @_ } : $_[0];
-    return "\$self->{template}->parse_discard(\$FILENAME, undef, $block, $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
+    return "\$self->{template}->parse_real(\$FILENAME, undef, $block, $args)";
 }
 
 # Run block from another template: exec_from('file.tpl', 'block'[, args])
@@ -1214,29 +1217,29 @@ sub function_exec_from
     my $self = shift;
     my $file = shift;
     my $block = shift;
-    my $args = @_ > 1 ? { @_ } : $_[0];
-    return "\$self->{template}->parse_discard($file, undef, $block, $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
+    return "\$self->{template}->parse_real($file, undef, $block, $args)";
 }
 
 # (Not recommended, but possible)
 # Parse string as a template: parse('code'[, args])
-sub function_parse
+sub function_parse_inline
 {
     my $self = shift;
     my $code = shift;
-    my $args = @_ > 1 ? { @_ } : $_[0];
-    return "\$self->{template}->parse_discard(undef, $code, 'main', $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
+    return "\$self->{template}->parse_real(undef, $code, 'main', $args)";
 }
 
 # (Highly not recommended, but still possible)
 # Parse string as a template and run a named block from it: parse('code', 'block'[, args])
-sub function_parse
+sub function_exec_from_inline
 {
     my $self = shift;
     my $code = shift;
     my $block = shift;
-    my $args = @_ > 1 ? { @_ } : $_[0];
-    return "\$self->{template}->parse_discard(undef, $code, $block, $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
+    return "\$self->{template}->parse_real(undef, $code, $block, $args)";
 }
 
 1;
