@@ -1,5 +1,7 @@
 # Контекстно-свободная Parse::Yapp-грамматика шаблонизатора
 #
+# Компилировать так: yapp -o VMXTemplate.pm -t template.skel.pm template.yp
+#
 # {{ двойные скобки }} нужно исключительно чтобы маркеры начала и конца подстановки
 # были уникальны в грамматике. Вместо них обычно используются { одинарные }, а
 # выбор корректной лексемы - скобки или маркера - делает лексический анализатор.
@@ -13,11 +15,7 @@
 # * Олдстайл BEGIN .. END ликвидирован
 # * Возможно, нужно добавить в каком-то виде foreach ... as key => value
 #
-# P.S: Комментарии типа "#{" и "#}" служат, чтобы тупой Parse::Yapp понимал парные скобки
-
-%{
-VMXTemplate::Utils::import();
-%}
+# P.S: Комментарии типа "#{" и "#}" служат, чтобы у тупого Parse::Yapp'а число скобок сходилось
 
 %start template
 
@@ -82,7 +80,7 @@ chunks: {
   }
 ;
 chunk: literal {
-    '$t .= ' . $_[1] . ";\n";
+    '$t .= ' . $_[1][0] . ";\n";
   }
 | '<!--' code_chunk '-->' {
     $_[2];
@@ -210,22 +208,22 @@ exp: exp '..' exp {
     [ '!$self->lt(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
   }
 | exp '+' exp {
-    [ '(' . $_[1][0] . ' + ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' + ' . $_[3][0] . ')', 'i' ];
   }
 | exp '-' exp {
-    [ '(' . $_[1][0] . ' - ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' - ' . $_[3][0] . ')', 'i' ];
   }
 | exp '&' exp {
-    [ '(' . $_[1][0] . ' & ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' & ' . $_[3][0] . ')', 'i' ];
   }
 | exp '*' exp {
-    [ '(' . $_[1][0] . ' * ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' * ' . $_[3][0] . ')', 'i' ];
   }
 | exp '/' exp {
-    [ '(' . $_[1][0] . ' / ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' / ' . $_[3][0] . ')', 'i' ];
   }
 | exp '%' exp {
-    [ '(' . $_[1][0] . ' % ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ' % ' . $_[3][0] . ')', 'i' ];
   }
 | p10
 ;
@@ -248,9 +246,7 @@ p11: nonbrace
 nonbrace: '{' hash '}' {
     [ "{ " . $_[2] . " }", 1 ];
   }
-| literal {
-    [ $1, 1 ];
-  }
+| literal
 | varref
 | name '(' ')' {
     $_[0]->{template}->compile_function($_[1], []);
@@ -263,20 +259,6 @@ nonbrace: '{' hash '}' {
   }
 | name nonbrace {
     $_[0]->{template}->compile_function($_[1], [ $_[3] ]);
-  }
-| method '(' ')' {
-    [ $_[1].'()', 1 ];
-  }
-| method '(' list ')' {
-    my $argv = [];
-    foreach my $a (@{$_[3]}) {
-      push @$argv, $a->[0];
-    }
-    [ $_[1].'('.join(', ', @$argv).')', 1 ];
-  }
-;
-method: varref '.' name {
-    $_[1][0].'->'.$_[3];
   }
 ;
 list: exp {
@@ -331,6 +313,12 @@ varpart: '.' name {
 | '[' exp ']' {
     ($_[2][1] eq 'i' ? '['.$_[2][0].']' : "{".$_[2][0]."}");
   }
+| '.' name '(' ')' {
+    '->'.$_[2].'()';
+  }
+| '.' name '(' list ')' {
+    '->'.$_[2].'('.join(', ', map { $_->[0] } @{$_[4]}).')';
+  }
 ;
 varpath: {
     '';
@@ -341,430 +329,3 @@ varpath: {
 ;
 
 %%
-
-# Possible tokens consisting of special characters
-my $chartokens = '+ - = * / % ! , . < > ( ) { } [ ] & .. || && == != <= >= =>';
-
-# Reserved keywords
-my $keywords_str = 'OR XOR AND NOT IF ELSE ELSIF ELSEIF END SET FOR FOREACH FUNCTION BLOCK MACRO';
-
-sub _Lexer
-{
-    my ($parser) = shift;
-    return $parser->{__lexer}->read_token;
-}
-
-sub _error
-{
-    my ($self) = @_;
-    $self->{__lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
-    $self->{__lexer}->skip_error;
-}
-
-sub compile
-{
-    my ($self, $text) = @_;
-    $self->{__lexer} ||= new VMXTemplate::Lexer($self, $self->{__options});
-    $self->{__lexer}->set_code($text);
-    $self->YYParse(yylex => \&_Lexer, yyerror => \&_error);
-}
-
-package VMXTemplate::Lexer;
-
-sub new
-{
-    my $class = shift;
-    $class = ref($class) || $class;
-    my ($options) = @_;
-
-    my $self = bless {
-        options => $options,
-
-        # Input
-        code => '',
-        eaten => '',
-        lineno => 0,
-
-        # Preprocessed keyword tokens
-        nchar => {},
-        lens => [],
-        keywords => { map { $_ => 1 } split / /, $keywords_str },
-
-        # Last directive start position, directive and substitution start/end counters
-        last_start => 0,
-        last_start_line => 0,
-        in_code => 0,
-        in_subst => 0,
-    }, $class;
-
-    foreach (split(/ /, $chartokens))
-    {
-        $self->{nchar}{length($_)}{$_} = 1;
-    }
-    # Add code fragment finishing tokens
-    $self->{nchar}{length($self->{options}->{end_code})}{$self->{options}->{end_code}} = 1;
-    if ($self->{options}->{end_subst})
-    {
-        $self->{nchar}{length($self->{options}->{end_subst})}{$self->{options}->{end_subst}} = 1;
-    }
-    # Reverse-sort lengths
-    $self->{lens} = [ sort { $b <=> $a } keys %{$self->{nchar}} ];
-
-    return $self;
-}
-
-sub set_code
-{
-    my $self = shift;
-    my ($code) = @_;
-    $self->{code} = $code;
-    $self->{eaten} = '';
-    $self->{lineno} = $self->{in_code} = $self->{in_subst} = 0;
-    $self->{last_start} = $self->{last_start_line} = 0;
-}
-
-sub eat
-{
-    my $self = shift;
-    my ($len) = @_;
-    my $str = substr($self->{code}, 0, $len, '');
-    $self->{eaten} .= $str;
-    $self->{lineno} += ($str =~ tr/\n/\n/);
-    return $str;
-}
-
-sub skip_error
-{
-    my ($self) = @_;
-    $self->{code} = substr($self->{eaten}, $self->{last_start}+1, length($self->{eaten}), '') . $self->{code};
-    $self->{lineno} = $self->{last_start_line};
-    $self->{in_code} = $self->{in_subst} = 0;
-}
-
-sub read_token
-{
-    my $self = shift;
-    if (!length $self->{code})
-    {
-        # End of code
-        return;
-    }
-    if ($self->{in_code} <= 0 && $self->{in_subst} <= 0)
-    {
-        my $r;
-        my $code_pos = index($self->{code}, $self->{options}->{begin_code});
-        my $subst_pos = index($self->{code}, $self->{options}->{begin_subst});
-        if ($code_pos == -1 && $subst_pos == -1)
-        {
-            # No more directives
-            $r = [ 'literal', "'".addcslashes($self->eat(length $self->{code}), "'\\")."'" ];
-        }
-        elsif ($subst_pos == -1 || $code_pos >= 0 && $subst_pos > $code_pos)
-        {
-            # Code starts closer
-            if ($code_pos > 0)
-            {
-                # We didn't yet reach the code beginning
-                my $str = $self->eat($code_pos);
-                if ($self->{options}->{eat_code_line})
-                {
-                    $str =~ s/\n[ \t]*$/\n/s;
-                }
-                $r = [ 'literal', "'".addcslashes($str, "'\\")."'" ];
-            }
-            else
-            {
-                # We are at the code beginning
-                my $i = length $self->{options}->{begin_code};
-                if ($self->{code} =~ /^.{$i}([ \t]+)/s)
-                {
-                    $i += length $1;
-                }
-                if ($i < length($self->{code}) && substr($self->{code}, $i, 1) eq '#')
-                {
-                    # Strip comment and retry
-                    $i = index($self->{code}, $self->{options}->{end_code}, $i);
-                    $i = $i >= 0 ? $i+length($self->{options}->{end_code}) : length $self->{code};
-                    $self->eat($i);
-                    return $self->read_token();
-                }
-                $r = [ '<!--', $self->{options}->{begin_code} ];
-                $self->{last_start} = length $self->{eaten};
-                $self->{last_start_line} = $self->{lineno};
-                $self->eat(length $self->{options}->{begin_code});
-                $self->{in_code} = 1;
-            }
-        }
-        else
-        {
-            # Substitution is closer
-            if ($subst_pos > 0)
-            {
-                $r = [ 'literal', "'".addcslashes($self->eat($subst_pos), "'\\")."'" ];
-            }
-            else
-            {
-                $r = [ '{{', $self->{options}->{begin_subst} ];
-                $self->{last_start} = length $self->{eaten};
-                $self->{last_start_line} = $self->{lineno};
-                $self->eat(length $self->{options}->{begin_subst});
-                $self->{in_subst} = 1;
-            }
-        }
-        return @$r;
-    }
-    # Skip whitespace
-    if ($self->{code} =~ /^(\s+)/)
-    {
-        $self->eat(length $1);
-    }
-    if (!length $self->{code})
-    {
-        # End of code
-        return;
-    }
-    if ($self->{code} =~ /^([a-z_][a-z0-9_]*)/is)
-    {
-        my $l = $1;
-        $self->eat(length $l);
-        if (exists $self->{keywords}->{uc $l})
-        {
-            # Keyword
-            return (uc $l, $l);
-        }
-        # Identifier
-        return ('name', $l);
-    }
-    elsif ($self->{code} =~ /^(
-        (\")(?:[^\"\\\\]+|\\\\.)*\" |
-        \'(?:[^\'\\\\]+|\\\\.)*\' |
-        0\d+ | \d+(\.\d+)? | 0x\d+)/xis)
-    {
-        # String or numeric non-negative literal
-        my $t = $1;
-        $self->eat(length $t);
-        if ($2)
-        {
-            $t =~ s/\$/\\\$/gso;
-        }
-        return ('literal', $t);
-    }
-    else
-    {
-        # Special characters
-        foreach my $l (@{$self->{lens}})
-        {
-            my $a = $self->{nchar}->{$l};
-            my $t = substr($self->{code}, 0, $l);
-            if (exists $a->{$t})
-            {
-                $self->eat($l);
-                if ($self->{in_code})
-                {
-                    $self->{in_code}++ if $t eq $self->{options}->{begin_code};
-                    $self->{in_code}-- if $t eq $self->{options}->{end_code};
-                    if (!$self->{in_code})
-                    {
-                        if ($self->{options}->{eat_code_line} &&
-                            $self->{code} =~ /^([ \t\r]+\n\r?)/so)
-                        {
-                            $self->eat(length $1);
-                        }
-                        return ('-->', $t);
-                    }
-                }
-                elsif ($self->{in_subst})
-                {
-                    $self->{in_subst}++ if $t eq $self->{options}->{begin_subst};
-                    $self->{in_subst}-- if $t eq $self->{options}->{end_subst};
-                    if (!$self->{in_subst})
-                    {
-                        return ('}}', $t);
-                    }
-                }
-                return ($t, undef);
-            }
-        }
-        # Unknown character
-        $self->warn("Unexpected character '".substr($self->{code}, 0, 1)."'");
-        return ('error', undef);
-    }
-}
-
-sub errorinfo
-{
-    my $self = shift;
-    my $linestart = rindex($self->{eaten}, "\n");
-    my $lineend = index($self->{code}, "\n");
-    $lineend = length($self->{code}) if $lineend < 0;
-    my $line = substr($self->{eaten}, $linestart+1) . '^^^' . substr($self->{code}, 0, $lineend);
-    my $charpos;
-    {
-        use bytes;
-        $charpos = length $self->{eaten};
-    }
-    return ' in '.$self->{options}->{input_filename}.', line '.($self->{lineno}+1).
-        ', character '.$charpos.', marked by ^^^ in '.$line;
-}
-
-sub warn
-{
-    my $self = shift;
-    my ($text) = @_;
-    $self->{options}->error($text.$self->errorinfo());
-}
-
-package VMXTemplate::Utils;
-
-use base qw(Exporter);
-our @EXPORT = qw(
-    TS_UNIX TS_DB TS_DB_DATE TS_MW TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
-    timestamp plural_ru strlimit strip_tags addcslashes
-);
-
-use constant {
-    TS_UNIX     => 0,
-    TS_DB       => 1,
-    TS_DB_DATE  => 2,
-    TS_MW       => 3,
-    TS_EXIF     => 4,
-    TS_ORACLE   => 5,
-    TS_ISO_8601 => 6,
-    TS_RFC822   => 7,
-};
-
-my @Mon = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
-my %mon = qw(jan 0 feb 1 mar 2 apr 3 may 4 jun 5 jul 6 aug 7 sep 8 oct 9 nov 10 dec 11);
-my @Wday = qw(Sun Mon Tue Wed Thu Fri Sat);
-
-our $safe_tags = 'div|blockquote|span|a|b|i|u|p|h1|h2|h3|h4|h5|h6|strike|strong|small|big|blink|center|ol|pre|sub|sup|font|br|table|tr|td|th|tbody|tfoot|thead|tt|ul|li|em|img|marquee|cite';
-
-# ограниченная распознавалка дат
-sub timestamp
-{
-    my ($ts, $format) = @_;
-
-    require POSIX;
-    if (int($ts) eq $ts)
-    {
-        # TS_UNIX or Epoch
-        $ts = time if !$ts;
-    }
-
-    elsif ($ts =~ /^\D*(\d{4,}?)\D*(\d{2})\D*(\d{2})\D*(?:(\d{2})\D*(\d{2})\D*(\d{2})\D*([\+\- ]\d{2}\D*)?)?$/so)
-    {
-        # TS_DB, TS_DB_DATE, TS_MW, TS_EXIF, TS_ISO_8601
-        $ts = POSIX::mktime($6||0, $5||0, $4||0, $3, $2-1, $1-1900);
-    }
-    elsif ($ts =~ /^\s*(\d\d?)-(...)-(\d\d(?:\d\d)?)\s*(\d\d)\.(\d\d)\.(\d\d)/so)
-    {
-        # TS_ORACLE
-        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3 < 100 ? $3 : $3-1900);
-    }
-    elsif ($ts =~ /^\s*..., (\d\d?) (...) (\d{4,}) (\d\d):(\d\d):(\d\d)\s*([\+\- ]\d\d)\s*$/so)
-    {
-        # TS_RFC822
-        $ts = POSIX::mktime($6, $5, $4, int($1), $mon{lc $2}, $3-1900);
-    }
-    else
-    {
-        # Bogus value, return undef
-        return undef;
-    }
-
-    if (!$format)
-    {
-        # TS_UNIX
-        return $ts;
-    }
-    elsif ($format == TS_MW)
-    {
-        return POSIX::strftime("%Y%m%d%H%M%S", localtime($ts));
-    }
-    elsif ($format == TS_DB)
-    {
-        return POSIX::strftime("%Y-%m-%d %H:%M:%S", localtime($ts));
-    }
-    elsif ($format == TS_DB_DATE)
-    {
-        return POSIX::strftime("%Y-%m-%d", localtime($ts));
-    }
-    elsif ($format == TS_ISO_8601)
-    {
-        return POSIX::strftime("%Y-%m-%dT%H:%M:%SZ", localtime($ts));
-    }
-    elsif ($format == TS_EXIF)
-    {
-        return POSIX::strftime("%Y:%m:%d %H:%M:%S", localtime($ts));
-    }
-    elsif ($format == TS_RFC822)
-    {
-        my @l = localtime($ts);
-        return POSIX::strftime($Wday[$l[6]].", %d ".$Mon[$l[4]]." %Y %H:%M:%S %z", @l);
-    }
-    elsif ($format == TS_ORACLE)
-    {
-        my @l = localtime($ts);
-        return POSIX::strftime("%d-".$Mon[$l[4]]."-%Y %H.%M.%S %p", @l);
-    }
-    return $ts;
-}
-
-# Select one of 3 plural forms for russian language
-sub plural_ru
-{
-    my ($count, $one, $few, $many) = @_;
-    my $sto = $count % 100;
-    if ($sto >= 10 && $sto <= 20)
-    {
-        return $many;
-    }
-    my $r = $count % 10;
-    if ($r == 1)
-    {
-        return $one;
-    }
-    elsif ($r >= 2 && $r <= 4)
-    {
-        return $few;
-    }
-    return $many;
-}
-
-# Limit string to $maxlen
-sub strlimit
-{
-    my ($str, $maxlen, $dots) = @_;
-    if (!$maxlen || $maxlen < 1 || length($str) <= $maxlen)
-    {
-        return $str;
-    }
-    $str = substr($str, 0, $maxlen);
-    my $p = rindex($str, ' ');
-    if ($p < 0 || (my $pt = rindex($str, "\t")) > $p)
-    {
-        $p = $pt;
-    }
-    if ($p > 0)
-    {
-        $str = substr($str, 0, $p);
-    }
-    return $str . (defined $dots ? $dots : '...');
-}
-
-# Replace (some) tags with whitespace
-sub strip_tags
-{
-    my ($str, $allowed) = @_;
-    my $allowed = $allowed ? '(?!/?('.$allowed.'))' : '';
-    $str =~ s/(<$allowed\/?[a-z][a-z0-9-]*(\s+[^<>]*)?>\s*)+/ /gis;
-    return $str;
-}
-
-# Add '\' before specified chars
-sub addcslashes
-{
-    my ($str, $escape) = @_;
-    $str =~ s/([$escape])/\\$1/gs;
-    return $str;
-}
