@@ -68,7 +68,7 @@
 %%
 
 template: chunks {
-    $_[0]->{template}->{st}->{functions}->{main}->{body} = "sub fn_main() {\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
+    $_[0]->{functions}->{main}->{body} = "sub fn_main {\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -86,14 +86,14 @@ chunk: literal {
     $_[2];
   }
 | '{{' exp '}}' {
-    '$t .= ' . ($_[2][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[2][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
+    '$t .= ' . ($_[2][1] || !$_[0]->{compiler}->{options}->{auto_escape} ? $_[2][0] : $_[0]->{compiler}->compile_function($_[0]->{compiler}->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
   }
 | error {
     '';
   }
 ;
 code_chunk: c_if | c_set | c_fn | c_for | exp {
-    '$t .= ' . ($_[1][1] || !$_[0]->{template}->{options}->{auto_escape} ? $_[1][0] : $_[0]->{template}->compile_function($_[0]->{template}->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
+    '$t .= ' . ($_[1][1] || !$_[0]->{compiler}->{options}->{auto_escape} ? $_[1][0] : $_[0]->{compiler}->compile_function($_[0]->{compiler}->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
   }
 ;
 c_if: 'IF' exp '-->' chunks '<!--' 'END' {
@@ -127,24 +127,22 @@ c_set: 'SET' varref '=' exp {
     "push \@\$stack, \$t;\n\$t = '';\n" . $_[4] . $_[2][0] . " = \$t;\n\$t = pop(\@\$stack);\n";
   }
 ;
-c_fn: fn name '(' arglist ')' '=' exp {
-    $_[0]->{template}->{st}->{functions}->{$_[2]} = {
-      'name' => $_[2],
-      'args' => $_[4],
-      'body' => 'sub fn_'.$_[2]." () {\nreturn ".$_[7].";\n}\n",
-      #'line' => $line, Ой, я чо - аргументы не юзаю?
-      #'pos' => $pos,
+fn_def: fn name '(' arglist ')' {
+    $_[0]->{functions}->{$_[2]} = {
+      name => $_[2],
+      args => $_[4],
+      line => $_[0]->{lexer}->line,
+      pos => $_[0]->{lexer}->pos,
+      body => 'sub fn_'.$_[2],
     };
+  }
+;
+c_fn: fn_def '=' exp {
+    $_[1]->{body} .= " {\nreturn ".$_[3].";\n}\n";
     '';
   }
-| fn name '(' arglist ')' '-->' chunks '<!--' 'END' {
-    $_[0]->{template}->{st}->{functions}->{$_[2]} = {
-      'name' => $_[2],
-      'args' => $_[4],
-      'body' => 'sub fn_'.$_[2]." () {\nmy \$stack = [];\nmy \$t = '';\n".$_[7]."\nreturn \$t;\n}\n",
-      #'line' => $line,
-      #'pos' => $pos,
-    };
+| fn_def '-->' chunks '<!--' 'END' {
+    $_[1]->{body} .= " {\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -155,7 +153,7 @@ c_for: for varref '=' exp '-->' chunks '<!--' 'END' {
     #{
     my $varref_index = substr($varref[0], 0, -1) . ".'_index'}";
     "push \@\$stack, ".$varref[0].", ".$varref_index.", 0;
-foreach my \$item (array1($exp[0])) {
+foreach my \$item (array_items($exp[0])) {
 ".$varref[0]." = \$item;
 ".$varref_index." = \$stack[count(\$stack)-1]++;
 ".$cs."}
@@ -249,16 +247,16 @@ nonbrace: '{' hash '}' {
 | literal
 | varref
 | name '(' ')' {
-    $_[0]->{template}->compile_function($_[1], []);
+    $_[0]->{compiler}->compile_function($_[1], []);
   }
 | name '(' list ')' {
-    $_[0]->{template}->compile_function($_[1], $_[3]);
+    $_[0]->{compiler}->compile_function($_[1], $_[3]);
   }
 | name '(' gthash ')' {
-    [ "\$self->{parent}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{__lexer}->errorinfo(), "'\\")."')", 1 ];
+    [ "\$self->{template}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'\\")."')", 1 ];
   }
 | name nonbrace {
-    $_[0]->{template}->compile_function($_[1], [ $_[3] ]);
+    $_[0]->{compiler}->compile_function($_[1], [ $_[3] ]);
   }
 ;
 list: exp {

@@ -20,6 +20,7 @@ sub new
 {
     my $class = shift;
     $class = ref($class) || $class;
+    my ($compiler) = @_;
     return bless $class->SUPER::new(
         yyversion => '<<$version>>',
         yystates =>
@@ -27,6 +28,8 @@ sub new
         yyrules =>
 <<$rules>>,
 #line 30 "template.skel.pm"
+        compiler => $compiler,
+        lexer => undef,
         @_
     ), $class;
 }
@@ -34,22 +37,39 @@ sub new
 sub _Lexer
 {
     my ($parser) = shift;
-    return $parser->{__lexer}->read_token;
+    return $parser->{lexer}->read_token;
 }
 
 sub _error
 {
     my ($self) = @_;
-    $self->{__lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
-    $self->{__lexer}->skip_error;
+    $self->{lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
+    $self->{lexer}->skip_error;
 }
 
 sub compile
 {
     my ($self, $text) = @_;
-    $self->{__lexer} ||= new VMXTemplate::Lexer($self, $self->{__options});
-    $self->{__lexer}->set_code($text);
+    $self->{lexer} ||= new VMXTemplate::Lexer($self, $self->{compiler}->{options});
+    $self->{lexer}->set_code($text);
+    $self->{functions} = {
+        main => {
+            name => 'main',
+            args => [],
+            body => '',
+            line => 0,
+            pos => 0,
+        },
+    };
     $self->YYParse(yylex => \&_Lexer, yyerror => \&_error);
+    if (!$self->{functions}->{main}->{body})
+    {
+        # Parse error?
+        delete $self->{functions}->{main};
+    }
+    return "use VMXTemplate::Utils;\n".
+        "our \$FUNCTIONS = { ".join(", ", map { "$_ => 1" } keys %{$self->{functions}})." };\n".
+        join("\n", map { $_->{body} } values %{$self->{functions}})
 }
 
 package VMXTemplate::Lexer;
@@ -120,6 +140,19 @@ sub eat
     $self->{eaten} .= $str;
     $self->{lineno} += ($str =~ tr/\n/\n/);
     return $str;
+}
+
+sub pos
+{
+    my $self = shift;
+    use bytes;
+    return length $self->{eaten};
+}
+
+sub line
+{
+    my $self = shift;
+    return $self->{lineno};
 }
 
 sub skip_error
@@ -287,13 +320,8 @@ sub errorinfo
     my $lineend = index($self->{code}, "\n");
     $lineend = length($self->{code}) if $lineend < 0;
     my $line = substr($self->{eaten}, $linestart+1) . '^^^' . substr($self->{code}, 0, $lineend);
-    my $charpos;
-    {
-        use bytes;
-        $charpos = length $self->{eaten};
-    }
     return ' in '.$self->{options}->{input_filename}.', line '.($self->{lineno}+1).
-        ', character '.$charpos.', marked by ^^^ in '.$line;
+        ', byte '.$self->pos.', marked by ^^^ in '.$line;
 }
 
 sub warn
@@ -305,10 +333,15 @@ sub warn
 
 package VMXTemplate::Utils;
 
+use Encode;
+
 use base qw(Exporter);
 our @EXPORT = qw(
     TS_UNIX TS_DB TS_DB_DATE TS_MW TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
-    timestamp plural_ru strlimit strip_tags addcslashes requote
+    timestamp plural_ru strlimit htmlspecialchars strip_tags strip_unsafe_tags
+    addcslashes requote quotequote sql_quote regex_replace str_replace
+    array_slice array_div encode_json trim html_pbr array_items utf8on
+    exec_subst exec_pairs exec_is_array exec_get exec_cmp
 );
 
 use constant {
@@ -578,9 +611,68 @@ sub html_pbr
     return $s;
 }
 
-package VMXTemplate::Exception;
+# helper - returns array elements or just scalar, if it's not an arrayref
+sub array_items
+{
+    ref($_[0]) && $_[0] =~ /ARRAY/ ? @{$_[0]} : (defined $_[0] ? ($_[0]) : ());
+}
 
-VMXTemplate::Utils::import();
+# recursive utf8_on and return result
+sub utf8on
+{
+    if (ref($_[0]) && $_[0] =~ /HASH/so)
+    {
+        utf8on($_[0]->{$_}) for keys %{$_[0]};
+    }
+    elsif (ref($_[0]) && $_[0] =~ /ARRAY/so)
+    {
+        utf8on($_) for @{$_[0]};
+    }
+    else
+    {
+        Encode::_utf8_on($_[0]);
+    }
+    return $_[0];
+}
+
+# function subst()
+sub exec_subst
+{
+    my $str = shift;
+    $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/$_[($2||$3)-1]/gisoe;
+    return $str;
+}
+
+# array of sorted key-value pairs for hash: [ { key => ..., value => ... }, ... ]
+sub exec_pairs
+{
+    my $hash = shift;
+    return [ map { { key => $_, value => $hash->{$_} } } sort keys %{ $hash || {} } ];
+}
+
+# check if the argument is an arrayref
+sub exec_is_array
+{
+    return ref $_[1] && $_[1] =~ /ARRAY/;
+}
+
+# get array or hash element
+sub exec_get
+{
+    defined $_[1] && ref $_[0] || return $_[0];
+    $_[0] =~ /ARRAY/ && return $_[0]->[$_[1]];
+    return $_[0]->{$_[1]};
+}
+
+# type-dependent comparison
+sub exec_cmp
+{
+    my ($a, $b) = @_;
+    my $n = grep /^-?\d+(\.\d+)?$/, $a, $b;
+    return $n ? $a <=> $b : $a cmp $b;
+}
+
+package VMXTemplate::Exception;
 
 sub new
 {
@@ -592,6 +684,8 @@ sub new
 
 package VMXTemplate::Options;
 
+VMXTemplate::Utils::import();
+
 sub new
 {
     my $class = shift;
@@ -601,9 +695,9 @@ sub new
     my $self = bless {
         begin_code    => '<!--',    # instruction start
         end_code      => '-->',     # instruction end
-        begin_subst   => '{',       # substitution start (may be turned off via false)
-        end_subst     => '}',       # substitution end (may be turned off via false)
-        no_code_subst => 0,         # do not substitute expressions in instructions
+        begin_subst   => '{',       # substitution start (set to '' to turn off)
+        end_subst     => '}',       # substitution end (set to '' to turn off)
+        no_code_subst => 0,         # only evaluate instructions, but ignore their results
         eat_code_line => 1,         # remove the "extra" lines which contain instructions only
         root          => '.',       # directory with templates
         cache_dir     => undef,     # compiled templates cache directory
@@ -697,7 +791,6 @@ sub new
 
     my $self = bless {
         tpldata => {},
-        parent => undef,
         failed => {},
         function_search_path => {},
         options => new VMXTemplate::Options($options),
@@ -708,43 +801,6 @@ sub new
 }
 
 package VMXTemplate::Compiler;
-
-# function subst()
-sub exec_subst
-{
-    my $str = shift;
-    $str =~ s/(?<!\\)((?:\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/$_[($2||$3)-1]/gisoe;
-    return $str;
-}
-
-# array of sorted key-value pairs for hash: [ { key => ..., value => ... }, ... ]
-sub exec_pairs
-{
-    my $hash = shift;
-    return [ map { { key => $_, value => $hash->{$_} } } sort keys %{ $hash || {} } ];
-}
-
-# check if the argument is an arrayref
-sub exec_is_array
-{
-    return ref $_[1] && $_[1] =~ /ARRAY/;
-}
-
-# get array or hash element
-sub exec_get
-{
-    defined $_[1] && ref $_[0] || return $_[0];
-    $_[0] =~ /ARRAY/ && return $_[0]->[$_[1]];
-    return $_[0]->{$_[1]};
-}
-
-# type-dependent comparison
-sub exec_cmp
-{
-    my ($a, $b) = @_;
-    my $n = grep /^-?\d+(\.\d+)?$/, $a, $b;
-    return $n ? $a <=> $b : $a cmp $b;
-}
 
 # Function aliases
 my $functions = {
@@ -868,182 +924,7 @@ my $functionSafeness = {
     'yesno'             => Q_ALL_BUT_FIRST,
 };
 
-sub fmop
-{
-    my $op = shift;
-    return "((" . join(") $op (", @_) . "))";
-}
-
-# логические операции
-sub function_or      { fmop('||', @_) }
-sub function_and     { fmop('&&', @_) }
-sub function_not     { "!($_[1])" }
-# арифметические операции
-sub function_add     { fmop('+', @_) }
-sub function_sub     { fmop('-', @_) }
-sub function_mul     { fmop('*', @_) }
-sub function_div     { fmop('/', @_) }
-sub function_mod     { fmop('%', @_) }
-# логарифм
-sub function_log     { "log($_[1])" }
-# чётный, нечётный
-sub function_even    { "!(($_[1]) & 1)" }
-sub function_odd     { "(($_[1]) & 1)" }
-# приведение к целому числу
-sub function_int     { "int($_[1])" }
-# сравнения: = != > < >= <= (типозависимые)
-sub function_eq      { "(exec_cmp($_[1], $_[2]) == 0)" }
-sub function_ne      { "(exec_cmp($_[1], $_[2]) != 0)" }
-sub function_gt      { "(exec_cmp($_[1], $_[2]) > 0)" }
-sub function_lt      { "(exec_cmp($_[1], $_[2]) < 0)" }
-sub function_ge      { "(exec_cmp($_[1], $_[2]) >= 0)" }
-sub function_le      { "(exec_cmp($_[1], $_[2]) <= 0)" }
-# сравнения: = != > < >= <= (строковые)
-sub function_seq     { "(($_[1]) eq ($_[2]))" }
-sub function_sne     { "(($_[1]) ne ($_[2]))" }
-sub function_sgt     { "(($_[1]) gt ($_[2]))" }
-sub function_slt     { "(($_[1]) lt ($_[2]))" }
-sub function_sge     { "(($_[1]) ge ($_[2]))" }
-sub function_sle     { "(($_[1]) le ($_[2]))" }
-# сравнения: = != > < >= <= (численные)
-sub function_neq     { "(($_[1]) == ($_[2]))" }
-sub function_nne     { "(($_[1]) != ($_[2]))" }
-sub function_ngt     { "(($_[1]) >  ($_[2]))" }
-sub function_nlt     { "(($_[1]) <  ($_[2]))" }
-sub function_nge     { "(($_[1]) >= ($_[2]))" }
-sub function_nle     { "(($_[1]) <= ($_[2]))" }
-# тернарный оператор $1 ? $2 : $3
-sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
-
-## Строки
-
-# нижний и верхний регистр
-sub function_lc             { "lc($_[1])" }
-sub function_uc             { "uc($_[1])" }
-# нижний и верхний регистр первого символа
-sub function_lcfirst        { "lcfirst($_[1])" }
-sub function_ucfirst        { "ucfirst($_[1])" }
-# экранировать двойные и одинарные кавычки в стиле C (добавить \)
-sub function_quote          { "quotequote($_[1])" }
-# экранировать двойные кавычки в стиле SQL/CSV (удвоением)
-sub function_sql_quote      { "sql_quote($_[1])" }
-# экранирование символов, специальных для регулярного выражения
-sub function_requote        { "requote($_[1])" }
-# кодировать символы в стиле URL
-sub function_urlencode      { shift; "URI::Escape::uri_escape(".join(",",@_).")" }
-# декодировать символы в стиле URL
-sub function_urldecode      { shift; "URI::Escape::uri_unescape(".join(",",@_).")" }
-# замена регэкспов
-sub function_replace        { "regex_replace($_[1], $_[2], $_[3])" }
-# замена подстрок (а не регэкспов)
-sub function_str_replace    { "str_replace($_[1], $_[2], $_[3])" }
-# длина строки в символах
-sub function_strlen         { "strlen($_[1])" }
-# подстрока
-sub function_substr         { shift; "substr(".join(",", @_).")" }
-# обрезать пробелы из начала и конца строки
-sub function_trim           { shift; "trim($_[0])" }
-# разделить строку $2 по регулярному выражению $1 опционально с лимитом $3
-sub function_split          { shift; "split(".join(",", @_).")" }
-# заменить символы & < > " ' на HTML-сущности
-sub function_html           { "htmlspecialchars($_[1])" }
-# удалить все HTML-теги
-sub function_strip          { "strip_tags($_[1])" }
-# оставить только "безопасные" HTML-теги
-sub function_strip_unsafe   { "strip_unsafe_tags($_[1])" }
-# заменить \n на <br />
-sub function_nl2br          { "regex_replace(qr/\\n/s, '<br />', $_[1])" }
-# конкатенация строк
-sub function_concat         { fmop('.', @_) }
-# объединяет не просто скаляры, а также все элементы массивов
-sub function_join           { fearr('join', 1, @_) }
-# подставляет на места $1, $2 и т.п. в строке аргументы
-sub function_subst          { fearr('exec_subst', 1, @_) }
-# sprintf
-sub function_sprintf        { fearr('sprintf', 1, @_) }
-# strftime
-sub function_strftime
-{
-    my $self = shift;
-    my ($fmt, $date, $time) = @_;
-    $date = "($date).' '.($time)" if $time;
-    $date = "POSIX::strftime($date, localtime(timestamp($date)))";
-    $date = "utf8on($date)" if $self->{use_utf8};
-    return $date;
-}
-# ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что.
-sub function_strlimit       { shift; "strlimit(".join(",", @_).")" }
-# выбор правильной формы множественного числа для русского языка
-sub function_plural_ru      { shift; "plural_ru(".join(",", @_).")" }
-
-## Массивы и хеши
-
-# создание хеша
-sub function_hash           { shift; @_ == 1 ? "{ \@{ $_[0] } }" : "{" . join(",", @_) . "}"; }
-# hash keys, values
-sub function_keys           { '[ keys(%{'.$_[1].'}) ]'; }
-sub function_values         { '[ values(%{'.$_[1].'}) ]'; }
-# сортировка массива
-sub function_sort           { '[ '.fearr('sort', 0, @_).' ]'; }
-# пары { id => ключ, name => значение } для хеша
-sub function_pairs          { "exec_pairs($_[1])" }
-# создание массива
-sub function_array          { shift; "[" . join(",", @_) . "]"; }
-# диапазон значений
-sub function_range          { "[ $_[1] .. $_[2] ]" }
-# проверка, аргумент - массив или не массив?
-sub function_is_array       { "exec_is_array($_[1])" }
-# количество элементов _массива_ (не хеша)
-sub function_count          { "(ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0)" }
-# подмассив по номерам элементов
-sub function_array_slice    { shift; "array_slice(" . join(",", @_) . ")"; }
-# подмассив по кратности номеров элементов
-sub function_array_div      { shift; "array_div(" . join(",", @_) . ")"; }
-# получить элемент хеша/массива по неконстантному ключу (например get(iteration.array, rand(5)))
-# по-моему, это лучше, чем Template Toolkit'овский ад - hash.key.${another.hash.key}.зюка.хрюка и т.п.
-sub function_get            { shift; "exec_get(" . join(",", @_) . ")"; }
-# для хеша
-sub function_hget           { "($_[1])->\{$_[2]}" }
-# для массива
-sub function_aget           { "($_[1])->\[$_[2]]" }
-# присваивание (только lvalue)
-sub function_set            { "scalar(($_[1] = $_[2]), '')" }
-# слияние массивов в один большой массив
-sub function_array_merge    { shift; '[@{'.join('},@{',@_).'}]' }
-# вынуть первый элемент массива
-sub function_shift          { "shift(\@{$_[1]})"; }
-# вынуть последний элемент массива
-sub function_pop            { "pop(\@{$_[1]})"; }
-# вставить как первый элемент массива
-sub function_unshift        { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
-# вставить как последний элемент массива
-sub function_push           { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
-
-## Прочее
-
-# вычисление выражения и игнорирование результата, как в JS
-sub function_void           { "scalar(($_[1]), '')" }
-# дамп переменной
-sub function_dump           { shift; "exec_dump(" . join(",", @_) . ")" }
-# JSON-кодирование
-sub function_json           { "encode_json($_[1])" }
-# return the value as is, to ignore automatic escaping of "unsafe" HTML
-sub function_raw            { $_[1] }
-# apply the function to each array element
-sub function_map
-{
-    my $self = shift;
-    my $fn = shift;
-    if ($fn =~ /^[\"\'](\w+)[\"\']$/so)
-    {
-        return '(map { '.$self->compile_function($1, '$_').' } (@{'.join('}, @{', @_).'}))';
-    }
-    else
-    {
-        $self->{lexer}->warn("Non-constant function: unimplemented");
-    }
-}
-
+# Generate semantic expression for template function call
 sub compile_function
 {
     my $self = shift;
@@ -1095,6 +976,267 @@ sub compile_function
         $r = "''";
     }
     return [ $r, $q ];
+}
+
+# call operator on arguments
+sub fmop
+{
+    my $op = shift;
+    return "((" . join(") $op (", @_) . "))";
+}
+
+# call function, expanding all passed arrays
+sub fearr
+{
+    my $f = shift;
+    my $n = shift;
+    my $self = shift;
+    my $e = "$f(";
+    $e .= join(", ", splice(@_, 0, $n)) if $n;
+    $e .= ", " if $n && @_;
+    $e .= join(", ", map { "array_items($_)" } @_);
+    $e .= ")";
+    return $e;
+}
+
+### Function implementations
+
+## Numeric/Logical
+
+# logical
+sub function_or      { fmop('||', @_) }
+sub function_and     { fmop('&&', @_) }
+sub function_not     { "!($_[1])" }
+# arithmetic
+sub function_add     { fmop('+', @_) }
+sub function_sub     { fmop('-', @_) }
+sub function_mul     { fmop('*', @_) }
+sub function_div     { fmop('/', @_) }
+sub function_mod     { fmop('%', @_) }
+# logarithm
+sub function_log     { "log($_[1])" }
+# is the argument even/odd?
+sub function_even    { "!(($_[1]) & 1)" }
+sub function_odd     { "(($_[1]) & 1)" }
+# cast to integer, throwing away the fractional part
+sub function_int     { "int($_[1])" }
+# type-dependent comparisons: = != > < >= <=
+sub function_eq      { "(exec_cmp($_[1], $_[2]) == 0)" }
+sub function_ne      { "(exec_cmp($_[1], $_[2]) != 0)" }
+sub function_gt      { "(exec_cmp($_[1], $_[2]) > 0)" }
+sub function_lt      { "(exec_cmp($_[1], $_[2]) < 0)" }
+sub function_ge      { "(exec_cmp($_[1], $_[2]) >= 0)" }
+sub function_le      { "(exec_cmp($_[1], $_[2]) <= 0)" }
+# string comparisons: = != > < >= <=
+sub function_seq     { "(($_[1]) eq ($_[2]))" }
+sub function_sne     { "(($_[1]) ne ($_[2]))" }
+sub function_sgt     { "(($_[1]) gt ($_[2]))" }
+sub function_slt     { "(($_[1]) lt ($_[2]))" }
+sub function_sge     { "(($_[1]) ge ($_[2]))" }
+sub function_sle     { "(($_[1]) le ($_[2]))" }
+# numeric comparisons: = != > < >= <=
+sub function_neq     { "(($_[1]) == ($_[2]))" }
+sub function_nne     { "(($_[1]) != ($_[2]))" }
+sub function_ngt     { "(($_[1]) >  ($_[2]))" }
+sub function_nlt     { "(($_[1]) <  ($_[2]))" }
+sub function_nge     { "(($_[1]) >= ($_[2]))" }
+sub function_nle     { "(($_[1]) <= ($_[2]))" }
+# ternary operator $1 ? $2 : $3
+sub function_yesno   { "(($_[1]) ? ($_[2]) : ($_[3]))" }
+
+## String
+
+# lowercase, uppercase
+sub function_lc             { "lc($_[1])" }
+sub function_uc             { "uc($_[1])" }
+# lowercase, uppercase the first letter
+sub function_lcfirst        { "lcfirst($_[1])" }
+sub function_ucfirst        { "ucfirst($_[1])" }
+# quote ', ", \, \n and \r in C-style, prepending \
+sub function_quote          { "quotequote($_[1])" }
+# quote " in SQL/CSV style (by doubling them)
+sub function_sql_quote      { "sql_quote($_[1])" }
+# escape characters special to regular expressions
+sub function_requote        { "requote($_[1])" }
+# encode URL parameter
+sub function_urlencode      { shift; "URI::Escape::uri_escape(".join(",",@_).")" }
+# decode URL parameter
+sub function_urldecode      { shift; "URI::Escape::uri_unescape(".join(",",@_).")" }
+# replace regexp: replace(<regex>, <replacement>, <subject>)
+sub function_replace        { "regex_replace($_[1], $_[2], $_[3])" }
+# replace substrings
+sub function_str_replace    { "str_replace($_[1], $_[2], $_[3])" }
+# character length of string
+sub function_strlen         { "strlen($_[1])" }
+# substring
+sub function_substr         { shift; "substr(".join(",", @_).")" }
+# remove starting and ending whitespace
+sub function_trim           { shift; "trim($_[0])" }
+# splice $2 with regexp $1, optionally maximum to $3 parts
+sub function_split          { shift; "split(".join(",", @_).")" }
+# replace & < > " ' with HTML entities
+sub function_html           { "htmlspecialchars($_[1])" }
+# remove HTML tags
+sub function_strip          { "strip_tags($_[1])" }
+# remove "unsafe" HTML tags
+sub function_strip_unsafe   { "strip_unsafe_tags($_[1])" }
+# replace \n with <br />
+sub function_nl2br          { "regex_replace(qr/\\n/s, '<br />', $_[1])" }
+# concatenate strings
+sub function_concat         { fmop('.', @_) }
+# join strings with delimiter specified as the first argument; expands all passed arrays
+sub function_join           { fearr('join', 1, @_) }
+# replace $1, $2 etc with passed arguments
+sub function_subst          { fearr('exec_subst', 1, @_) }
+# sprintf
+sub function_sprintf        { fearr('sprintf', 1, @_) }
+# strftime
+sub function_strftime
+{
+    my $self = shift;
+    my ($fmt, $date, $time) = @_;
+    $date = "($date).' '.($time)" if $time;
+    $date = "POSIX::strftime($date, localtime(timestamp($date)))";
+    $date = "utf8on($date)" if $self->{use_utf8};
+    return $date;
+}
+# limit $1 with $2 chars on whitespace boundary and add $3 (or '...' by default) if it is longer
+sub function_strlimit       { shift; "strlimit(".join(",", @_).")" }
+# select one of 3 russian plural forms based on first numeric argument: plural_ru($number, $one, $few, $many)
+sub function_plural_ru      { shift; "plural_ru(".join(",", @_).")" }
+
+## Arrays and hashes
+
+# create a hash
+sub function_hash           { shift; @_ == 1 ? "{ \@{ $_[0] } }" : "{" . join(",", @_) . "}"; }
+# hash keys
+sub function_keys           { '[ keys(%{'.$_[1].'}) ]'; }
+# hash values
+sub function_values         { '[ values(%{'.$_[1].'}) ]'; }
+# sort array
+sub function_sort           { '[ '.fearr('sort', 0, @_).' ]'; }
+# extract [ { key => <key>, value => <value> }, ... ] pairs from first hash argument
+sub function_pairs          { "exec_pairs($_[1])" }
+# create an array
+sub function_array          { shift; "[" . join(",", @_) . "]"; }
+# create a numeric range array
+sub function_range          { "[ $_[1] .. $_[2] ]" }
+# check if the argument is an array
+sub function_is_array       { "exec_is_array($_[1])" }
+# count array (not hash) elements
+sub function_count          { "(ref($_[1]) && $_[1] =~ /ARRAY/so ? scalar(\@{ $_[1] }) : 0)" }
+# extract a contiguous slice of array
+sub function_array_slice    { shift; "array_slice(" . join(",", @_) . ")"; }
+# extract a regular slice of array
+sub function_array_div      { shift; "array_div(" . join(",", @_) . ")"; }
+# get array or hash element using a variable key (i.e. get(iteration.array, rand(5)))
+sub function_get            { shift; "exec_get(" . join(",", @_) . ")"; }
+# same only for hash
+sub function_hget           { "($_[1])->\{$_[2]}" }
+# same only for array
+sub function_aget           { "($_[1])->\[$_[2]]" }
+# set first argument to second (first argument must be an "lvalue")
+sub function_set            { "scalar(($_[1] = $_[2]), '')" }
+# merge arrays into one
+sub function_array_merge    { shift; '[@{'.join('},@{',@_).'}]' }
+# extract first argument of an array
+sub function_shift          { "shift(\@{$_[1]})"; }
+# extract last argument of an array
+sub function_pop            { "pop(\@{$_[1]})"; }
+# insert into beginning of an array
+sub function_unshift        { shift; "unshift(\@{".shift(@_)."}, ".join(",", @_).")"; }
+# insert into end of an array
+sub function_push           { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")"; }
+
+## Misc
+
+# explicitly ignore expression result (like void() in javascript)
+sub function_void           { "scalar(($_[1]), '')" }
+# dump variable
+sub function_dump           { shift; "exec_dump(" . join(",", @_) . ")" }
+# encode into JSON
+sub function_json           { "encode_json($_[1])" }
+# return the value as is, to ignore automatic escaping of "unsafe" HTML
+sub function_raw            { $_[1] }
+# call object method using variable name and inline arguments
+sub function_call
+{
+    my $self = shift;
+    my $obj = shift;
+    my $method = shift;
+    return "map({ ($obj)->\$_(".join(",", @_).") } $method)";
+}
+# call object method using variable name and array arguments
+sub function_call_array
+{
+    my ($self, $obj, $method, $args) = @_;
+    return "map({ ($obj)->\$_(\@\{$args}) } $method)";
+}
+
+# apply the function to each array element
+sub function_map
+{
+    my $self = shift;
+    my $fn = shift;
+    if ($fn =~ /^[\"\'](\w+)[\"\']$/so)
+    {
+        return '(map { '.$self->compile_function($1, '$_').' } (@{'.join('}, @{', @_).'}))';
+    }
+    else
+    {
+        $self->{lexer}->warn("Non-constant function: unimplemented");
+    }
+}
+
+## Template inclusion
+
+# Include another template: parse('file.tpl'[, args])
+sub function_parse
+{
+    my $self = shift;
+    my $file = shift;
+    my $args = @_ > 1 ? { @_ } : $_[0];
+    return "\$self->{template}->parse_discard($file, undef, 'main', $args)";
+}
+
+# Run block from current template: exec('block'[, args])
+sub function_exec
+{
+    my $self = shift;
+    my $block = shift;
+    my $args = @_ > 1 ? { @_ } : $_[0];
+    return "\$self->{template}->parse_discard(\$FILENAME, undef, $block, $args)";
+}
+
+# Run block from another template: exec_from('file.tpl', 'block'[, args])
+sub function_exec_from
+{
+    my $self = shift;
+    my $file = shift;
+    my $block = shift;
+    my $args = @_ > 1 ? { @_ } : $_[0];
+    return "\$self->{template}->parse_discard($file, undef, $block, $args)";
+}
+
+# (Not recommended, but possible)
+# Parse string as a template: parse('code'[, args])
+sub function_parse
+{
+    my $self = shift;
+    my $code = shift;
+    my $args = @_ > 1 ? { @_ } : $_[0];
+    return "\$self->{template}->parse_discard(undef, $code, 'main', $args)";
+}
+
+# (Highly not recommended, but still possible)
+# Parse string as a template and run a named block from it: parse('code', 'block'[, args])
+sub function_parse
+{
+    my $self = shift;
+    my $code = shift;
+    my $block = shift;
+    my $args = @_ > 1 ? { @_ } : $_[0];
+    return "\$self->{template}->parse_discard(undef, $code, $block, $args)";
 }
 
 1;
