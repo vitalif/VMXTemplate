@@ -1,15 +1,19 @@
 # Контекстно-свободная Parse::Yapp-грамматика шаблонизатора
 #
-# Компилировать так: yapp -o VMXTemplate.pm -t template.skel.pm template.yp
+# Компилировать так: yapp -o VMXTemplate/Parser.pm -t template.skel.pm template.yp
 #
 # {{ двойные скобки }} нужно исключительно чтобы маркеры начала и конца подстановки
 # были уникальны в грамматике. Вместо них обычно используются { одинарные }, а
 # выбор корректной лексемы - скобки или маркера - делает лексический анализатор.
 # Но зато вместо { фигурных скобок } можно выбрать себе любые другие маркеры!
 #
-# Все выражения представляются массивом из двух значений: [ код выражения, флаг экранирования ]
-# Флаг экранирования == true, если это выражение HTML-безопасно. При включённом auto_escape
-# небезопасные выражения прогоняются через экранирование.
+# Все выражения представляются массивами из двух-трёх значений:
+# [ код выражения, флаг экранирования, флаг принудительной подстановки ]
+# Флаг экранирования == true, если это выражение HTML-безопасно, и 'i', если оно не только
+# HTML-безопасно, но ещё и численно. При включённом auto_escape небезопасные выражения
+# прогоняются через экранирование (обычно через 's').
+# Флаг принудительной подстановки используется функциями типа INCLUDE, чтобы подставлять результат,
+# даже когда no_code_subst == true.
 #
 # Кстати:
 # * Олдстайл BEGIN .. END ликвидирован
@@ -68,7 +72,7 @@
 %%
 
 template: chunks {
-    $_[0]->{functions}->{main}->{body} = "sub fn_main {\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
+    $_[0]->{functions}->{main}->{body} = "sub fn_main {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -86,14 +90,15 @@ chunk: literal {
     $_[2];
   }
 | '{{' exp '}}' {
-    '$t .= ' . ($_[2][1] || !$_[0]->{compiler}->{options}->{auto_escape} ? $_[2][0] : $_[0]->{compiler}->compile_function($_[0]->{compiler}->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
+    '$t .= ' . ($_[2][1] || !$_[0]->{options}->{auto_escape} ? $_[2][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
   }
 | error {
     '';
   }
 ;
 code_chunk: c_if | c_set | c_fn | c_for | exp {
-    '$t .= ' . ($_[1][1] || !$_[0]->{compiler}->{options}->{auto_escape} ? $_[1][0] : $_[0]->{compiler}->compile_function($_[0]->{compiler}->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
+    ($_[1][2] || !$_[0]->{options}->{no_code_subst} ? '$t .= ' : '') .
+    ($_[1][1] || !$_[0]->{options}->{auto_escape} ? $_[1][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
   }
 ;
 c_if: 'IF' exp '-->' chunks '<!--' 'END' {
@@ -138,11 +143,11 @@ fn_def: fn name '(' arglist ')' {
   }
 ;
 c_fn: fn_def '=' exp {
-    $_[1]->{body} .= " {\nreturn ".$_[3].";\n}\n";
+    $_[1]->{body} .= " {\nmy \$self = shift;\nreturn ".$_[3].";\n}\n";
     '';
   }
 | fn_def '-->' chunks '<!--' 'END' {
-    $_[1]->{body} .= " {\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
+    $_[1]->{body} .= " {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -155,7 +160,7 @@ c_for: for varref '=' exp '-->' chunks '<!--' 'END' {
     "push \@\$stack, ".$varref[0].", ".$varref_index.", 0;
 foreach my \$item (array_items($exp[0])) {
 ".$varref[0]." = \$item;
-".$varref_index." = \$stack[count(\$stack)-1]++;
+".$varref_index." = \$stack->[\$#\$stack]++;
 ".$cs."}
 pop \@\$stack;
 ".$varref_index." = pop(\@\$stack);
@@ -188,22 +193,22 @@ exp: exp '..' exp {
     [ '(' . $_[1][0] . ' && ' . $_[3][0] . ')', 1 ];
   }
 | exp '==' exp {
-    [ '$self->eq(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' == ' : ' eq ') . $_[3][0] . ')', 1 ];
   }
 | exp '!=' exp {
-    [ '!$self->eq(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' != ' : ' ne ') . $_[3][0] . ')', 1 ];
   }
 | exp '<' exp {
-    [ '$self->lt(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' < ' : ' lt ') . $_[3][0] . ')', 1 ];
   }
 | exp '>' exp {
-    [ '$self->gt(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' > ' : ' gt ') . $_[3][0] . ')', 1 ];
   }
 | exp '<=' exp {
-    [ '!$self->gt(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' <= ' : ' le ') . $_[3][0] . ')', 1 ];
   }
 | exp '>=' exp {
-    [ '!$self->lt(' . $_[1][0] . ', ' . $_[3][0] . ')', 1 ];
+    [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' >= ' : ' ge ') . $_[3][0] . ')', 1 ];
   }
 | exp '+' exp {
     [ '(' . $_[1][0] . ' + ' . $_[3][0] . ')', 'i' ];
@@ -247,16 +252,16 @@ nonbrace: '{' hash '}' {
 | literal
 | varref
 | name '(' ')' {
-    $_[0]->{compiler}->compile_function($_[1], []);
+    $_[0]->compile_function($_[1], []);
   }
 | name '(' list ')' {
-    $_[0]->{compiler}->compile_function($_[1], $_[3]);
+    $_[0]->compile_function($_[1], $_[3]);
   }
 | name '(' gthash ')' {
-    [ "\$self->{template}->call_block('".addcslashes($_[1], "'\\")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'\\")."')", 1 ];
+    [ "\$self->{template}->call_block('".addcslashes($_[1], "'")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'")."')", 1 ];
   }
 | name nonbrace {
-    $_[0]->{compiler}->compile_function($_[1], [ $_[3] ]);
+    $_[0]->compile_function($_[1], [ $_[2] ]);
   }
 ;
 list: exp {
@@ -299,14 +304,14 @@ gtpair: exp '=>' exp {
   }
 ;
 varref: name {
-    [ "\$self->{tpldata}{'".addcslashes($_[1], "\\\'")."'}", 0 ];
+    [ "\$self->{tpldata}{'".addcslashes($_[1], "'")."'}", 0 ];
   }
 | varref varpart {
     [ $_[1][0] . $_[2], 0 ];
   }
 ;
 varpart: '.' name {
-    "{'".addcslashes($_[1], "\\\'")."'}";
+    "{'".addcslashes($_[2], "'")."'}";
   }
 | '[' exp ']' {
     ($_[2][1] eq 'i' ? '['.$_[2][0].']' : "{".$_[2][0]."}");
