@@ -72,7 +72,7 @@
 %%
 
 template: chunks {
-    $_[0]->{functions}->{main}->{body} = "sub fn_main {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
+    $_[0]->{functions}->{main}->{body} = "sub {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[1]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -138,16 +138,16 @@ fn_def: fn name '(' arglist ')' {
       args => $_[4],
       line => $_[0]->{lexer}->line,
       pos => $_[0]->{lexer}->pos,
-      body => 'sub fn_'.$_[2],
+      body => '',
     };
   }
 ;
 c_fn: fn_def '=' exp {
-    $_[1]->{body} .= " {\nmy \$self = shift;\nreturn ".$_[3].";\n}\n";
+    $_[1]->{body} = "sub {\nmy \$self = shift;\nreturn ".$_[3].";\n}\n";
     '';
   }
 | fn_def '-->' chunks '<!--' 'END' {
-    $_[1]->{body} .= " {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
+    $_[1]->{body} = "sub {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
     '';
   }
 ;
@@ -258,7 +258,7 @@ nonbrace: '{' hash '}' {
     $_[0]->compile_function($_[1], $_[3]);
   }
 | name '(' gthash ')' {
-    [ "\$self->{template}->call_block('".addcslashes($_[1], "'")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'")."')", 1 ];
+    [ "\$self->_call_block('".addcslashes($_[1], "'")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'")."')", 1 ];
   }
 | name nonbrace {
     $_[0]->compile_function($_[1], [ $_[2] ]);

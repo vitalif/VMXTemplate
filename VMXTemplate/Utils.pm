@@ -3,15 +3,16 @@
 package VMXTemplate::Utils;
 
 use strict;
+use utf8;
 use Encode;
 use base qw(Exporter);
 
 our @EXPORT = qw(
     TS_UNIX TS_DB TS_DB_DATE TS_MW TS_EXIF TS_ORACLE TS_ISO_8601 TS_RFC822
-    timestamp plural_ru strlimit htmlspecialchars strip_tags strip_unsafe_tags
+    timestamp plural_ru strlimit htmlspecialchars urlencode urldecode strip_tags strip_unsafe_tags
     addcslashes requote quotequote sql_quote regex_replace str_replace
     array_slice array_div encode_json trim html_pbr array_items utf8on
-    exec_subst exec_pairs exec_is_array exec_get exec_cmp
+    exec_subst exec_pairs exec_is_array exec_get exec_cmp var_dump
 );
 
 use constant {
@@ -155,6 +156,25 @@ sub htmlspecialchars
     s/\"/&quot;/gso;
     s/\'/&apos;/gso;
     return $_;
+}
+
+# URL-encode
+sub urlencode
+{
+    my ($param) = @_;
+    utf8::encode($param) if utf8::is_utf8($param);
+    $param =~ s/([^a-zA-Z0-9_\-.])/uc sprintf("%%%02x",ord($1))/eg;
+    return $param;
+}
+
+# URL-decode
+sub urldecode
+{
+    my ($param) = @_;
+    $param =~ tr/+/ /;
+    $param =~ s/%([0-9a-fA-F]{2})/pack("C",hex($1))/ge;
+    utf8::decode($param); # try to decode it
+    return $param;
 }
 
 # Replace (some) tags with whitespace
@@ -341,6 +361,16 @@ sub exec_cmp
     my ($a, $b) = @_;
     my $n = grep /^-?\d+(\.\d+)?$/, $a, $b;
     return $n ? $a <=> $b : $a cmp $b;
+}
+
+# Data::Dumper
+sub var_dump
+{
+    require Data::Dumper;
+    local $Data::Dumper::Indent = 1;
+    local $Data::Dumper::Varname = '';
+    local $Data::Dumper::Sortkeys = 1;
+    return scalar Data::Dumper::Dumper(@_);
 }
 
 package VMXTemplate::Exception;

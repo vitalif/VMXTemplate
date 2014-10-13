@@ -25,8 +25,8 @@ sub compile
     $self->{lexer} ||= VMXTemplate::Lexer->new($self->{options});
     $self->{lexer}->set_code($text);
     $self->{functions} = {
-        main => {
-            name => 'main',
+        ':main' => {
+            name => ':main',
             args => [],
             body => '',
             line => 0,
@@ -34,14 +34,14 @@ sub compile
         },
     };
     $self->YYParse(yylex => \&_Lexer, yyerror => \&_error);
-    if (!$self->{functions}->{main}->{body})
+    if (!$self->{functions}->{':main'}->{body})
     {
         # Parse error?
-        delete $self->{functions}->{main};
+        delete $self->{functions}->{':main'};
     }
-    return "use strict;\nuse VMXTemplate::Utils;\n".
-        "our \$FUNCTIONS = { ".join(", ", map { "$_ => 1" } keys %{$self->{functions}})." };\n".
-        join("\n", map { $_->{body} } values %{$self->{functions}})
+    return ($self->{options}->{use_utf8} ? "use utf8;\n" : "").
+        "{\n':version' => ".VMXTemplate->CODE_VERSION.",\n".
+        join(",\n", map { "'$_->{name}' => $_->{body}" } values %{$self->{functions}})."};\n";
 }
 
 # Function aliases
@@ -310,9 +310,9 @@ sub function_sql_quote      { "sql_quote($_[1])" }
 # escape characters special to regular expressions
 sub function_requote        { "requote($_[1])" }
 # encode URL parameter
-sub function_urlencode      { shift; "URI::Escape::uri_escape(".join(",",@_).")" }
+sub function_urlencode      { "urlencode($_[1])" }
 # decode URL parameter
-sub function_urldecode      { shift; "URI::Escape::uri_unescape(".join(",",@_).")" }
+sub function_urldecode      { "urldecode($_[1])" }
 # replace regexp: replace(<regex>, <replacement>, <subject>)
 sub function_replace        { "regex_replace($_[1], $_[2], $_[3])" }
 # replace substrings
@@ -404,7 +404,7 @@ sub function_push           { shift; "push(\@{".shift(@_)."}, ".join(",", @_).")
 # explicitly ignore expression result (like void() in javascript)
 sub function_void           { "scalar(($_[1]), '')" }
 # dump variable
-sub function_dump           { shift; "exec_dump(" . join(",", @_) . ")" }
+sub function_dump           { shift; "var_dump(" . join(",", @_) . ")" }
 # encode into JSON
 sub function_json           { "encode_json($_[1])" }
 # return the value as is, to ignore automatic escaping of "unsafe" HTML
@@ -415,13 +415,13 @@ sub function_call
     my $self = shift;
     my $obj = shift;
     my $method = shift;
-    return "map({ ($obj)->\$_(".join(",", @_).") } $method)";
+    return "[ map { scalar ($obj)->\$_(".join(",", @_).") } $method ]->[0]";
 }
 # call object method using variable name and array arguments
 sub function_call_array
 {
     my ($self, $obj, $method, $args) = @_;
-    return "map({ ($obj)->\$_(\@\{$args}) } $method)";
+    return "[ map { scalar ($obj)->\$_(\@\{$args}) } $method ]->[0]";
 }
 
 # apply the function to each array element
@@ -449,9 +449,9 @@ sub function_parse
 {
     my $self = shift;
     my $file = shift;
-    die VMXTemplate::Exception->new("include() requires at least 1 parameter") if !$file;
+    $self->{lexer}->warn("include() requires at least 1 parameter"), return "''" if !$file;
     my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->{template}->parse_real($file, undef, 'main', $args)";
+    return "\$self->parse_real($file, undef, ':main', $args)";
 }
 
 # Run block from current template: exec('block'[, <args>])
@@ -459,9 +459,9 @@ sub function_exec
 {
     my $self = shift;
     my $block = shift;
-    die VMXTemplate::Exception->new("exec() requires at least 1 parameters") if !$block;
+    $self->{lexer}->warn("exec() requires at least 1 parameters"), return "''" if !$block;
     my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->{template}->parse_real(\$FILENAME, undef, $block, $args)";
+    return "\$self->parse_real(\$FILENAME, undef, $block, $args)";
 }
 
 # Run block from another template: exec_from('file.tpl', 'block'[, args])
@@ -470,9 +470,9 @@ sub function_exec_from
     my $self = shift;
     my $file = shift;
     my $block = shift;
-    die VMXTemplate::Exception->new("exec_from() requires at least 2 parameters") if !$file || !$block;
+    $self->{lexer}->warn("exec_from() requires at least 2 parameters"), return "''" if !$file || !$block;
     my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->{template}->parse_real($file, undef, $block, $args)";
+    return "\$self->parse_real($file, undef, $block, $args)";
 }
 
 # (Not recommended, but possible)
@@ -481,9 +481,9 @@ sub function_parse_inline
 {
     my $self = shift;
     my $code = shift;
-    die VMXTemplate::Exception->new("parse_inline() requires at least 1 parameter") if !$code;
+    $self->{lexer}->warn("parse_inline() requires at least 1 parameter"), return "''" if !$code;
     my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->{template}->parse_real(undef, $code, 'main', $args)";
+    return "\$self->parse_real(undef, $code, ':main', $args)";
 }
 
 # (Highly not recommended, but still possible)
@@ -493,9 +493,9 @@ sub function_exec_from_inline
     my $self = shift;
     my $code = shift;
     my $block = shift;
-    die VMXTemplate::Exception->new("exec_from_inline() requires at least 2 parameters") if !$code || !$block;
+    $self->{lexer}->warn("exec_from_inline() requires at least 2 parameters"), return "''" if !$code || !$block;
     my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->{template}->parse_real(undef, $code, $block, $args)";
+    return "\$self->parse_real(undef, $code, $block, $args)";
 }
 
 1;

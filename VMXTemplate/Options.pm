@@ -20,15 +20,16 @@ sub new
         eat_code_line => 1,         # remove the "extra" lines which contain instructions only
         root          => '.',       # directory with templates
         cache_dir     => undef,     # compiled templates cache directory
-        reload        => 1,         # 0 means to not check for new versions of cached templates
+        reload        => 2,         # 0 means to not check for new versions of cached templates
+                                    # > 0 - check at most each <reload> seconds
         filters       => [],        # filters to run on output of every template
-        use_utf8      => 1,         # use UTF-8 for all string operations on template variables
+        use_utf8      => 1,         # templates are in UTF-8 and all template variables should be in UTF-8
         raise_error   => 0,         # die() on fatal template errors
         log_error     => 0,         # send errors to standard error output
         print_error   => 0,         # print fatal template errors
         strip_space   => 0,         # strip spaces from beginning and end of each line
-        auto_escape   => undef,     # "safe mode" (use 's' for HTML) - automatically escapes substituted
-                                    # values via this functions if not escaped explicitly
+        auto_escape   => undef,     # "safe mode" function name (use 's' for HTML) - automatically escapes substituted
+                                    # values via this function if not escaped explicitly
         compiletime_functions => {},# custom compile-time functions (code generators)
 
         input_filename  => '',
