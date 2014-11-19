@@ -800,7 +800,7 @@ class VMXTemplateOptions
         {
             print '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
                 'VMXTemplate errors:<ul><li>'.
-                implode('</li><li>', array_map('html_pbr', $this->errors)).
+                implode('</li><li>', array_map('nl2br', array_map('htmlspecialchars', $this->errors))).
                 '</li></ul>';
                 $fp = fopen("php://stderr", 'a');
                 fputs($fp, "VMXTemplate errors:\n".implode("\n", $this->errors));
