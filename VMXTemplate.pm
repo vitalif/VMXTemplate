@@ -139,16 +139,6 @@ sub parse_real
     {
         $self->{options}->{errors} = [];
     }
-    # Load code
-    if ($filename)
-    {
-        $filename = $self->{options}->{root}.$filename if $filename !~ m!^/!so;
-        unless ($text = $self->loadfile($filename))
-        {
-            $self->{options}->error("couldn't load template file '$filename'");
-            return $is_outer ? $self->{options}->get_errors : '';
-        }
-    }
     my ($code, $key) = $self->compile($text, $filename);
     if (!$self->{loaded_templates}->{$key})
     {
@@ -216,42 +206,6 @@ sub _call_block
     $self->{options}->error("Unknown block '$block'$errorinfo");
 }
 
-# Load file
-# $textref = $obj->loadfile($file)
-sub loadfile
-{
-    my $self = shift;
-    my ($fn) = @_;
-    my $load = 0;
-    my $mtime;
-    if (!$self->{ltimes}->{$fn} || $self->{reload} &&
-        $self->{ltimes}->{$fn}+$self->{reload} < time)
-    {
-        $mtime = [ stat $fn ] -> [ 9 ];
-        $load = 1 if !$self->{ltimes}->{$fn} || $mtime > $self->{mtimes}->{$fn};
-    }
-    if ($load)
-    {
-        # reload if file has changed
-        my ($fd, $text);
-        if (open $fd, "<", $fn)
-        {
-            local $/ = undef;
-            $text = <$fd>;
-            close $fd;
-        }
-        else
-        {
-            return undef;
-        }
-        # delete old compiled code
-        $self->{mtimes}->{$fn} = $mtime;
-        $self->{ltimes}->{$fn} = time;
-        return $text;
-    }
-    return undef;
-}
-
 # Compile code and cache it on disk
 # ($sub, $cache_key) = $self->compile($code, $filename);
 # print &$sub($self);
@@ -261,9 +215,40 @@ sub compile
     my ($code, $fn, $force_reload) = @_;
     Encode::_utf8_off($code); # for md5_hex
     my $key = $fn ? 'F'.$fn : 'C'.md5_hex($code);
-    if (!$force_reload && (my $res = $self->{compiled_code}->{$key}))
+    $force_reload = 1 if !$self->{compiled_code}->{$key};
+
+    # Load code
+    my $mtime;
+    if ($fn)
     {
-        return ($res, $key);
+        $fn = $self->{options}->{root}.$fn if $fn !~ m!^/!so;
+        if (!$force_reload && $self->{reload} && $self->{ltimes}->{$fn}+$self->{reload} < time)
+        {
+            $mtime = [ stat $fn ] -> [ 9 ];
+            $force_reload = 1 if $mtime > $self->{mtimes}->{$fn};
+        }
+    }
+
+    if (!$force_reload)
+    {
+        return ($self->{compiled_code}->{$key}, $key);
+    }
+
+    if ($fn)
+    {
+        # reload if file has changed
+        my $fd;
+        if (open $fd, "<", $fn)
+        {
+            local $/ = undef;
+            $code = <$fd>;
+            close $fd;
+        }
+        else
+        {
+            $self->{options}->error("couldn't load template file '$fn': $!");
+            return ();
+        }
     }
 
     # inline code
@@ -327,6 +312,13 @@ sub compile
     {
         $self->{options}->error("error compiling '$fn': [$@] in CODE:\n$code");
         return ();
+    }
+
+    if ($fn)
+    {
+        # remember modification and load time
+        $self->{mtimes}->{$fn} = $mtime;
+        $self->{ltimes}->{$fn} = time;
     }
 
     return ($self->{compiled_code}->{$key}, $key);
