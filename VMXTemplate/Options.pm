@@ -77,7 +77,7 @@ sub get_errors
     {
         return '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
             'VMXTemplate errors:<ul><li>'.
-            join('</li><li>', map \&html_pbr, @{$self->{errors}}).
+            join('</li><li>', map { html_pbr($_) } @{$self->{errors}}).
             '</li></ul>';
     }
     return '';

@@ -106,7 +106,7 @@ sub read_token
     {
         my $r;
         my $code_pos = index($self->{code}, $self->{options}->{begin_code});
-        my $subst_pos = index($self->{code}, $self->{options}->{begin_subst});
+        my $subst_pos = $self->{options}->{begin_subst} ne '' ? index($self->{code}, $self->{options}->{begin_subst}) : -1;
         if ($code_pos == -1 && $subst_pos == -1)
         {
             # No more directives

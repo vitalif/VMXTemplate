@@ -233,6 +233,7 @@ sub compile_function
 sub fmop
 {
     my $op = shift;
+    my $self = shift;
     return "((" . join(") $op (", @_) . "))";
 }
 

@@ -32,8 +32,9 @@ use strict;
 use Digest::MD5 qw(md5_hex);
 use POSIX;
 
+use VMXTemplate::Utils;
 use VMXTemplate::Options;
-use VMXTemplate::Compiler;
+use VMXTemplate::Parser;
 
 # Version of code classes, saved into compiled files
 use constant CODE_VERSION => 4;
@@ -97,7 +98,7 @@ sub vars
 sub parse
 {
     my ($self, $fn, $vars) = @_;
-    return $self->parse_real($fn, undef, '_main', $vars);
+    return $self->parse_real($fn, undef, undef, $vars);
 }
 
 # Call named block/function from a template
@@ -112,7 +113,7 @@ sub exec_from
 sub parse_inline
 {
     my ($self, $code, $vars) = @_;
-    return $self->parse_real(undef, $_[1], '_main', $vars);
+    return $self->parse_real(undef, $_[1], undef, $vars);
 }
 
 # Call function from a string parsed as a template
@@ -141,7 +142,7 @@ sub parse_real
     # Load code
     if ($filename)
     {
-        $filename = $self->{root}.$filename if $filename !~ m!^/!so;
+        $filename = $self->{options}->{root}.$filename if $filename !~ m!^/!so;
         unless ($text = $self->loadfile($filename))
         {
             $self->{options}->error("couldn't load template file '$filename'");
@@ -178,14 +179,19 @@ sub _run
     my ($code, $is_outer, $function, $filename, $vars) = @_;
     $function ||= ':main';
     my $str = $code->{$function};
+    if (!defined $str)
+    {
+        $self->{options}->error("template function '$function' not found in '".($filename || 'inline template')."'");
+        return $is_outer ? $self->{options}->get_errors : '';
+    }
     # a template function is just a constant if not a coderef
-    if (ref $str eq 'CODE')
+    elsif (ref $str eq 'CODE')
     {
         local $self->{tpldata} = $vars if $vars;
         $str = eval { &$str($self) };
         if ($@)
         {
-            $self->{options}->error("error running '".($filename || 'inline template').'::'."$function': $@");
+            $self->{options}->error("error running function '$function' from '".($filename || 'inline template')."': $@");
             return $is_outer ? $self->{options}->get_errors : '';
         }
     }
@@ -296,7 +302,7 @@ sub compile
 
     # call Compiler
     $self->{options}->{input_filename} = $fn;
-    $self->{compiler} ||= VMXTemplate::Compiler->new($self->{options});
+    $self->{compiler} ||= VMXTemplate::Parser->new($self->{options});
     $code = $self->{compiler}->compile($code);
 
     # write compiled code to file
@@ -319,7 +325,7 @@ sub compile
     $self->{compiled_code}->{$key} = eval $code;
     if ($@)
     {
-        $self->error("error compiling '$fn': [$@] in CODE:\n$code");
+        $self->{options}->error("error compiling '$fn': [$@] in CODE:\n$code");
         return ();
     }
 
