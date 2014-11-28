@@ -272,8 +272,9 @@ sub array_div
 sub encode_json
 {
     require JSON;
-    *encode_json = *JSON::encode_json;
-    goto &JSON::encode_json;
+    my $s = JSON->new->utf8->allow_nonref->encode(@_);
+    Encode::_utf8_on($s);
+    return $s;
 }
 
 # Remove whitespace from the beginning and the end of the line

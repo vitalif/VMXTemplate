@@ -15,7 +15,7 @@ sub _Lexer
 sub _error
 {
     my ($self) = @_;
-    if ($self->YYCurtok ne 'invalid')
+    if ($self->YYCurtok ne 'error')
     {
         $self->{lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
     }
@@ -465,8 +465,8 @@ sub function_exec
     my $self = shift;
     my $block = shift;
     $self->{lexer}->warn("exec() requires at least 1 parameters"), return "''" if !$block;
-    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : '');
-    return "\$self->parse_real(\$FILENAME, undef, $block, $args)";
+    my $args = @_ > 1 ? "{ ".join(", ", @_)." }" : (@_ ? $_[0] : 'undef');
+    return "\$self->_call_block($block, $args, '".addcslashes($self->{lexer}->errorinfo(), "'")."')";
 }
 
 # Run block from another template: exec_from('file.tpl', 'block'[, args])

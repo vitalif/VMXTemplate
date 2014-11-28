@@ -79,8 +79,17 @@ template: chunks {
 chunks: {
     '';
   }
+| chunks error {
+    # Exit error recovery
+    $_[0]->YYErrok;
+    # Skip current token
+    ${$_[0]->{TOKEN}} = undef;
+    $_[1];
+  }
 | chunks chunk {
-    $_[1] . $_[2];
+    $_[1] .
+    '# line '.(1+$_[0]->{lexer}->{lineno}).' "'.$_[0]->{options}->{input_filename}."\"\n".
+    $_[2];
   }
 ;
 chunk: literal {
@@ -91,9 +100,6 @@ chunk: literal {
   }
 | '{{' exp '}}' {
     '$t .= ' . ($_[2][1] || !$_[0]->{options}->{auto_escape} ? $_[2][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
-  }
-| error {
-    '';
   }
 ;
 code_chunk: c_if | c_set | c_fn | c_for | exp {

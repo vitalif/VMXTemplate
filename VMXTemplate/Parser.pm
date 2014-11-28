@@ -35,8 +35,8 @@ sub new
 		ACTIONS => {
 			'' => -1,
 			'literal' => 3,
-			"{{" => 5,
-			'error' => 4,
+			'error' => 5,
+			"{{" => 4,
 			"<!--" => 7
 		},
 		GOTOS => {
@@ -49,12 +49,9 @@ sub new
 		}
 	},
 	{#State 3
-		DEFAULT => -4
+		DEFAULT => -5
 	},
 	{#State 4
-		DEFAULT => -7
-	},
-	{#State 5
 		ACTIONS => {
 			'literal' => 15,
 			"-" => 9,
@@ -72,8 +69,11 @@ sub new
 			'nonbrace' => 11
 		}
 	},
-	{#State 6
+	{#State 5
 		DEFAULT => -3
+	},
+	{#State 6
+		DEFAULT => -4
 	},
 	{#State 7
 		ACTIONS => {
@@ -502,7 +502,7 @@ sub new
 		}
 	},
 	{#State 46
-		DEFAULT => -6
+		DEFAULT => -7
 	},
 	{#State 47
 		ACTIONS => {
@@ -803,7 +803,7 @@ sub new
 		DEFAULT => -57
 	},
 	{#State 69
-		DEFAULT => -5
+		DEFAULT => -6
 	},
 	{#State 70
 		DEFAULT => -2,
@@ -1274,8 +1274,8 @@ sub new
 	{#State 107
 		ACTIONS => {
 			'literal' => 3,
-			"{{" => 5,
-			'error' => 4,
+			"{{" => 4,
+			'error' => 5,
 			"<!--" => 124
 		},
 		GOTOS => {
@@ -1537,8 +1537,8 @@ sub new
 	{#State 127
 		ACTIONS => {
 			'literal' => 3,
-			"{{" => 5,
-			'error' => 4,
+			"{{" => 4,
+			'error' => 5,
 			"<!--" => 141
 		},
 		GOTOS => {
@@ -1594,8 +1594,8 @@ sub new
 	{#State 130
 		ACTIONS => {
 			'literal' => 3,
-			"{{" => 5,
-			'error' => 4,
+			"{{" => 4,
+			'error' => 5,
 			"<!--" => 144
 		},
 		GOTOS => {
@@ -1778,8 +1778,8 @@ sub new
 	{#State 148
 		ACTIONS => {
 			'literal' => 3,
-			'error' => 4,
-			"{{" => 5,
+			'error' => 5,
+			"{{" => 4,
 			"<!--" => 155
 		},
 		GOTOS => {
@@ -1789,8 +1789,8 @@ sub new
 	{#State 149
 		ACTIONS => {
 			'literal' => 3,
-			'error' => 4,
-			"{{" => 5,
+			'error' => 5,
+			"{{" => 4,
 			"<!--" => 156
 		},
 		GOTOS => {
@@ -1967,8 +1967,8 @@ sub new
 	{#State 164
 		ACTIONS => {
 			'literal' => 3,
-			'error' => 4,
-			"{{" => 5,
+			'error' => 5,
+			"{{" => 4,
 			"<!--" => 168
 		},
 		GOTOS => {
@@ -2044,8 +2044,8 @@ sub new
 	{#State 169
 		ACTIONS => {
 			'literal' => 3,
-			'error' => 4,
-			"{{" => 5,
+			'error' => 5,
+			"{{" => 4,
 			"<!--" => 172
 		},
 		GOTOS => {
@@ -2123,39 +2123,45 @@ sub
 sub
 #line 82 "template.yp"
 {
-    $_[1] . $_[2];
+    # Exit error recovery
+    $_[0]->YYErrok;
+    # Skip current token
+    ${$_[0]->{TOKEN}} = undef;
+    $_[1];
   }
 	],
 	[#Rule 4
-		 'chunk', 1,
-sub
-#line 86 "template.yp"
-{
-    '$t .= ' . $_[1][0] . ";\n";
-  }
-	],
-	[#Rule 5
-		 'chunk', 3,
+		 'chunks', 2,
 sub
 #line 89 "template.yp"
 {
+    $_[1] .
+    '# line '.(1+$_[0]->{lexer}->{lineno}).' "'.$_[0]->{options}->{input_filename}."\"\n".
     $_[2];
+  }
+	],
+	[#Rule 5
+		 'chunk', 1,
+sub
+#line 95 "template.yp"
+{
+    '$t .= ' . $_[1][0] . ";\n";
   }
 	],
 	[#Rule 6
 		 'chunk', 3,
 sub
-#line 92 "template.yp"
+#line 98 "template.yp"
 {
-    '$t .= ' . ($_[2][1] || !$_[0]->{options}->{auto_escape} ? $_[2][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
+    $_[2];
   }
 	],
 	[#Rule 7
-		 'chunk', 1,
+		 'chunk', 3,
 sub
-#line 95 "template.yp"
+#line 101 "template.yp"
 {
-    '';
+    '$t .= ' . ($_[2][1] || !$_[0]->{options}->{auto_escape} ? $_[2][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[2] ])->[0]) . ";\n";
   }
 	],
 	[#Rule 8
@@ -2173,7 +2179,7 @@ sub
 	[#Rule 12
 		 'code_chunk', 1,
 sub
-#line 99 "template.yp"
+#line 105 "template.yp"
 {
     ($_[1][2] || !$_[0]->{options}->{no_code_subst} ? '$t .= ' : '') .
     ($_[1][1] || !$_[0]->{options}->{auto_escape} ? $_[1][0] : $_[0]->compile_function($_[0]->{options}->{auto_escape}, [ $_[1] ])->[0]) . ";\n";
@@ -2182,7 +2188,7 @@ sub
 	[#Rule 13
 		 'c_if', 6,
 sub
-#line 104 "template.yp"
+#line 110 "template.yp"
 {
     "if (" . $_[2][0] . ") {\n" . $_[4] . "}\n";
   }
@@ -2190,7 +2196,7 @@ sub
 	[#Rule 14
 		 'c_if', 10,
 sub
-#line 107 "template.yp"
+#line 113 "template.yp"
 {
     "if (" . $_[2][0] . ") {\n" . $_[4] . "} else {\n" . $_[8] . "}\n";
   }
@@ -2198,7 +2204,7 @@ sub
 	[#Rule 15
 		 'c_if', 8,
 sub
-#line 110 "template.yp"
+#line 116 "template.yp"
 {
     "if (" . $_[2][0] . ") {\n" . $_[4] . $_[5] . $_[6] . "}\n";
   }
@@ -2206,7 +2212,7 @@ sub
 	[#Rule 16
 		 'c_if', 12,
 sub
-#line 113 "template.yp"
+#line 119 "template.yp"
 {
     "if (" . $_[2][0] . ") {\n" . $_[4] . $_[5] . $_[6] . "} else {\n" . $_[10] . "}\n";
   }
@@ -2214,7 +2220,7 @@ sub
 	[#Rule 17
 		 'c_elseifs', 4,
 sub
-#line 117 "template.yp"
+#line 123 "template.yp"
 {
     #{
     "} elsif (" . $_[3][0] . ") {\n";
@@ -2224,7 +2230,7 @@ sub
 	[#Rule 18
 		 'c_elseifs', 6,
 sub
-#line 122 "template.yp"
+#line 128 "template.yp"
 {
     #{
     $_[1] . $_[2] . "} elsif (" . $_[5][0] . ") {\n";
@@ -2234,7 +2240,7 @@ sub
 	[#Rule 19
 		 'c_set', 4,
 sub
-#line 128 "template.yp"
+#line 134 "template.yp"
 {
     $_[2][0] . ' = ' . $_[4][0] . ";\n";
   }
@@ -2242,7 +2248,7 @@ sub
 	[#Rule 20
 		 'c_set', 6,
 sub
-#line 131 "template.yp"
+#line 137 "template.yp"
 {
     "push \@\$stack, \$t;\n\$t = '';\n" . $_[4] . $_[2][0] . " = \$t;\n\$t = pop(\@\$stack);\n";
   }
@@ -2250,7 +2256,7 @@ sub
 	[#Rule 21
 		 'fn_def', 5,
 sub
-#line 135 "template.yp"
+#line 141 "template.yp"
 {
     $_[0]->{functions}->{$_[2]} = {
       name => $_[2],
@@ -2264,7 +2270,7 @@ sub
 	[#Rule 22
 		 'c_fn', 3,
 sub
-#line 145 "template.yp"
+#line 151 "template.yp"
 {
     $_[1]->{body} = "sub {\nmy \$self = shift;\nreturn ".$_[3].";\n}\n";
     '';
@@ -2273,7 +2279,7 @@ sub
 	[#Rule 23
 		 'c_fn', 5,
 sub
-#line 149 "template.yp"
+#line 155 "template.yp"
 {
     $_[1]->{body} = "sub {\nmy \$self = shift;\nmy \$stack = [];\nmy \$t = '';\n".$_[3]."\nreturn \$t;\n}\n";
     '';
@@ -2282,7 +2288,7 @@ sub
 	[#Rule 24
 		 'c_for', 8,
 sub
-#line 154 "template.yp"
+#line 160 "template.yp"
 {
     my @varref = @{$_[2]};
     my @exp = @{$_[4]};
@@ -2327,7 +2333,7 @@ pop \@\$stack;
 	[#Rule 33
 		 'exp', 3,
 sub
-#line 177 "template.yp"
+#line 183 "template.yp"
 {
     [ '(' . $_[1][0] . ' . ' . $_[3][0] . ')', $_[1][1] && $_[3][1] ];
   }
@@ -2335,7 +2341,7 @@ sub
 	[#Rule 34
 		 'exp', 3,
 sub
-#line 180 "template.yp"
+#line 186 "template.yp"
 {
     [ '(' . $_[1][0] . ' || ' . $_[3][0] . ')', $_[1][1] && $_[3][1] ];
   }
@@ -2343,7 +2349,7 @@ sub
 	[#Rule 35
 		 'exp', 3,
 sub
-#line 183 "template.yp"
+#line 189 "template.yp"
 {
     [ '(' . $_[1][0] . ' || ' . $_[3][0] . ')', $_[1][1] && $_[3][1] ];
   }
@@ -2351,7 +2357,7 @@ sub
 	[#Rule 36
 		 'exp', 3,
 sub
-#line 186 "template.yp"
+#line 192 "template.yp"
 {
     [ '(' . $_[1][0] . ' XOR ' . $_[3][0] . ')', 1 ];
   }
@@ -2359,7 +2365,7 @@ sub
 	[#Rule 37
 		 'exp', 3,
 sub
-#line 189 "template.yp"
+#line 195 "template.yp"
 {
     [ '(' . $_[1][0] . ' && ' . $_[3][0] . ')', 1 ];
   }
@@ -2367,7 +2373,7 @@ sub
 	[#Rule 38
 		 'exp', 3,
 sub
-#line 192 "template.yp"
+#line 198 "template.yp"
 {
     [ '(' . $_[1][0] . ' && ' . $_[3][0] . ')', 1 ];
   }
@@ -2375,7 +2381,7 @@ sub
 	[#Rule 39
 		 'exp', 3,
 sub
-#line 195 "template.yp"
+#line 201 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' == ' : ' eq ') . $_[3][0] . ')', 1 ];
   }
@@ -2383,7 +2389,7 @@ sub
 	[#Rule 40
 		 'exp', 3,
 sub
-#line 198 "template.yp"
+#line 204 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' != ' : ' ne ') . $_[3][0] . ')', 1 ];
   }
@@ -2391,7 +2397,7 @@ sub
 	[#Rule 41
 		 'exp', 3,
 sub
-#line 201 "template.yp"
+#line 207 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' < ' : ' lt ') . $_[3][0] . ')', 1 ];
   }
@@ -2399,7 +2405,7 @@ sub
 	[#Rule 42
 		 'exp', 3,
 sub
-#line 204 "template.yp"
+#line 210 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' > ' : ' gt ') . $_[3][0] . ')', 1 ];
   }
@@ -2407,7 +2413,7 @@ sub
 	[#Rule 43
 		 'exp', 3,
 sub
-#line 207 "template.yp"
+#line 213 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' <= ' : ' le ') . $_[3][0] . ')', 1 ];
   }
@@ -2415,7 +2421,7 @@ sub
 	[#Rule 44
 		 'exp', 3,
 sub
-#line 210 "template.yp"
+#line 216 "template.yp"
 {
     [ '(' . $_[1][0] . ($_[1][1] eq 'i' || $_[3][1] eq 'i' ? ' >= ' : ' ge ') . $_[3][0] . ')', 1 ];
   }
@@ -2423,7 +2429,7 @@ sub
 	[#Rule 45
 		 'exp', 3,
 sub
-#line 213 "template.yp"
+#line 219 "template.yp"
 {
     [ '(' . $_[1][0] . ' + ' . $_[3][0] . ')', 'i' ];
   }
@@ -2431,7 +2437,7 @@ sub
 	[#Rule 46
 		 'exp', 3,
 sub
-#line 216 "template.yp"
+#line 222 "template.yp"
 {
     [ '(' . $_[1][0] . ' - ' . $_[3][0] . ')', 'i' ];
   }
@@ -2439,7 +2445,7 @@ sub
 	[#Rule 47
 		 'exp', 3,
 sub
-#line 219 "template.yp"
+#line 225 "template.yp"
 {
     [ '(' . $_[1][0] . ' & ' . $_[3][0] . ')', 'i' ];
   }
@@ -2447,7 +2453,7 @@ sub
 	[#Rule 48
 		 'exp', 3,
 sub
-#line 222 "template.yp"
+#line 228 "template.yp"
 {
     [ '(' . $_[1][0] . ' * ' . $_[3][0] . ')', 'i' ];
   }
@@ -2455,7 +2461,7 @@ sub
 	[#Rule 49
 		 'exp', 3,
 sub
-#line 225 "template.yp"
+#line 231 "template.yp"
 {
     [ '(' . $_[1][0] . ' / ' . $_[3][0] . ')', 'i' ];
   }
@@ -2463,7 +2469,7 @@ sub
 	[#Rule 50
 		 'exp', 3,
 sub
-#line 228 "template.yp"
+#line 234 "template.yp"
 {
     [ '(' . $_[1][0] . ' % ' . $_[3][0] . ')', 'i' ];
   }
@@ -2477,7 +2483,7 @@ sub
 	[#Rule 53
 		 'p10', 2,
 sub
-#line 234 "template.yp"
+#line 240 "template.yp"
 {
     [ '(-'.$_[2][0].')', 1 ];
   }
@@ -2488,7 +2494,7 @@ sub
 	[#Rule 55
 		 'p11', 4,
 sub
-#line 239 "template.yp"
+#line 245 "template.yp"
 {
     [ '('.$_[2][0].')'.$_[4], 0 ];
   }
@@ -2496,7 +2502,7 @@ sub
 	[#Rule 56
 		 'p11', 2,
 sub
-#line 242 "template.yp"
+#line 248 "template.yp"
 {
     [ '(!'.$_[2][0].')', 1 ];
   }
@@ -2504,7 +2510,7 @@ sub
 	[#Rule 57
 		 'p11', 2,
 sub
-#line 245 "template.yp"
+#line 251 "template.yp"
 {
     [ '(!'.$_[2][0].')', 1 ];
   }
@@ -2512,7 +2518,7 @@ sub
 	[#Rule 58
 		 'nonbrace', 3,
 sub
-#line 249 "template.yp"
+#line 255 "template.yp"
 {
     [ "{ " . $_[2] . " }", 1 ];
   }
@@ -2526,7 +2532,7 @@ sub
 	[#Rule 61
 		 'nonbrace', 3,
 sub
-#line 254 "template.yp"
+#line 260 "template.yp"
 {
     $_[0]->compile_function($_[1], []);
   }
@@ -2534,7 +2540,7 @@ sub
 	[#Rule 62
 		 'nonbrace', 4,
 sub
-#line 257 "template.yp"
+#line 263 "template.yp"
 {
     $_[0]->compile_function($_[1], $_[3]);
   }
@@ -2542,7 +2548,7 @@ sub
 	[#Rule 63
 		 'nonbrace', 4,
 sub
-#line 260 "template.yp"
+#line 266 "template.yp"
 {
     [ "\$self->_call_block('".addcslashes($_[1], "'")."', { ".$_[3]." }, '".addcslashes($_[0]->{lexer}->errorinfo(), "'")."')", 1 ];
   }
@@ -2550,7 +2556,7 @@ sub
 	[#Rule 64
 		 'nonbrace', 2,
 sub
-#line 263 "template.yp"
+#line 269 "template.yp"
 {
     $_[0]->compile_function($_[1], [ $_[2] ]);
   }
@@ -2558,7 +2564,7 @@ sub
 	[#Rule 65
 		 'list', 1,
 sub
-#line 267 "template.yp"
+#line 273 "template.yp"
 {
     [ $_[1] ];
   }
@@ -2566,7 +2572,7 @@ sub
 	[#Rule 66
 		 'list', 3,
 sub
-#line 270 "template.yp"
+#line 276 "template.yp"
 {
     [ $_[1], @{$_[3]} ];
   }
@@ -2574,7 +2580,7 @@ sub
 	[#Rule 67
 		 'arglist', 1,
 sub
-#line 274 "template.yp"
+#line 280 "template.yp"
 {
     [ $_[1] ];
   }
@@ -2582,7 +2588,7 @@ sub
 	[#Rule 68
 		 'arglist', 3,
 sub
-#line 277 "template.yp"
+#line 283 "template.yp"
 {
     [ $_[1], @{$_[3]} ];
   }
@@ -2590,7 +2596,7 @@ sub
 	[#Rule 69
 		 'arglist', 0,
 sub
-#line 280 "template.yp"
+#line 286 "template.yp"
 {
     [];
   }
@@ -2601,7 +2607,7 @@ sub
 	[#Rule 71
 		 'hash', 3,
 sub
-#line 285 "template.yp"
+#line 291 "template.yp"
 {
     $_[1] . ', ' . $_[3];
   }
@@ -2609,7 +2615,7 @@ sub
 	[#Rule 72
 		 'hash', 0,
 sub
-#line 288 "template.yp"
+#line 294 "template.yp"
 {
     '';
   }
@@ -2620,7 +2626,7 @@ sub
 	[#Rule 74
 		 'gthash', 3,
 sub
-#line 293 "template.yp"
+#line 299 "template.yp"
 {
     $_[1] . ', ' . $_[3];
   }
@@ -2628,7 +2634,7 @@ sub
 	[#Rule 75
 		 'pair', 3,
 sub
-#line 297 "template.yp"
+#line 303 "template.yp"
 {
     $_[1][0] . ' => ' . $_[3][0];
   }
@@ -2639,7 +2645,7 @@ sub
 	[#Rule 77
 		 'gtpair', 3,
 sub
-#line 302 "template.yp"
+#line 308 "template.yp"
 {
     $_[1][0] . ' => ' . $_[3][0];
   }
@@ -2647,7 +2653,7 @@ sub
 	[#Rule 78
 		 'varref', 1,
 sub
-#line 306 "template.yp"
+#line 312 "template.yp"
 {
     [ "\$self->{tpldata}{'".addcslashes($_[1], "'")."'}", 0 ];
   }
@@ -2655,7 +2661,7 @@ sub
 	[#Rule 79
 		 'varref', 2,
 sub
-#line 309 "template.yp"
+#line 315 "template.yp"
 {
     [ $_[1][0] . $_[2], 0 ];
   }
@@ -2663,7 +2669,7 @@ sub
 	[#Rule 80
 		 'varpart', 2,
 sub
-#line 313 "template.yp"
+#line 319 "template.yp"
 {
     "->{'".addcslashes($_[2], "'")."'}";
   }
@@ -2671,7 +2677,7 @@ sub
 	[#Rule 81
 		 'varpart', 3,
 sub
-#line 316 "template.yp"
+#line 322 "template.yp"
 {
     ($_[2][1] eq 'i' ? '->['.$_[2][0].']' : "->{".$_[2][0]."}");
   }
@@ -2679,7 +2685,7 @@ sub
 	[#Rule 82
 		 'varpart', 4,
 sub
-#line 319 "template.yp"
+#line 325 "template.yp"
 {
     '->'.$_[2].'()';
   }
@@ -2687,7 +2693,7 @@ sub
 	[#Rule 83
 		 'varpart', 5,
 sub
-#line 322 "template.yp"
+#line 328 "template.yp"
 {
     '->'.$_[2].'('.join(', ', map { $_->[0] } @{$_[4]}).')';
   }
@@ -2695,7 +2701,7 @@ sub
 	[#Rule 84
 		 'varpath', 0,
 sub
-#line 326 "template.yp"
+#line 332 "template.yp"
 {
     '';
   }
@@ -2703,7 +2709,7 @@ sub
 	[#Rule 85
 		 'varpath', 2,
 sub
-#line 329 "template.yp"
+#line 335 "template.yp"
 {
     $_[1] . $_[2];
   }

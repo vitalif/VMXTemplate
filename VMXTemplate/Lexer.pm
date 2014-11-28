@@ -243,7 +243,8 @@ sub read_token
         }
         # Unknown character
         $self->warn("Unexpected character '".substr($self->{code}, 0, 1)."'");
-        return ('invalid', undef);
+        $self->skip_error;
+        return ('error', undef);
     }
 }
 
