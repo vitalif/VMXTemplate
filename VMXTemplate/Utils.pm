@@ -363,6 +363,15 @@ sub exec_cmp
     return $n ? $a <=> $b : $a cmp $b;
 }
 
+# Quote strings without transforming UTF-8 to \x{...}
+sub _dumper_qquote
+{
+    my $s = $_[0];
+    $s = '' unless defined $s;
+    $s =~ s/\"/\\"/gs;
+    return '"'.$s.'"';
+}
+
 # Data::Dumper
 sub var_dump
 {
@@ -370,6 +379,9 @@ sub var_dump
     local $Data::Dumper::Indent = 1;
     local $Data::Dumper::Varname = '';
     local $Data::Dumper::Sortkeys = 1;
+    local $Data::Dumper::Useperl = 1;
+    no warnings 'redefine';
+    *Data::Dumper::qquote = \&_dumper_qquote;
     return scalar Data::Dumper::Dumper(@_);
 }
 

@@ -15,7 +15,7 @@ sub _Lexer
 sub _error
 {
     my ($self) = @_;
-    if ($self->YYCurtok ne 'error')
+    if ($self->YYCurtok ne 'invalid')
     {
         $self->{lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
     }
