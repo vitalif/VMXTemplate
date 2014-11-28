@@ -15,7 +15,10 @@ sub _Lexer
 sub _error
 {
     my ($self) = @_;
-    $self->{lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
+    if ($self->YYCurtok ne 'error')
+    {
+        $self->{lexer}->warn('Unexpected ' . $self->YYCurtok . ($self->YYCurval ? ' ' . $self->YYCurval : ''));
+    }
     $self->{lexer}->skip_error;
 }
 
@@ -40,6 +43,7 @@ sub compile
         delete $self->{functions}->{':main'};
     }
     return ($self->{options}->{use_utf8} ? "use utf8;\n" : "").
+        ($self->{options}->{input_filename} ? "# $self->{options}->{input_filename}\n" : '').
         "{\n':version' => ".VMXTemplate->CODE_VERSION.",\n".
         join(",\n", map { "'$_->{name}' => $_->{body}" } values %{$self->{functions}})."};\n";
 }
@@ -348,7 +352,7 @@ sub function_strftime
     my $self = shift;
     my ($fmt, $date, $time) = @_;
     $date = "($date).' '.($time)" if $time;
-    $date = "POSIX::strftime($date, localtime(timestamp($date)))";
+    $date = "POSIX::strftime($fmt, localtime(timestamp($date)))";
     $date = "utf8on($date)" if $self->{use_utf8};
     return $date;
 }

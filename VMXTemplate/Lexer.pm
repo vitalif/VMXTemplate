@@ -31,6 +31,7 @@ sub new
         keywords => { map { $_ => 1 } split / /, $keywords_str },
 
         # Last directive start position, directive and substitution start/end counters
+        skip_chars => 0,
         last_start => 0,
         last_start_line => 0,
         in_code => 0,
@@ -60,7 +61,7 @@ sub set_code
     $self->{code} = $code;
     $self->{eaten} = '';
     $self->{lineno} = $self->{in_code} = $self->{in_subst} = 0;
-    $self->{last_start} = $self->{last_start_line} = 0;
+    $self->{skip_chars} = $self->{last_start} = $self->{last_start_line} = 0;
 }
 
 sub eat
@@ -89,7 +90,8 @@ sub line
 sub skip_error
 {
     my ($self) = @_;
-    $self->{code} = substr($self->{eaten}, $self->{last_start}+1, length($self->{eaten}), '') . $self->{code};
+    $self->{code} = substr($self->{eaten}, $self->{last_start}, length($self->{eaten}), '') . $self->{code};
+    $self->{skip_chars} = 1;
     $self->{lineno} = $self->{last_start_line};
     $self->{in_code} = $self->{in_subst} = 0;
 }
@@ -105,8 +107,9 @@ sub read_token
     if ($self->{in_code} <= 0 && $self->{in_subst} <= 0)
     {
         my $r;
-        my $code_pos = index($self->{code}, $self->{options}->{begin_code});
-        my $subst_pos = $self->{options}->{begin_subst} ne '' ? index($self->{code}, $self->{options}->{begin_subst}) : -1;
+        my $code_pos = index($self->{code}, $self->{options}->{begin_code}, $self->{skip_chars});
+        my $subst_pos = $self->{options}->{begin_subst} ne '' ? index($self->{code}, $self->{options}->{begin_subst}, $self->{skip_chars}) : -1;
+        $self->{skip_chars} = 0;
         if ($code_pos == -1 && $subst_pos == -1)
         {
             # No more directives
@@ -189,8 +192,8 @@ sub read_token
         return ('name', $l);
     }
     elsif ($self->{code} =~ /^(
-        (\")(?:[^\"\\\\]+|\\\\.)*\" |
-        \'(?:[^\'\\\\]+|\\\\.)*\' |
+        (\")(?:[^\"\\]+|\\.)*\" |
+        \'(?:[^\'\\]+|\\.)*\' |
         0\d+ | \d+(\.\d+)? | 0x\d+)/xis)
     {
         # String or numeric non-negative literal

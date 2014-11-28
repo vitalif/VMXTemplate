@@ -22,6 +22,7 @@ sub new
         cache_dir     => undef,     # compiled templates cache directory
         reload        => 2,         # 0 means to not check for new versions of cached templates
                                     # > 0 - check at most each <reload> seconds
+        disable_cache => 0,         # turn cache off completely?
         filters       => [],        # filters to run on output of every template
         use_utf8      => 1,         # templates are in UTF-8 and all template variables should be in UTF-8
         raise_error   => 0,         # die() on fatal template errors
@@ -78,7 +79,7 @@ sub get_errors
         return '<div id="template-errors" style="display: block; border: 1px solid black; padding: 8px; background: #fcc">'.
             'VMXTemplate errors:<ul><li>'.
             join('</li><li>', map { html_pbr($_) } @{$self->{errors}}).
-            '</li></ul>';
+            '</li></ul></div>';
     }
     return '';
 }

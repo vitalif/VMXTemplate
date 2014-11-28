@@ -215,14 +215,16 @@ sub compile
     my ($code, $fn, $force_reload) = @_;
     Encode::_utf8_off($code); # for md5_hex
     my $key = $fn ? 'F'.$fn : 'C'.md5_hex($code);
+
     $force_reload = 1 if !$self->{compiled_code}->{$key};
+    $force_reload = 1 if $self->{options}->{disable_cache};
 
     # Load code
     my $mtime;
     if ($fn)
     {
         $fn = $self->{options}->{root}.$fn if $fn !~ m!^/!so;
-        if (!$force_reload && $self->{reload} && $self->{ltimes}->{$fn}+$self->{reload} < time)
+        if (!$force_reload && $self->{options}->{reload} && $self->{ltimes}->{$fn}+$self->{options}->{reload} < time)
         {
             $mtime = [ stat $fn ] -> [ 9 ];
             $force_reload = 1 if $mtime > $self->{mtimes}->{$fn};
@@ -263,7 +265,7 @@ sub compile
     if ($self->{options}->{cache_dir})
     {
         $h = $self->{options}->{cache_dir}.md5_hex($code).'.pl';
-        if (-e $h && !$force_reload)
+        if (-e $h)
         {
             my $r = $self->{compiled_code}->{$key} = do $h;
             if ($@)
@@ -272,13 +274,19 @@ sub compile
                 unlink $h;
             }
             elsif (ref $r eq 'CODE' ||
-                !$r->{':version'} || $r->{version} < CODE_VERSION)
+                !$r->{':version'} || $r->{':version'} < CODE_VERSION)
             {
                 # we got cache from older version, force recompile
             }
             else
             {
-                return $r;
+                if ($fn)
+                {
+                    # remember modification and load time
+                    $self->{mtimes}->{$fn} = $mtime;
+                    $self->{ltimes}->{$fn} = time;
+                }
+                return ($r, $key);
             }
         }
     }
