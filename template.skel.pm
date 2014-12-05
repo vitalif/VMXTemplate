@@ -10,9 +10,10 @@
 package VMXTemplate::Parser;
 
 use strict;
-use base qw(Parse::Yapp::Driver VMXTemplate::Compiler);
+use VMXTemplate::Compiler;
 use VMXTemplate::Utils;
 <<$driver>>
+our @ISA = qw(Parse::Yapp::Driver VMXTemplate::Compiler);
 
 <<$head>>
 sub new
@@ -26,7 +27,7 @@ sub new
 <<$states>>,
         yyrules =>
 <<$rules>>,
-#line 29 "template.skel.pm"
+#line 30 "template.skel.pm"
     ), $class;
     $self->{options} = $options;
     return $self;
