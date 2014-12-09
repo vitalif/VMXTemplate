@@ -351,8 +351,16 @@ sub function_strftime
 {
     my $self = shift;
     my ($fmt, $date, $time) = @_;
-    $date = "($date).' '.($time)" if $time;
-    $date = "POSIX::strftime($fmt, localtime(timestamp($date)))";
+    if ($date)
+    {
+        $date = "($date).' '.($time)" if $time;
+        $date = "timestamp($date)";
+    }
+    else
+    {
+        $date = '';
+    }
+    $date = "POSIX::strftime($fmt, localtime($date))";
     $date = "utf8on($date)" if $self->{use_utf8};
     return $date;
 }
