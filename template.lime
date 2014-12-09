@@ -241,7 +241,7 @@ p10: p11/$
 .
 p11: nonbrace
 | '(' exp/e ')' varpath/p {
-    $$ = [ '('.$e[0].')'.$p, false ];
+    $$ = [ ($p !== '' ? 'self::noop('.$e[0].')'.$p : '('.$e[0].')'), false ];
   }
 | '!' p11/a {
     $$ = [ '(!'.$a[0].')', true ];
@@ -343,7 +343,7 @@ varpart: '.' namekw/n {
   }
 | '.' name/n '(' list/l ')' {
     $argv = [];
-    foreach ($args as $a) {
+    foreach ($l as $a) {
       $argv[] = $a[0];
     }
     $$ = '->'.$n.'('.implode(', ', $argv).')';

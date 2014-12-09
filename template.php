@@ -474,6 +474,12 @@ class VMXTemplate
         return array($a);
     }
 
+    // No-op, just returns the single argument. Needed to workaround ($expression)['key'] and ($expression)->m() issues.
+    static function noop($a)
+    {
+        return $a;
+    }
+
     // Guess if the array is associative based on the first key (for performance)
     static function is_assoc($a)
     {

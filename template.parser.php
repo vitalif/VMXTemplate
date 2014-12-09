@@ -418,9 +418,13 @@ $code
     }
 
     /* strftime */
-    function function_strftime($fmt, $date)
+    function function_strftime($fmt, $date = NULL)
     {
-        return "strftime($fmt, self::timestamp($date))";
+        if ($date !== NULL)
+        {
+            $date = ", self::timestamp($date)";
+        }
+        return "strftime($fmt$date)";
     }
 
     /* ограничение длины строки $maxlen символами на границе пробелов и добавление '...', если что. */
@@ -4002,7 +4006,7 @@ class VMXTemplateParser extends lime_parser {
     $e = &$tokens[1];
     $p = &$tokens[3];
 
-    $result = [ '('.$e[0].')'.$p, false ];
+    $result = [ ($p !== '' ? 'self::noop('.$e[0].')'.$p : '('.$e[0].')'), false ];
   }
 
   function reduce_54_p11_3($tokens, &$result) {
@@ -4255,7 +4259,7 @@ class VMXTemplateParser extends lime_parser {
     $l = &$tokens[3];
 
     $argv = [];
-    foreach ($args as $a) {
+    foreach ($l as $a) {
       $argv[] = $a[0];
     }
     $result = '->'.$n.'('.implode(', ', $argv).')';
@@ -4992,5 +4996,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 0.559287786484 seconds
-// Memory: 11818920 bytes
+// Time: 1,0702919960022 seconds
+// Memory: 11815712 bytes
