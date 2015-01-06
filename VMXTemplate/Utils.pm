@@ -12,7 +12,7 @@ our @EXPORT = qw(
     timestamp plural_ru strlimit htmlspecialchars urlencode urldecode strip_tags strip_unsafe_tags
     addcslashes requote quotequote sql_quote regex_replace str_replace
     array_slice array_div encode_json trim html_pbr array_items utf8on
-    exec_subst exec_pairs exec_is_array exec_get exec_cmp var_dump
+    exec_subst exec_pairs exec_is_array exec_get exec_cmp min max str_min str_max var_dump
 );
 
 use constant {
@@ -362,6 +362,48 @@ sub exec_cmp
     my ($a, $b) = @_;
     my $n = grep /^-?\d+(\.\d+)?$/, $a, $b;
     return $n ? $a <=> $b : $a cmp $b;
+}
+
+# min
+sub min
+{
+    my $r = shift @_;
+    for (@_)
+    {
+        $r = $_ if $_ < $r;
+    }
+    return $r;
+}
+
+sub str_min
+{
+    my $r = shift @_;
+    for (@_)
+    {
+        $r = $_ if $_ lt $r;
+    }
+    return $r;
+}
+
+# max
+sub max
+{
+    my $r = shift @_;
+    for (@_)
+    {
+        $r = $_ if $_ > $r;
+    }
+    return $r;
+}
+
+sub str_max
+{
+    my $r = shift @_;
+    for (@_)
+    {
+        $r = $_ if $_ gt $r;
+    }
+    return $r;
 }
 
 # Quote strings without transforming UTF-8 to \x{...}

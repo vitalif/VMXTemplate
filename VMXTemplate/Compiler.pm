@@ -91,6 +91,7 @@ use constant Q_ALWAYS => -1; # always safe
 use constant Q_IF_ALL => -2; # safe if all arguments are safe
 use constant Q_ALL_BUT_FIRST => -3; # safe if all arguments except first are safe; first may be safe or unsafe
 use constant Q_ALWAYS_NUM => -4; # always safe, returns numeric values
+use constant Q_PASS => -5; # pass safeness to function
 
 my $functionSafeness = {
     int                 => Q_ALWAYS_NUM,
@@ -115,6 +116,8 @@ my $functionSafeness = {
     mul                 => Q_ALWAYS_NUM,
     div                 => Q_ALWAYS_NUM,
     mod                 => Q_ALWAYS_NUM,
+    min                 => Q_IF_ALL_PASS,
+    max                 => Q_IF_ALL_PASS,
     log                 => Q_ALWAYS_NUM,
     even                => Q_ALWAYS_NUM,
     odd                 => Q_ALWAYS_NUM,
@@ -191,29 +194,30 @@ sub compile_function
         $fn = $functions->{$fn};
     }
     # Calculate HTML safeness flag
-    my $q = $functionSafeness->{$fn};
-    if ($q > 0)
+    my $fl = $functionSafeness->{$fn};
+    my $q;
+    if ($fl > 0)
     {
-        $q = exists $args->[$q-1] ? $args->[$q-1]->[1] : 1;
+        $q = exists $args->[$fl-1] ? $args->[$fl-1]->[1] : 1;
     }
-    elsif ($q == Q_ALWAYS)
+    elsif ($fl == Q_ALWAYS)
     {
         $q = 1;
     }
-    elsif ($q == Q_ALWAYS_NUM)
+    elsif ($fl == Q_ALWAYS_NUM)
     {
         $q = 'i';
     }
-    else
+    elsif ($fl != Q_PASS)
     {
         $q = 1;
         my $n = scalar @$args;
-        for (my $i = ($q == Q_ALL_BUT_FIRST ? 1 : 0); $i < $n; $i++)
+        for (my $i = ($fl == Q_ALL_BUT_FIRST ? 1 : 0); $i < $n; $i++)
         {
             $q = $q && $args->[$i]->[1];
         }
     }
-    my $argv = [ map { $_->[0] } @$args ];
+    my $argv = $fl == Q_PASS ? [ map { $_->[0] } @$args ] : $argv;
     my $r;
     if ($self->can(my $ffn = "function_$fn"))
     {
@@ -228,9 +232,11 @@ sub compile_function
     else
     {
         $self->{lexer}->warn("Unknown function: '$fn'");
-        $r = "''";
+        $r = $fl == Q_PASS ? [ "''", 1 ] : "''";
     }
-    return [ $r, $q, ($forceSubst->{$fn} ? 1 : ()) ];
+    $r = [ $r, $q ] if $fl != Q_PASS;
+    push @$r, 1 if $forceSubst->{$fn};
+    return $r;
 }
 
 # call operator on arguments
@@ -269,6 +275,9 @@ sub function_sub     { fmop('-', @_) }
 sub function_mul     { fmop('*', @_) }
 sub function_div     { fmop('/', @_) }
 sub function_mod     { fmop('%', @_) }
+# min, max
+sub function_min     { (grep { $_->[1] ne 'i' } @_ ? 'str_' : '')."min(".join(', ', map { $_->[0] } @_).")" }
+sub function_max     { (grep { $_->[1] ne 'i' } @_ ? 'str_' : '')."max(".join(', ', map { $_->[0] } @_).")" }
 # logarithm
 sub function_log     { "log($_[1])" }
 # is the argument even/odd?

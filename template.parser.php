@@ -90,6 +90,8 @@ class VMXTemplateCompiler
         'mul'               => self::Q_ALWAYS,
         'div'               => self::Q_ALWAYS,
         'mod'               => self::Q_ALWAYS,
+        'min'               => self::Q_IF_ALL,
+        'max'               => self::Q_IF_ALL,
         'log'               => self::Q_ALWAYS,
         'even'              => self::Q_ALWAYS,
         'odd'               => self::Q_ALWAYS,
@@ -284,6 +286,10 @@ $code
     function function_mul()      { $a = func_get_args(); return self::fmop('*', $a); }
     function function_div()      { $a = func_get_args(); return self::fmop('/', $a); }
     function function_mod($a,$b) { return "(($a) % ($b))"; }
+
+    /* минимум и максимум */
+    function function_min()      { $a = func_get_args(); return "min([ ".implode(', ', $a)." ])"; }
+    function function_max()      { $a = func_get_args(); return "max([ ".implode(', ', $a)." ])"; }
 
     /* логарифм */
     function function_log($e)    { return "log($e)"; }
