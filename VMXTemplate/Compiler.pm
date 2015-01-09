@@ -118,6 +118,7 @@ my $functionSafeness = {
     mod                 => Q_ALWAYS_NUM,
     min                 => Q_IF_ALL_PASS,
     max                 => Q_IF_ALL_PASS,
+    round               => Q_ALWAYS_NUM,
     log                 => Q_ALWAYS_NUM,
     even                => Q_ALWAYS_NUM,
     odd                 => Q_ALWAYS_NUM,
@@ -278,6 +279,7 @@ sub function_mod     { fmop('%', @_) }
 # min, max
 sub function_min     { (grep { $_->[1] ne 'i' } @_ ? 'str_' : '')."min(".join(', ', map { $_->[0] } @_).")" }
 sub function_max     { (grep { $_->[1] ne 'i' } @_ ? 'str_' : '')."max(".join(', ', map { $_->[0] } @_).")" }
+sub function_round   { "round($_[1])" }
 # logarithm
 sub function_log     { "log($_[1])" }
 # is the argument even/odd?

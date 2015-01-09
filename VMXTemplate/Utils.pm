@@ -12,7 +12,7 @@ our @EXPORT = qw(
     timestamp plural_ru strlimit htmlspecialchars urlencode urldecode strip_tags strip_unsafe_tags
     addcslashes requote quotequote sql_quote regex_replace str_replace
     array_slice array_div encode_json trim html_pbr array_items utf8on
-    exec_subst exec_pairs exec_is_array exec_get exec_cmp min max str_min str_max var_dump
+    exec_subst exec_pairs exec_is_array exec_get exec_cmp min max str_min str_max round var_dump
 );
 
 use constant {
@@ -404,6 +404,14 @@ sub str_max
         $r = $_ if $_ gt $r;
     }
     return $r;
+}
+
+# round
+sub round
+{
+    my $i = int($_[0]);
+    my $a = $_[0]-$i;
+    return $a >= 0.5 ? $i+1 : ($a <= -0.5 ? $i-1 : $i);
 }
 
 # Quote strings without transforming UTF-8 to \x{...}
