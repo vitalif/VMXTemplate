@@ -621,13 +621,13 @@ class VMXTemplate
     // UTF-8 lcfirst()
     static function mb_lcfirst($str)
     {
-        return mb_strtolower(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+        return mb_strtolower(mb_substr($str, 0, 1)) . mb_substr($str, 1);
     }
 
     // UTF-8 ucfirst()
     static function mb_ucfirst($str)
     {
-        return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 0, 1);
+        return mb_strtoupper(mb_substr($str, 0, 1)) . mb_substr($str, 1);
     }
 
     // Replace tags with whitespace
