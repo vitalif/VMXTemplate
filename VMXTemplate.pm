@@ -8,8 +8,8 @@
 #
 # Homepage: http://yourcmc.ru/wiki/VMX::Template
 # License: GNU GPLv3 or later
-# Author: Vitaliy Filippov, 2006-2014
-# Version: V3 (LALR), 2014-10-14
+# Author: Vitaliy Filippov, 2006-2015
+# Version: V3 (LALR), 2015-01-09
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
