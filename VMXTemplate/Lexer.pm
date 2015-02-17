@@ -106,6 +106,7 @@ sub read_token
     }
     if ($self->{in_code} <= 0 && $self->{in_subst} <= 0)
     {
+        my $was_code = 1;
         my $r;
         my $code_pos = index($self->{code}, $self->{options}->{begin_code}, $self->{skip_chars});
         my $subst_pos = $self->{options}->{begin_subst} ne '' ? index($self->{code}, $self->{options}->{begin_subst}, $self->{skip_chars}) : -1;
@@ -124,7 +125,7 @@ sub read_token
                 my $str = $self->eat($code_pos);
                 if ($self->{options}->{eat_code_line})
                 {
-                    $str =~ s/\n[ \t]*$/\n/s;
+                    $was_code ? $str =~ s/\n[ \t]*$//s : $str =~ s/\n[ \t]*$/\n/s;
                 }
                 $r = [ 'literal', [ "'".addcslashes($str, "'")."'", 1 ] ];
             }
@@ -150,6 +151,7 @@ sub read_token
                 $self->eat(length $self->{options}->{begin_code});
                 $self->{in_code} = 1;
             }
+            $was_code = 1;
         }
         else
         {
@@ -166,6 +168,7 @@ sub read_token
                 $self->eat(length $self->{options}->{begin_subst});
                 $self->{in_subst} = 1;
             }
+            $was_code = 0;
         }
         return @$r;
     }
@@ -221,11 +224,6 @@ sub read_token
                     $self->{in_code}-- if $t eq $self->{options}->{end_code};
                     if (!$self->{in_code})
                     {
-                        if ($self->{options}->{eat_code_line} &&
-                            $self->{code} =~ /^([ \t\r]+\n\r?)/so)
-                        {
-                            $self->eat(length $1);
-                        }
                         return ('-->', $t);
                     }
                 }
