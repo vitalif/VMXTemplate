@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-01-17
+ * Version: V3 (LALR), 2015-02-17
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -777,6 +777,7 @@ class VMXTemplateLexer
         }
         if ($this->in_code <= 0 && $this->in_subst <= 0)
         {
+            $was_code = true;
             $code_pos = strpos($this->code, $this->options->begin_code, $this->pos+$this->force_literal);
             $subst_pos = strpos($this->code, $this->options->begin_subst, $this->pos+$this->force_literal);
             $this->force_literal = 0;
@@ -795,7 +796,7 @@ class VMXTemplateLexer
                     $str = substr($this->code, $this->pos, $code_pos-$this->pos);
                     if ($this->options->eat_code_line)
                     {
-                        $str = preg_replace('/\n[ \t]*$/s', "\n", $str);
+                        $str = preg_replace('/\n[ \t]*$/s', $was_code ? '' : "\n", $str);
                     }
                     $r = array('literal', "'".addcslashes($str, "'\\")."'");
                     $this->lineno += substr_count($r[1], "\n");
@@ -822,6 +823,7 @@ class VMXTemplateLexer
                     $this->pos += strlen($this->options->begin_code);
                     $this->in_code = 1;
                 }
+                $was_code = true;
             }
             else
             {
@@ -840,6 +842,7 @@ class VMXTemplateLexer
                     $this->pos++;
                     $this->in_subst = 1;
                 }
+                $was_code = false;
             }
             return $r;
         }
@@ -898,23 +901,6 @@ class VMXTemplateLexer
                         $this->in_code -= ($t === $this->options->end_code);
                         if (!$this->in_code)
                         {
-                            if ($this->options->eat_code_line)
-                            {
-                                $p = $this->pos;
-                                while ($p < $this->codelen && (($c = $this->code{$p}) == ' ' || $c == "\t" || $c == "\r"))
-                                {
-                                    $p++;
-                                }
-                                if ($p < $this->codelen && $this->code{$p} == "\n")
-                                {
-                                    $p++;
-                                    if ($p < $this->codelen && $this->code{$p} == "\r")
-                                    {
-                                        $p++;
-                                    }
-                                    $this->pos = $p;
-                                }
-                            }
                             return array('-->', $t);
                         }
                     }
@@ -3596,7 +3582,7 @@ class VMXTemplateParser extends lime_parser {
     // (3) chunk :=  literal
     $result = reset($tokens);
 
-    $result = '$t .= ' . $tokens[0] . ";\n";
+    $result = ($tokens[0] != "''" && $tokens[0] != '""' ? '$t .= ' . $tokens[0] . ";\n" : '');
   }
 
   function reduce_4_chunk_2($tokens, &$result) {
@@ -5005,5 +4991,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 1,0702919960022 seconds
-// Memory: 11815712 bytes
+// Time: 2,6265029907227 seconds
+// Memory: 11885624 bytes
