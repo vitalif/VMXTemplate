@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-02-17
+ * Version: V3 (LALR), 2015-03-09
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -65,7 +65,7 @@ class VMXTemplate
     const TS_RFC822     = 7;
 
     // Version of code classes, saved into static $version
-    const CODE_VERSION  = 4;
+    const CODE_VERSION  = 5;
 
     // Data passed to the template
     var $tpldata = array();
@@ -296,11 +296,11 @@ class VMXTemplate
                     );
                     return NULL;
                 }
-                foreach ($class::$functions as $loaded_function => $true)
+                foreach ($class::$functions as $loaded_function => $args)
                 {
                     // FIXME Do it better
                     // Remember functions during file loading
-                    $this->function_search_path[$loaded_function][] = $fn;
+                    $this->function_search_path[$loaded_function][] = array($fn, $args);
                 }
             }
         }
@@ -459,10 +459,21 @@ class VMXTemplate
         if (isset($this->function_search_path[$block]))
         {
             // FIXME maybe do it better!
-            $fn = $this->function_search_path[$block][0];
+            $fn = $this->function_search_path[$block][0][0];
             return $this->parse_real($fn, NULL, $block, $args);
         }
-        throw new VMXTemplateException("$errorinfo Unknown block '$block'");
+        throw new VMXTemplateException("Unknown block '$block'$errorinfo");
+    }
+
+    function call_block_list($block, $args, $errorinfo)
+    {
+        if (isset($this->function_search_path[$block]))
+        {
+            $fun = $this->function_search_path[$block][0];
+            $args = array_combine($fun[1], array_pad(array_slice($args, 0, count($fun[1])), count($fun[1]), NULL));
+            return $this->parse_real($fun[0], NULL, $block, $args);
+        }
+        throw new VMXTemplateException("Unknown block or function '$block'$errorinfo");
     }
 
     static function array1($a)

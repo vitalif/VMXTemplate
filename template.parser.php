@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-02-17
+ * Version: V3 (LALR), 2015-03-09
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -194,7 +194,7 @@ class VMXTemplateCompiler
         foreach ($this->st->functions as $n => $f)
         {
             $code .= $f['body'];
-            $functions[$n] = true;
+            $functions[$n] = $f['args'];
         }
 
         // Assemble the class code
@@ -225,7 +225,7 @@ $code
             $fn = self::$functions[$fn];
         }
         $argv = [];
-        $q = @self::$functionSafeness[$fn];
+        $q = isset(self::$functionSafeness[$fn]) ? self::$functionSafeness[$fn] : false;
         if ($q > 0)
         {
             $q = isset($args[$q-1]) ? $args[$q-1][1] : true;
@@ -234,7 +234,7 @@ $code
         {
             $q = true;
         }
-        else
+        elseif ($q == self::Q_IF_ALL || $q == self::Q_ALL_BUT_FIRST)
         {
             $q = true;
             $n = count($args);
@@ -259,8 +259,9 @@ $code
         }
         else
         {
-            $this->lexer->warn("Unknown function: '$fn'");
-            $r = "false";
+            // A block reference or unknown function
+            $r = "\$this->parent->call_block_list('$fn', array(".implode(', ', $argv)."), '".addcslashes($this->lexer->errorinfo(), "'\\")."')";
+            $q = true;
         }
         return [ $r, $q ];
     }
