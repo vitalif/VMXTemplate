@@ -489,7 +489,7 @@ $code
         return "call_user_func('VMXTemplate::exec_sort', self::merge_to_array(".implode(', ', $a)."))";
     }
 
-    /* пары id => ключ, name => значение для ассоциативного массива */
+    /* пары key => ключ, value => значение для ассоциативного массива */
     function function_pairs($a) { return "self::exec_pairs(is_array($a) ? $a : array())"; }
 
     /* создание массива */
