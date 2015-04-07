@@ -162,7 +162,7 @@ c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "END" {
     $$ = "\$stack[] = ".$varref[0].";
 \$stack[] = ".$varref_index.";
 \$stack[] = 0;
-foreach (self::array1($exp[0]) as \$item) {
+foreach ((array)($exp[0]) as \$item) {
 ".$varref[0]." = \$item;
 ".$varref_index." = \$stack[count(\$stack)-1]++;
 ".$cs."}

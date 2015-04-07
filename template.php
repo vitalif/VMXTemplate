@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-03-09
+ * Version: V3 (LALR), 2015-04-08
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -474,15 +474,6 @@ class VMXTemplate
             return $this->parse_real($fun[0], NULL, $block, $args);
         }
         throw new VMXTemplateException("Unknown block or function '$block'$errorinfo");
-    }
-
-    static function array1($a)
-    {
-        if (is_null($a))
-            return array();
-        if (is_array($a) && !self::is_assoc($a))
-            return $a;
-        return array($a);
     }
 
     // No-op, just returns the single argument. Needed to workaround ($expression)['key'] and ($expression)->m() issues.

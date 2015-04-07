@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-03-09
+ * Version: V3 (LALR), 2015-04-08
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -3761,7 +3761,7 @@ class VMXTemplateParser extends lime_parser {
         $result = "\$stack[] = ".$varref[0].";
     \$stack[] = ".$varref_index.";
     \$stack[] = 0;
-    foreach (self::array1($exp[0]) as \$item) {
+    foreach ((array)($exp[0]) as \$item) {
     ".$varref[0]." = \$item;
     ".$varref_index." = \$stack[count(\$stack)-1]++;
     ".$cs."}
@@ -4992,5 +4992,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 2,6265029907227 seconds
-// Memory: 11885624 bytes
+// Time: 3,1172089576721 seconds
+// Memory: 11886108 bytes
