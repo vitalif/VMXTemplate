@@ -81,59 +81,73 @@
 # Директивы
 
 template = chunks {
-    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$1."\nreturn \$t;\n}\n";
+    $cs = $1;
+    $r = '';
+    foreach ($cs as $a)
+    {
+      if (is_array($a))
+      {
+        $r .= "\$t .= '".addcslashes($a[0], "'\\")."';\n";
+        $this->template->track_dom($a[0], strlen($r));
+      }
+      else
+      {
+        $r .= $a;
+      }
+    }
+    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$r."\nreturn \$t;\n}\n";
     $$ = '';
   }
 .
 chunks = {
-    $$ = '';
+    $$ = [];
   }
 | chunks chunk {
-    $$ = $1 . $2;
+    $$ = array_merge($1, $2);
   }
 .
 chunk = literal {
-    $$ = ($1 != "''" && $1 != '""' ? '$t .= ' . $1 . ";\n" : '');
+    $$ = [ ($1 !== '' ? [ $1 ] : '') ];
   }
 | "<!--" code_chunk/c "-->" {
     $$ = $c;
   }
 | "{{" exp/e "}}" {
-    $$ = '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n";
+    $$ = [ '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n" ];
   }
 | error/e {
-    $$ = '';
+    $$ = [];
   }
 .
 code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp/e {
-    $$ = '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n";
+    $$ = [ '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n" ];
   }
 .
 c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
-    $$ = "if (" . $e[0] . ") {\n" . $if . "}\n";
+    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "}\n" ]);
   }
 | "IF" exp/e "-->" chunks/if "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
-    $$ = "if (" . $e[0] . ") {\n" . $if . "} else {\n" . $else . "}\n";
+    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "} else {\n" ], $else, [ "}\n" ]);
   }
 | "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "END" {
-    $$ = "if (" . $e[0] . ") {\n" . $if . $ei . $ec . "}\n";
+    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "}\n" ]);
   }
 | "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
-    $$ = "if (" . $e[0] . ") {\n" . $if . $ei . $ec . "} else {\n" . $else . "}\n";
+    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "} else {\n" ], $else, [ "}\n" ]);
   }
 .
 c_elseifs = "<!--" elseif exp/e "-->" {
-    $$ = "} elseif (" . $e[0] . ") {\n";
+    $$ = [ "} elseif (" . $e[0] . ") {\n" ];
   }
 | c_elseifs/p chunks/cs "<!--" elseif exp/e "-->" {
-    $$ = $p . $cs . "} elseif (" . $e[0] . ") {\n";
+    $$ = array_merge($p, $cs, [ "} elseif (" . $e[0] . ") {\n" ]);
   }
 .
 c_set = "SET" varref/v "=" exp/e {
-    $$ = $v[0] . ' = ' . $e[0] . ";\n";
+    $$ = [ $v[0] . ' = ' . $e[0] . ";\n" ];
   }
 | "SET" varref/v "-->" chunks/cs "<!--" "END" {
-    $$ = "\$stack[] = \$t;\n\$t = '';\n" . $cs . $v[0] . " = \$t;\n\$t = array_pop(\$stack);\n";
+    $$ = array_merge([ "\$stack[] = \$t;\n\$t = '';\n" ], $cs, [ $v[0] . " = \$t;\n\$t = array_pop(\$stack);\n" ]);
   }
 .
 c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
@@ -144,9 +158,17 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
       //'line' => $line, Ой, я чо - аргументы не юзаю?
       //'pos' => $pos,
     );
-    $$ = '';
+    $$ = [];
   }
 | fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
+    foreach ($cs as &$a)
+    {
+      if (is_array($a))
+      {
+        $a = "\$t .= '".addcslashes($a[0], "'\\")."';\n";
+      }
+    }
+    $cs = implode('', $cs);
     $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
@@ -154,22 +176,22 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
       //'line' => $line,
       //'pos' => $pos,
     );
-    $$ = '';
+    $$ = [];
   }
 .
 c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "END" {
     $varref_index = substr($varref[0], 0, -1) . ".'_index']";
-    $$ = "\$stack[] = ".$varref[0].";
+    $$ = array_merge([ "\$stack[] = ".$varref[0].";
 \$stack[] = ".$varref_index.";
 \$stack[] = 0;
 foreach ((array)($exp[0]) as \$item) {
 ".$varref[0]." = \$item;
 ".$varref_index." = \$stack[count(\$stack)-1]++;
-".$cs."}
+" ], $cs, [ "}
 array_pop(\$stack);
 ".$varref_index." = array_pop(\$stack);
 ".$varref[0]." = array_pop(\$stack);
-";
+" ]);
   }
 .
 fn = "FUNCTION" | "BLOCK" | "MACRO" .
