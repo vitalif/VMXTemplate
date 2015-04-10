@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-04-08
+ * Version: V3 (LALR), 2015-04-10
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -634,19 +634,29 @@ $code
     }
 
     /* map() */
-    // FIXME: Я думаю, что это не работает :-)
     function function_map($f)
     {
-        if (!method_exists($this, "function_$f"))
+        if (!preg_match('/^(["\'])([a-z_]+)\1$/s', $f, $m))
+        {
+            $this->lexer->warn("Non-constant function specified for map(): $f");
+            return 'false';
+        }
+        $fn = $m[2];
+        if (isset(self::$functions[$fn]))
+        {
+            // Function alias
+            $fn = self::$functions[$fn];
+        }
+        if (!method_exists($this, "function_$fn"))
         {
             $this->lexer->warn("Unknown function specified for map(): $f");
             return 'false';
         }
-        $f = "function_$f";
-        $f = $this->$f('$arg');
+        $fn = "function_$fn";
+        $fn = $this->$fn('$arg');
         $args = func_get_args();
         array_shift($args);
-        return "call_user_func('array_map', create_function('$arg', $f), self::merge_to_array(".implode(", ", $args)."))";
+        return "array_map(function(\$arg) { return $fn; }, self::merge_to_array(".implode(", ", $args)."))";
     }
 }
 
