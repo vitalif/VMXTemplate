@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-04-10
+ * Version: V3 (LALR), 2015-04-12
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates

@@ -269,20 +269,6 @@ nonbrace: '{' hash/h '}' {
 | name/f nonbrace/arg {
     $$ = $this->template->compile_function($f, [ $arg ]);
   }
-| method/f '(' ')' {
-    $$ = [ $f.'()', true ];
-  }
-| method/f '(' list/args ')' {
-    $argv = [];
-    foreach ($args as $a) {
-      $argv[] = $a[0];
-    }
-    $$ = [ $f.'('.implode(', ', $argv).')', true ];
-  }
-.
-method: varref/v '.' namekw/m {
-    $$ = $v[0].'->'.$m;
-  }
 .
 list: exp/e {
     $$ = [ $e ];
@@ -338,10 +324,10 @@ varpart: '.' namekw/n {
 | '[' exp/e ']' {
     $$ = '['.$e[0].']';
   }
-| '.' name/n '(' ')' {
+| '.' namekw/n '(' ')' {
     $$ = '->'.$n.'()';
   }
-| '.' name/n '(' list/l ')' {
+| '.' namekw/n '(' list/l ')' {
     $argv = [];
     foreach ($l as $a) {
       $argv[] = $a[0];

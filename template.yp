@@ -316,16 +316,16 @@ varref: name {
     [ $_[1][0] . $_[2], 0 ];
   }
 ;
-varpart: '.' name {
+varpart: '.' namekw {
     "->{'".addcslashes($_[2], "'")."'}";
   }
 | '[' exp ']' {
     ($_[2][1] eq 'i' ? '->['.$_[2][0].']' : "->{".$_[2][0]."}");
   }
-| '.' name '(' ')' {
+| '.' namekw '(' ')' {
     '->'.$_[2].'()';
   }
-| '.' name '(' list ')' {
+| '.' namekw '(' list ')' {
     '->'.$_[2].'('.join(', ', map { $_->[0] } @{$_[4]}).')';
   }
 ;
@@ -335,6 +335,8 @@ varpath: {
 | varpath varpart {
     $_[1] . $_[2];
   }
+;
+namekw: name | 'IF' | 'END' | 'ELSE' | 'ELSIF' | 'ELSEIF' | 'SET' | 'OR' | 'XOR' | 'AND' | 'NOT' | 'FUNCTION' | 'BLOCK' | 'MACRO' | 'FOR' | 'FOREACH'
 ;
 
 %%

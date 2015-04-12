@@ -50,8 +50,7 @@ exp: exp ".." exp |
     p10
 p10: p11 | '-' p11
 p11: nonbrace | '(' exp ')' varpath | '!' p11 | "NOT" p11
-nonbrace: '{' hash '}' | literal | varref | name '(' ')' | name '(' list ')' | name '(' gthash ')' | name nonbrace | method '(' ')' | method '(' list ')'
-method: varref '.' namekw
+nonbrace: '{' hash '}' | literal | varref | name '(' ')' | name '(' list ')' | name '(' gthash ')' | name nonbrace
 list: exp | exp ',' list
 arglist: name | name ',' arglist |
 hash: pair | pair ',' hash |
@@ -59,7 +58,7 @@ gthash: gtpair | gtpair ',' gthash
 pair: exp ',' exp | gtpair
 gtpair: exp "=>" exp
 varref: name | varref varpart
-varpart: '.' namekw | '[' exp ']'
+varpart: '.' namekw | '[' exp ']' | '.' namekw '(' ')' | '.' namekw '(' list ')'
 varpath: | varpath varpart
 namekw: name | "IF" | "END" | "ELSE" | "ELSIF" | "ELSEIF" | "SET" | "OR" | "XOR" | "AND" | "NOT" | "FUNCTION" | "BLOCK" | "MACRO" | "FOR" | "FOREACH"
 %%
