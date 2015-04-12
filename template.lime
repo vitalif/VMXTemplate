@@ -81,21 +81,7 @@
 # Директивы
 
 template = chunks {
-    $cs = $1;
-    $r = '';
-    foreach ($cs as $a)
-    {
-      if (is_array($a))
-      {
-        $r .= "\$t .= '".addcslashes($a[0], "'\\")."';\n";
-        $this->template->track_dom($a[0], strlen($r));
-      }
-      else
-      {
-        $r .= $a;
-      }
-    }
-    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$r."\nreturn \$t;\n}\n";
+    $this->template->st->AST = $1;
     $$ = '';
   }
 .
@@ -103,95 +89,72 @@ chunks = {
     $$ = [];
   }
 | chunks chunk {
-    $$ = array_merge($1, $2);
+    $$ = $1;
+    if ($2) {
+      $$[] = $2;
+    }
   }
 .
 chunk = literal {
-    $$ = [ ($1 !== '' ? [ $1 ] : '') ];
+    $$ = [ 'literal', $1 ];
   }
 | "<!--" code_chunk/c "-->" {
     $$ = $c;
   }
 | "{{" exp/e "}}" {
-    $$ = [ '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n" ];
+    $$ = [ 'subst', $e ];
   }
 | error/e {
-    $$ = [];
+    $$ = false;
   }
 .
 code_chunk = c_if/$ | c_set/$ | c_fn/$ | c_for/$ | exp/e {
-    $$ = [ '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n" ];
+    $$ = [ 'subst', $e ];
   }
 .
 c_if = "IF" exp/e "-->" chunks/if "<!--" "END" {
-    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "}\n" ]);
+    $$ = [ 'if', [ $e, $if ] ];
   }
 | "IF" exp/e "-->" chunks/if "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
-    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "} else {\n" ], $else, [ "}\n" ]);
+    $$ = [ 'if', [ $e, $if ], [ false, $else ] ];
   }
 | "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "END" {
-    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "}\n" ]);
+    $$ = $ei;
+    $$[count($$)-1] = $ec;
+    $$ = array_merge([ 'if', [ $e, $if ] ], $ei);
   }
 | "IF" exp/e "-->" chunks/if c_elseifs/ei chunks/ec "<!--" "ELSE" "-->" chunks/else "<!--" "END" {
-    $$ = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "} else {\n" ], $else, [ "}\n" ]);
+    $$ = $ei;
+    $$[count($$)-1] = $ec;
+    $$[] = [ false, $else ];
+    $$ = array_merge([ 'if', [ $e, $if ] ], $$);
   }
 .
 c_elseifs = "<!--" elseif exp/e "-->" {
-    $$ = [ "} elseif (" . $e[0] . ") {\n" ];
+    $$ = [ [ $e ] ];
   }
 | c_elseifs/p chunks/cs "<!--" elseif exp/e "-->" {
-    $$ = array_merge($p, $cs, [ "} elseif (" . $e[0] . ") {\n" ]);
+    $$ = $p;
+    $$[count($$)-1][] = $cs;
+    $$[] = [ $e ];
   }
 .
 c_set = "SET" varref/v "=" exp/e {
-    $$ = [ $v[0] . ' = ' . $e[0] . ";\n" ];
+    $$ = [ 'set', $v, [ 'subst', $e ] ];
   }
 | "SET" varref/v "-->" chunks/cs "<!--" "END" {
-    $$ = array_merge([ "\$stack[] = \$t;\n\$t = '';\n" ], $cs, [ $v[0] . " = \$t;\n\$t = array_pop(\$stack);\n" ]);
+    $$ = [ 'set', $v, $cs ];
   }
 .
 c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
-    $this->template->st->functions[$name] = array(
-      'name' => $name,
-      'args' => $args,
-      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
-      //'line' => $line, Ой, я чо - аргументы не юзаю?
-      //'pos' => $pos,
-    );
-    $$ = [];
+    $$ = [ 'function', $name, $args, [ 'subst', $exp ] ];
   }
 | fn name/name "(" arglist/args ")" "-->" chunks/cs "<!--" "END" {
-    foreach ($cs as &$a)
-    {
-      if (is_array($a))
-      {
-        $a = "\$t .= '".addcslashes($a[0], "'\\")."';\n";
-      }
-    }
-    $cs = implode('', $cs);
-    $this->template->st->functions[$name] = array(
-      'name' => $name,
-      'args' => $args,
-      'body' => 'function fn_'.$name." () {\$stack = array();\n\$t = '';\n".$cs."\nreturn \$t;\n}\n",
-      //'line' => $line,
-      //'pos' => $pos,
-    );
-    $$ = [];
+    $$ = [ 'function', $name, $args, $cs ];
   }
 .
 c_for = for varref/varref "=" exp/exp "-->" chunks/cs "<!--" "END" {
-    $varref_index = substr($varref[0], 0, -1) . ".'_index']";
-    $$ = array_merge([ "\$stack[] = ".$varref[0].";
-\$stack[] = ".$varref_index.";
-\$stack[] = 0;
-foreach ((array)($exp[0]) as \$item) {
-".$varref[0]." = \$item;
-".$varref_index." = \$stack[count(\$stack)-1]++;
-" ], $cs, [ "}
-array_pop(\$stack);
-".$varref_index." = array_pop(\$stack);
-".$varref[0]." = array_pop(\$stack);
-" ]);
+    $$ = [ 'for', $varref, $exp, $cs ];
   }
 .
 fn = "FUNCTION" | "BLOCK" | "MACRO" .
@@ -201,95 +164,91 @@ elseif = "ELSE" "IF" | "ELSIF" | "ELSEIF" .
 # Выражения
 
 exp: exp/a ".." exp/b {
-    $$ = [ '(' . $a[0] . ' . ' . $b[0] . ')', $a[1] && $b[1] ];
+    $$ = [ 'op', '.', $a, $b ];
   }
 | exp/a "||" exp/b {
-    $$ = [ '(' . $a[0] . ' ?: ' . $b[0] . ')', $a[1] && $b[1] ];
+    $$ = [ 'op', '||', $a, $b ];
   }
 | exp/a "OR" exp/b {
-    $$ = [ '(' . $a[0] . ' ?: ' . $b[0] . ')', $a[1] && $b[1] ];
-  }
+    $$ = [ 'op', '||', $a, $b ];
+ }
 | exp/a "XOR" exp/b {
-    $$ = [ '(' . $a[0] . ' XOR ' . $b[0] . ')', true ];
+    $$ = [ 'op', 'XOR', $a, $b ];
   }
 | exp/a "&&" exp/b {
-    $$ = [ '(' . $a[0] . ' && ' . $b[0] . ')', true ];
+    $$ = [ 'op', '&&', $a, $b ];
   }
 | exp/a "AND" exp/b {
-    $$ = [ '(' . $a[0] . ' && ' . $b[0] . ')', true ];
+    $$ = [ 'op', '&&', $a, $b ];
   }
 | exp/a "==" exp/b {
-    $$ = [ '(' . $a[0] . ' == ' . $b[0] . ')', true ];
+    $$ = [ 'op', '==', $a, $b ];
   }
 | exp/a "!=" exp/b {
-    $$ = [ '(' . $a[0] . ' != ' . $b[0] . ')', true ];
+    $$ = [ 'op', '!=', $a, $b ];
   }
 | exp/a "<" exp/b {
-    $$ = [ '(' . $a[0] . ' < ' . $b[0] . ')', true ];
+    $$ = [ 'op', '<', $a, $b ];
   }
 | exp/a ">" exp/b {
-    $$ = [ '(' . $a[0] . ' > ' . $b[0] . ')', true ];
+    $$ = [ 'op', '>', $a, $b ];
   }
 | exp/a "<=" exp/b {
-    $$ = [ '(' . $a[0] . ' <= ' . $b[0] . ')', true ];
+    $$ = [ 'op', '<=', $a, $b ];
   }
 | exp/a ">=" exp/b {
-    $$ = [ '(' . $a[0] . ' >= ' . $b[0] . ')', true ];
+    $$ = [ 'op', '>=', $a, $b ];
   }
 | exp/a "+" exp/b {
-    $$ = [ '(' . $a[0] . ' + ' . $b[0] . ')', true ];
+    $$ = [ 'op', '+', $a, $b ];
   }
 | exp/a "-" exp/b {
-    $$ = [ '(' . $a[0] . ' - ' . $b[0] . ')', true ];
+    $$ = [ 'op', '-', $a, $b ];
   }
 | exp/a "&" exp/b {
-    $$ = [ '(' . $a[0] . ' & ' . $b[0] . ')', true ];
+    $$ = [ 'op', '&', $a, $b ];
   }
 | exp/a "*" exp/b {
-    $$ = [ '(' . $a[0] . ' * ' . $b[0] . ')', true ];
+    $$ = [ 'op', '*', $a, $b ];
   }
 | exp/a "/" exp/b {
-    $$ = [ '(' . $a[0] . ' / ' . $b[0] . ')', true ];
+    $$ = [ 'op', '/', $a, $b ];
   }
 | exp/a "%" exp/b {
-    $$ = [ '(' . $a[0] . ' % ' . $b[0] . ')', true ];
+    $$ = [ 'op', '%', $a, $b ];
   }
 | p10/$
 .
 p10: p11/$
 | '-' p11/a {
-    $$ = [ '(-'.$a[0].')', true ];
+    $$ = [ 'op', '-', $a ];
   }
 .
-p11: nonbrace
+p11: nonbrace/$
 | '(' exp/e ')' varpath/p {
-    $$ = [ ($p !== '' ? 'self::noop('.$e[0].')'.$p : '('.$e[0].')'), false ];
+    $$ = [ 'varpath', $e, $p ];
   }
 | '!' p11/a {
-    $$ = [ '(!'.$a[0].')', true ];
+    $$ = [ 'op', '!', $a ];
   }
 | "NOT" p11/a {
-    $$ = [ '(!'.$a[0].')', true ];
+    $$ = [ 'op', '!', $a ];
   }
 .
-nonbrace: '{' hash/h '}' {
-    $$ = [ 'array(' . $h . ')', true ];
-  }
-| literal {
-    $$ = [ $1, true ];
-  }
+nonbrace: '{' hash/$ '}'
+| literal/$
 | varref/$
 | name/f '(' ')' {
-    $$ = $this->template->compile_function($f, []);
+    $$ = [ 'call', $f, [] ];
   }
 | name/f '(' list/args ')' {
-    $$ = $this->template->compile_function($f, $args);
+    $$ = [ 'call', $f, $args ];
   }
 | name/f '(' gthash/args ')' {
-    $$ = [ "\$this->parent->call_block('".addcslashes($f, "'\\")."', array(".$args."), '".addcslashes($this->template->lexer->errorinfo(), "'\\")."')", true ];
+    $$ = [ 'call_block', $f, $args, $this->template->lexer->errorpos() ];
   }
 | name/f nonbrace/arg {
-    $$ = $this->template->compile_function($f, [ $arg ]);
+    $$ = [ 'call', $f, [ $arg ] ];
   }
 .
 list: exp/e {
@@ -311,57 +270,61 @@ arglist: name/n {
     $$ = [];
   }
 .
-hash: pair/$
+hash: pair/p {
+    $$ = [ 'hash', $p ];
+  }
 | pair/p ',' hash/h {
-    $$ = $p . ', ' . $h;
+    array_splice($h, 1, 0, [ $p ]);
+    $$ = $h;
   }
 | {
-    $$ = '';
+    $$ = [ 'hash' ];
   }
 .
-gthash: gtpair/$
+gthash: gtpair/p {
+    $$ = [ 'hash', $p ];
+  }
 | gtpair/p ',' gthash/h {
-    $$ = $p . ', ' . $h;
+    array_splice($h, 1, 0, [ $p ]);
+    $$ = $h;
   }
 .
 pair: exp/k ',' exp/v {
-    $$ = $k[0] . ' => ' . $v[0];
+    $$ = [ $k, $v ];
   }
 | gtpair/$
 .
 gtpair: exp/k "=>" exp/v {
-    $$ = $k[0] . ' => ' . $v[0];
+    $$ = [ $k, $v ];
   }
 .
 varref: name/n {
-    $$ = [ "\$this->tpldata['".addcslashes($n, "\\\'")."']", false ];
+    $$ = [ 'varref', $n ];
   }
 | varref/v varpart/p {
-    $$ = [ $v[0] . $p, false ];
+    $v[] = $p;
+    $$ = $v;
   }
 .
 varpart: '.' namekw/n {
-    $$ = "['".addcslashes($n, "\\\'")."']";
+    $$ = [ 'index', $n ];
   }
 | '[' exp/e ']' {
-    $$ = '['.$e[0].']';
+    $$ = [ 'index', $e ];
   }
 | '.' namekw/n '(' ')' {
-    $$ = '->'.$n.'()';
+    $$ = [ 'method', $n, [] ];
   }
 | '.' namekw/n '(' list/l ')' {
-    $argv = [];
-    foreach ($l as $a) {
-      $argv[] = $a[0];
-    }
-    $$ = '->'.$n.'('.implode(', ', $argv).')';
+    $$ = [ 'method', $n, $l ];
   }
 .
 varpath: {
-    $$ = '';
+    $$ = [];
   }
 | varpath/a varpart/p {
-    $$ = $a . $p;
+    $a[] = $p;
+    $$ = $a;
   }
 .
 namekw: name

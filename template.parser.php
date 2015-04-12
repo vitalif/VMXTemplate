@@ -181,6 +181,8 @@ class VMXTemplateCompiler
         }
         $this->lexer->set_code($code);
         $this->lexer->feed($this->parser);
+        print json_encode($this->st->AST, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT);
+        exit;
 
         if ($this->st->functions['main']['body'] === '')
         {
@@ -814,6 +816,11 @@ class VMXTemplateLexer
         return " in {$this->options->input_filename}, line ".($this->lineno+1).", byte {$this->pos}, marked by ^^^ in $line";
     }
 
+    function errorpos()
+    {
+        return [ 'E', $this->pos ];
+    }
+
     function warn($text)
     {
         $this->options->error($text.$this->errorinfo());
@@ -956,7 +963,7 @@ class VMXTemplateLexer
                 $t = str_replace('$', '\\$', $t);
             }
             $this->pos += strlen($m[0]);
-            return array('literal', $t);
+            return array('literal', eval("return $t;"));
         }
         else
         {
@@ -3508,21 +3515,7 @@ class VMXTemplateParser extends lime_parser {
     // (0) template :=  chunks
     $result = reset($tokens);
 
-    $cs = $tokens[0];
-    $r = '';
-    foreach ($cs as $a)
-    {
-      if (is_array($a))
-      {
-        $r .= "\$t .= '".addcslashes($a[0], "'\\")."';\n";
-        $this->template->track_dom($a[0], strlen($r));
-      }
-      else
-      {
-        $r .= $a;
-      }
-    }
-    $this->template->st->functions['main']['body'] = "function fn_main() {\$stack = array();\n\$t = '';\n".$r."\nreturn \$t;\n}\n";
+    $this->template->st->AST = $tokens[0];
     $result = '';
   }
 
@@ -3537,14 +3530,17 @@ class VMXTemplateParser extends lime_parser {
     // (2) chunks :=  chunks  chunk
     $result = reset($tokens);
 
-    $result = array_merge($tokens[0], $tokens[1]);
+    $result = $tokens[0];
+    if ($tokens[1]) {
+      $result[] = $tokens[1];
+    }
   }
 
   function reduce_3_chunk_1($tokens, &$result) {
     // (3) chunk :=  literal
     $result = reset($tokens);
 
-    $result = [ ($tokens[0] !== '' ? [ $tokens[0] ] : '') ];
+    $result = [ 'literal', $tokens[0] ];
   }
 
   function reduce_4_chunk_2($tokens, &$result) {
@@ -3560,7 +3556,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[1];
 
-    $result = [ '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n" ];
+    $result = [ 'subst', $e ];
   }
 
   function reduce_6_chunk_4($tokens, &$result) {
@@ -3568,7 +3564,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[0];
 
-    $result = [];
+    $result = false;
   }
 
   function reduce_7_code_chunk_1($tokens, &$result) {
@@ -3596,7 +3592,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[0];
 
-    $result = '$t .= ' . ($e[1] || !$this->template->options->auto_escape ? $e[0] : $this->template->compile_function($this->template->options->auto_escape, [ $e ])[0]) . ";\n";
+    $result = [ 'subst', $e ];
   }
 
   function reduce_12_c_if_1($tokens, &$result) {
@@ -3605,7 +3601,7 @@ class VMXTemplateParser extends lime_parser {
     $e = &$tokens[1];
     $if = &$tokens[3];
 
-    $result = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "}\n" ]);
+    $result = [ 'if', $e, $if ];
   }
 
   function reduce_13_c_if_2($tokens, &$result) {
@@ -3615,7 +3611,7 @@ class VMXTemplateParser extends lime_parser {
     $if = &$tokens[3];
     $else = &$tokens[7];
 
-    $result = array_merge([ "if (" . $e[0] . ") {\n" ], $if, [ "} else {\n" ], $else, [ "}\n" ]);
+    $result = [ 'if', $e, $if, 'else', $else ];
   }
 
   function reduce_14_c_if_3($tokens, &$result) {
@@ -3626,7 +3622,7 @@ class VMXTemplateParser extends lime_parser {
     $ei = &$tokens[4];
     $ec = &$tokens[5];
 
-    $result = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "}\n" ]);
+    $result = array_merge([ 'if', $e, $if ], $ei, [ $ec ]);
   }
 
   function reduce_15_c_if_4($tokens, &$result) {
@@ -3638,7 +3634,7 @@ class VMXTemplateParser extends lime_parser {
     $ec = &$tokens[5];
     $else = &$tokens[9];
 
-    $result = array_merge([ "if (" . $e[0] . ") {\n" ], $if, $ei, $ec, [ "} else {\n" ], $else, [ "}\n" ]);
+    $result = array_merge([ 'if', $e, $if ], $ei, [ $ec, 'else', $else ]);
   }
 
   function reduce_16_c_elseifs_1($tokens, &$result) {
@@ -3646,7 +3642,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[2];
 
-    $result = [ "} elseif (" . $e[0] . ") {\n" ];
+    $result = [ 'elseif', $e ];
   }
 
   function reduce_17_c_elseifs_2($tokens, &$result) {
@@ -3656,7 +3652,7 @@ class VMXTemplateParser extends lime_parser {
     $cs = &$tokens[1];
     $e = &$tokens[4];
 
-    $result = array_merge($p, $cs, [ "} elseif (" . $e[0] . ") {\n" ]);
+    $result = array_merge($p, [ $cs, $e ]);
   }
 
   function reduce_18_c_set_1($tokens, &$result) {
@@ -3665,7 +3661,7 @@ class VMXTemplateParser extends lime_parser {
     $v = &$tokens[1];
     $e = &$tokens[3];
 
-    $result = [ $v[0] . ' = ' . $e[0] . ";\n" ];
+    $result = [ 'set', $v, [ 'subst', $e ] ];
   }
 
   function reduce_19_c_set_2($tokens, &$result) {
@@ -3674,7 +3670,7 @@ class VMXTemplateParser extends lime_parser {
     $v = &$tokens[1];
     $cs = &$tokens[3];
 
-    $result = array_merge([ "\$stack[] = \$t;\n\$t = '';\n" ], $cs, [ $v[0] . " = \$t;\n\$t = array_pop(\$stack);\n" ]);
+    $result = [ 'set', $v, $cs ];
   }
 
   function reduce_20_c_fn_1($tokens, &$result) {
@@ -3684,14 +3680,7 @@ class VMXTemplateParser extends lime_parser {
     $args = &$tokens[3];
     $exp = &$tokens[6];
 
-    $this->template->st->functions[$name] = array(
-      'name' => $name,
-      'args' => $args,
-      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
-      //'line' => $line, Ой, я чо - аргументы не юзаю?
-      //'pos' => $pos,
-    );
-    $result = [];
+    $result = [ 'function', $name, $args, [ 'subst', $exp ] ];
   }
 
   function reduce_21_c_fn_2($tokens, &$result) {
@@ -3701,22 +3690,7 @@ class VMXTemplateParser extends lime_parser {
     $args = &$tokens[3];
     $cs = &$tokens[6];
 
-    foreach ($cs as &$a)
-    {
-      if (is_array($a))
-      {
-        $a = "\$t .= '".addcslashes($a[0], "'\\")."';\n";
-      }
-    }
-    $cs = implode('', $cs);
-    $this->template->st->functions[$name] = array(
-      'name' => $name,
-      'args' => $args,
-      'body' => 'function fn_'.$name." () {\$stack = array();\n\$t = '';\n".$cs."\nreturn \$t;\n}\n",
-      //'line' => $line,
-      //'pos' => $pos,
-    );
-    $result = [];
+    $result = [ 'function', $name, $args, $cs ];
   }
 
   function reduce_22_c_for_1($tokens, &$result) {
@@ -3726,18 +3700,7 @@ class VMXTemplateParser extends lime_parser {
     $exp = &$tokens[3];
     $cs = &$tokens[5];
 
-        $varref_index = substr($varref[0], 0, -1) . ".'_index']";
-        $result = array_merge([ "\$stack[] = ".$varref[0].";
-    \$stack[] = ".$varref_index.";
-    \$stack[] = 0;
-    foreach ((array)($exp[0]) as \$item) {
-    ".$varref[0]." = \$item;
-    ".$varref_index." = \$stack[count(\$stack)-1]++;
-    " ], $cs, [ "}
-    array_pop(\$stack);
-    ".$varref_index." = array_pop(\$stack);
-    ".$varref[0]." = array_pop(\$stack);
-    " ]);
+    $result = [ 'for', $varref, $exp, $cs ];
   }
 
   function reduce_23_fn_1($tokens, &$result) {
@@ -3786,7 +3749,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' . ' . $b[0] . ')', $a[1] && $b[1] ];
+    $result = [ 'op', '.', $a, $b ];
   }
 
   function reduce_32_exp_2($tokens, &$result) {
@@ -3795,7 +3758,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' ?: ' . $b[0] . ')', $a[1] && $b[1] ];
+    $result = [ 'op', '||', $a, $b ];
   }
 
   function reduce_33_exp_3($tokens, &$result) {
@@ -3804,7 +3767,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' ?: ' . $b[0] . ')', $a[1] && $b[1] ];
+    $result = [ 'op', '||', $a, $b ];
   }
 
   function reduce_34_exp_4($tokens, &$result) {
@@ -3813,7 +3776,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' XOR ' . $b[0] . ')', true ];
+    $result = [ 'op', 'XOR', $a, $b ];
   }
 
   function reduce_35_exp_5($tokens, &$result) {
@@ -3822,7 +3785,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' && ' . $b[0] . ')', true ];
+    $result = [ 'op', '&&', $a, $b ];
   }
 
   function reduce_36_exp_6($tokens, &$result) {
@@ -3831,7 +3794,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' && ' . $b[0] . ')', true ];
+    $result = [ 'op', '&&', $a, $b ];
   }
 
   function reduce_37_exp_7($tokens, &$result) {
@@ -3840,7 +3803,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' == ' . $b[0] . ')', true ];
+    $result = [ 'op', '==', $a, $b ];
   }
 
   function reduce_38_exp_8($tokens, &$result) {
@@ -3849,7 +3812,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' != ' . $b[0] . ')', true ];
+    $result = [ 'op', '!=', $a, $b ];
   }
 
   function reduce_39_exp_9($tokens, &$result) {
@@ -3858,7 +3821,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' < ' . $b[0] . ')', true ];
+    $result = [ 'op', '<', $a, $b ];
   }
 
   function reduce_40_exp_10($tokens, &$result) {
@@ -3867,7 +3830,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' > ' . $b[0] . ')', true ];
+    $result = [ 'op', '>', $a, $b ];
   }
 
   function reduce_41_exp_11($tokens, &$result) {
@@ -3876,7 +3839,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' <= ' . $b[0] . ')', true ];
+    $result = [ 'op', '<=', $a, $b ];
   }
 
   function reduce_42_exp_12($tokens, &$result) {
@@ -3885,7 +3848,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' >= ' . $b[0] . ')', true ];
+    $result = [ 'op', '>=', $a, $b ];
   }
 
   function reduce_43_exp_13($tokens, &$result) {
@@ -3894,7 +3857,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' + ' . $b[0] . ')', true ];
+    $result = [ 'op', '+', $a, $b ];
   }
 
   function reduce_44_exp_14($tokens, &$result) {
@@ -3903,7 +3866,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' - ' . $b[0] . ')', true ];
+    $result = [ 'op', '-', $a, $b ];
   }
 
   function reduce_45_exp_15($tokens, &$result) {
@@ -3912,7 +3875,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' & ' . $b[0] . ')', true ];
+    $result = [ 'op', '&', $a, $b ];
   }
 
   function reduce_46_exp_16($tokens, &$result) {
@@ -3921,7 +3884,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' * ' . $b[0] . ')', true ];
+    $result = [ 'op', '*', $a, $b ];
   }
 
   function reduce_47_exp_17($tokens, &$result) {
@@ -3930,7 +3893,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' / ' . $b[0] . ')', true ];
+    $result = [ 'op', '/', $a, $b ];
   }
 
   function reduce_48_exp_18($tokens, &$result) {
@@ -3939,7 +3902,7 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $b = &$tokens[2];
 
-    $result = [ '(' . $a[0] . ' % ' . $b[0] . ')', true ];
+    $result = [ 'op', '%', $a, $b ];
   }
 
   function reduce_49_exp_19($tokens, &$result) {
@@ -3957,12 +3920,12 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $a = &$tokens[1];
 
-    $result = [ '(-'.$a[0].')', true ];
+    $result = [ 'op', '-', $a ];
   }
 
   function reduce_52_p11_1($tokens, &$result) {
     // (52) p11 :=  nonbrace
-    $result = reset($tokens);
+    $result = $tokens[0];
   }
 
   function reduce_53_p11_2($tokens, &$result) {
@@ -3971,7 +3934,7 @@ class VMXTemplateParser extends lime_parser {
     $e = &$tokens[1];
     $p = &$tokens[3];
 
-    $result = [ ($p !== '' ? 'self::noop('.$e[0].')'.$p : '('.$e[0].')'), false ];
+    $result = [ 'varpath', $e, $p ];
   }
 
   function reduce_54_p11_3($tokens, &$result) {
@@ -3979,7 +3942,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $a = &$tokens[1];
 
-    $result = [ '(!'.$a[0].')', true ];
+    $result = [ 'op', '!', $a ];
   }
 
   function reduce_55_p11_4($tokens, &$result) {
@@ -3987,22 +3950,17 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $a = &$tokens[1];
 
-    $result = [ '(!'.$a[0].')', true ];
+    $result = [ 'op', '!', $a ];
   }
 
   function reduce_56_nonbrace_1($tokens, &$result) {
     // (56) nonbrace :=  {  hash  }
-    $result = reset($tokens);
-    $h = &$tokens[1];
-
-    $result = [ 'array(' . $h . ')', true ];
+    $result = $tokens[1];
   }
 
   function reduce_57_nonbrace_2($tokens, &$result) {
     // (57) nonbrace :=  literal
-    $result = reset($tokens);
-
-    $result = [ $tokens[0], true ];
+    $result = $tokens[0];
   }
 
   function reduce_58_nonbrace_3($tokens, &$result) {
@@ -4015,7 +3973,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $f = &$tokens[0];
 
-    $result = $this->template->compile_function($f, []);
+    $result = [ 'call', $f, [] ];
   }
 
   function reduce_60_nonbrace_5($tokens, &$result) {
@@ -4024,7 +3982,7 @@ class VMXTemplateParser extends lime_parser {
     $f = &$tokens[0];
     $args = &$tokens[2];
 
-    $result = $this->template->compile_function($f, $args);
+    $result = [ 'call', $f, $args ];
   }
 
   function reduce_61_nonbrace_6($tokens, &$result) {
@@ -4033,7 +3991,7 @@ class VMXTemplateParser extends lime_parser {
     $f = &$tokens[0];
     $args = &$tokens[2];
 
-    $result = [ "\$this->parent->call_block('".addcslashes($f, "'\\")."', array(".$args."), '".addcslashes($this->template->lexer->errorinfo(), "'\\")."')", true ];
+    $result = [ 'call_block', $f, $args, $this->template->lexer->errorpos() ];
   }
 
   function reduce_62_nonbrace_7($tokens, &$result) {
@@ -4042,7 +4000,7 @@ class VMXTemplateParser extends lime_parser {
     $f = &$tokens[0];
     $arg = &$tokens[1];
 
-    $result = $this->template->compile_function($f, [ $arg ]);
+    $result = [ 'call', $f, [ $arg ] ];
   }
 
   function reduce_63_list_1($tokens, &$result) {
@@ -4090,7 +4048,10 @@ class VMXTemplateParser extends lime_parser {
 
   function reduce_68_hash_1($tokens, &$result) {
     // (68) hash :=  pair
-    $result = $tokens[0];
+    $result = reset($tokens);
+    $p = &$tokens[0];
+
+    $result = [ 'hash', $p ];
   }
 
   function reduce_69_hash_2($tokens, &$result) {
@@ -4099,19 +4060,23 @@ class VMXTemplateParser extends lime_parser {
     $p = &$tokens[0];
     $h = &$tokens[2];
 
-    $result = $p . ', ' . $h;
+    array_splice($h, 1, 0, [ $p ]);
+    $result = $h;
   }
 
   function reduce_70_hash_3($tokens, &$result) {
     // (70) hash :=  ε
     $result = reset($tokens);
 
-    $result = '';
+    $result = [ 'hash' ];
   }
 
   function reduce_71_gthash_1($tokens, &$result) {
     // (71) gthash :=  gtpair
-    $result = $tokens[0];
+    $result = reset($tokens);
+    $p = &$tokens[0];
+
+    $result = [ 'hash', $p ];
   }
 
   function reduce_72_gthash_2($tokens, &$result) {
@@ -4120,7 +4085,8 @@ class VMXTemplateParser extends lime_parser {
     $p = &$tokens[0];
     $h = &$tokens[2];
 
-    $result = $p . ', ' . $h;
+    array_splice($h, 1, 0, [ $p ]);
+    $result = $h;
   }
 
   function reduce_73_pair_1($tokens, &$result) {
@@ -4129,7 +4095,7 @@ class VMXTemplateParser extends lime_parser {
     $k = &$tokens[0];
     $v = &$tokens[2];
 
-    $result = $k[0] . ' => ' . $v[0];
+    $result = [ $k, $v ];
   }
 
   function reduce_74_pair_2($tokens, &$result) {
@@ -4143,7 +4109,7 @@ class VMXTemplateParser extends lime_parser {
     $k = &$tokens[0];
     $v = &$tokens[2];
 
-    $result = $k[0] . ' => ' . $v[0];
+    $result = [ $k, $v ];
   }
 
   function reduce_76_varref_1($tokens, &$result) {
@@ -4151,7 +4117,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $n = &$tokens[0];
 
-    $result = [ "\$this->tpldata['".addcslashes($n, "\\\'")."']", false ];
+    $result = [ 'varref', $n ];
   }
 
   function reduce_77_varref_2($tokens, &$result) {
@@ -4160,7 +4126,8 @@ class VMXTemplateParser extends lime_parser {
     $v = &$tokens[0];
     $p = &$tokens[1];
 
-    $result = [ $v[0] . $p, false ];
+    $v[] = $p;
+    $result = $v;
   }
 
   function reduce_78_varpart_1($tokens, &$result) {
@@ -4168,7 +4135,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $n = &$tokens[1];
 
-    $result = "['".addcslashes($n, "\\\'")."']";
+    $result = [ 'index', $n ];
   }
 
   function reduce_79_varpart_2($tokens, &$result) {
@@ -4176,7 +4143,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $e = &$tokens[1];
 
-    $result = '['.$e[0].']';
+    $result = [ 'index', $e ];
   }
 
   function reduce_80_varpart_3($tokens, &$result) {
@@ -4184,7 +4151,7 @@ class VMXTemplateParser extends lime_parser {
     $result = reset($tokens);
     $n = &$tokens[1];
 
-    $result = '->'.$n.'()';
+    $result = [ 'method', $n, [] ];
   }
 
   function reduce_81_varpart_4($tokens, &$result) {
@@ -4193,18 +4160,14 @@ class VMXTemplateParser extends lime_parser {
     $n = &$tokens[1];
     $l = &$tokens[3];
 
-    $argv = [];
-    foreach ($l as $a) {
-      $argv[] = $a[0];
-    }
-    $result = '->'.$n.'('.implode(', ', $argv).')';
+    $result = [ 'method', $n, $l ];
   }
 
   function reduce_82_varpath_1($tokens, &$result) {
     // (82) varpath :=  ε
     $result = reset($tokens);
 
-    $result = '';
+    $result = [];
   }
 
   function reduce_83_varpath_2($tokens, &$result) {
@@ -4213,7 +4176,8 @@ class VMXTemplateParser extends lime_parser {
     $a = &$tokens[0];
     $p = &$tokens[1];
 
-    $result = $a . $p;
+    $a[] = $p;
+    $result = $a;
   }
 
   function reduce_84_namekw_1($tokens, &$result) {
@@ -4913,5 +4877,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 2,8588461875916 seconds
-// Memory: 11894776 bytes
+// Time: 2,8789830207825 seconds
+// Memory: 11154544 bytes
