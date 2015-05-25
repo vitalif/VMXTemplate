@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-04-12
+ * Version: V3 (LALR), 2015-05-25
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -490,7 +490,7 @@ $code
     }
 
     /* пары key => ключ, value => значение для ассоциативного массива */
-    function function_pairs($a) { return "self::exec_pairs(is_array($a) ? $a : array())"; }
+    function function_pairs() { $a = func_get_args(); return "self::exec_pairs(".implode(', ', $a).")"; }
 
     /* создание массива */
     function function_array()

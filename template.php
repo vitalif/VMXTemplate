@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-04-12
+ * Version: V3 (LALR), 2015-05-25
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -584,11 +584,11 @@ class VMXTemplate
     }
 
     // For a hash, returns an array with pairs { key => 'key', value => 'value' }
-    static function exec_pairs($array)
+    static function exec_pairs($array, $kf = 'key', $vf = 'value')
     {
         $r = array();
         foreach ($array as $k => $v)
-            $r[] = array('key' => $k, 'value' => $v);
+            $r[] = array($kf => $k, $vf => $v);
         return $r;
     }
 
