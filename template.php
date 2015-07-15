@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-05-25
+ * Version: V3 (LALR), 2015-07-15
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -230,16 +230,17 @@ class VMXTemplate
 
     /**
      * parse_real variant that does not require $vars to be an lvalue
+     * and does not run filters on output
      */
     protected function parse_discard($fn, $inline, $func, $vars = NULL)
     {
-        return $this->parse_real($fn, $inline, $func, $vars);
+        return $this->parse_real($fn, $inline, $func, $vars, false);
     }
 
     /**
      * "Real" parse function, handles all parse_*()
      */
-    protected function parse_real($fn, $inline, $func, &$vars = NULL)
+    protected function parse_real($fn, $inline, $func, &$vars = NULL, $run_filters = true)
     {
         if (!$fn)
         {
@@ -325,7 +326,7 @@ class VMXTemplate
         {
             error_reporting($old);
         }
-        if ($this->options->filters)
+        if ($run_filters && $this->options->filters)
         {
             $filters = $this->options->filters;
             if (is_callable($filters) || is_string($filters) && is_callable(array(__CLASS__, "filter_$filters")))
@@ -460,7 +461,7 @@ class VMXTemplate
         {
             // FIXME maybe do it better!
             $fn = $this->function_search_path[$block][0][0];
-            return $this->parse_real($fn, NULL, $block, $args);
+            return $this->parse_real($fn, NULL, $block, $args, false);
         }
         throw new VMXTemplateException("Unknown block '$block'$errorinfo");
     }
@@ -471,7 +472,7 @@ class VMXTemplate
         {
             $fun = $this->function_search_path[$block][0];
             $args = array_combine($fun[1], array_pad(array_slice($args, 0, count($fun[1])), count($fun[1]), NULL));
-            return $this->parse_real($fun[0], NULL, $block, $args);
+            return $this->parse_real($fun[0], NULL, $block, $args, false);
         }
         throw new VMXTemplateException("Unknown block or function '$block'$errorinfo");
     }
