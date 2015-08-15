@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-05-25
+ * Version: V3 (LALR), 2015-08-15
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -558,10 +558,10 @@ $code
     /* Аргументы для функций включения
        аргументы ::= hash(ключ => значение, ...) | ключ => значение, ...
     */
-    function auto_hash($args)
+    protected function auto_hash($args)
     {
         if (!($n = count($args)))
-            $args = NULL;
+            $args = ', $this->tpldata';
         elseif ($n == 1)
             $args = ", ".$args[0];
         else
