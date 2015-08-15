@@ -561,7 +561,7 @@ $code
     protected function auto_hash($args)
     {
         if (!($n = count($args)))
-            $args = ', $this->tpldata';
+            $args = ', $this->tpldata, false';
         elseif ($n == 1)
             $args = ", ".$args[0];
         else
@@ -574,8 +574,9 @@ $code
     {
         $args = func_get_args();
         $file = array_shift($args);
+        $p = $args ? 'parse_discard' : 'parse_real';
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_discard($file, NULL, 'main'$args)";
+        return "\$this->parent->$p($file, NULL, 'main'$args)";
     }
 
     /* включение блока из текущего файла: exec('блок'[, аргументы]) */
@@ -583,8 +584,9 @@ $code
     {
         $args = func_get_args();
         $block = array_shift($args);
+        $p = $args ? 'parse_discard' : 'parse_real';
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_discard(self::\$template_filename, NULL, $block$args)";
+        return "\$this->parent->$p(self::\$template_filename, NULL, $block$args)";
     }
 
     /* включение блока из другого файла: exec_from('файл', 'блок'[, аргументы]) */
@@ -593,8 +595,9 @@ $code
         $args = func_get_args();
         $file = array_shift($args);
         $block = array_shift($args);
+        $p = $args ? 'parse_discard' : 'parse_real';
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_discard($file, NULL, $block$args)";
+        return "\$this->parent->$p($file, NULL, $block$args)";
     }
 
     /* parse не из файла, хотя и не рекомендуется */
@@ -602,8 +605,9 @@ $code
     {
         $args = func_get_args();
         $code = array_shift($args);
+        $p = $args ? 'parse_discard' : 'parse_real';
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_discard(NULL, $code, 'main'$args)";
+        return "\$this->parent->$p(NULL, $code, 'main'$args)";
     }
 
     /* сильно не рекомендуется, но возможно:
@@ -614,8 +618,9 @@ $code
         $args = func_get_args();
         $code = array_shift($args);
         $block = array_shift($args);
+        $p = $args ? 'parse_discard' : 'parse_real';
         $args = $this->auto_hash($args);
-        return "\$this->parent->parse_discard(NULL, $code, $block$args)";
+        return "\$this->parent->$p(NULL, $code, $block$args)";
     }
 
     /* вызов функции объекта по вычисляемому имени:
