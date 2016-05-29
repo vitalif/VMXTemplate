@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-08-15
+ * Version: V3 (LALR), 2016-05-28
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -425,6 +425,8 @@ class VMXTemplate
             $func_ns = md5($fn);
         }
 
+        if ($this->options->strip_space)
+            self::filter_strip_space($code);
         if (!$this->compiler)
         {
             require_once(dirname(__FILE__).'/template.parser.php');
@@ -784,10 +786,6 @@ class VMXTemplateOptions
             {
                 $this->$k = $v;
             }
-        }
-        if ($this->strip_space && array_search('strip_space', $this->filters) === false)
-        {
-            $this->filters[] = 'strip_space';
         }
         if (!$this->begin_subst || !$this->end_subst)
         {
