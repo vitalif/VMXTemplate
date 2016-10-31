@@ -7,8 +7,8 @@
  *
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
- * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2016-05-28
+ * Author: Vitaliy Filippov, 2006-2016
+ * Version: V3 (LALR), 2016-10-31
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -559,7 +559,14 @@ class VMXTemplate
     static function exec_subst($str)
     {
         $args = func_get_args();
-        $str = preg_replace_callback('/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is', create_function('$m', 'return $args[$m[2]?$m[2]:$m[3]];'), $str);
+        $str = preg_replace_callback(
+            '/(?<!\\\\)((?:\\\\\\\\)*)\$(?:([1-9]\d*)|\{([1-9]\d*)\})/is',
+            function($m) use($args)
+            {
+                return $args[$m[2] ? $m[2] : $m[3]];
+            },
+            $str
+        );
         return $str;
     }
 

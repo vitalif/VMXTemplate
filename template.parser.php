@@ -3,8 +3,8 @@
 /**
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
- * Author: Vitaliy Filippov, 2006-2015
- * Version: V3 (LALR), 2015-08-15
+ * Author: Vitaliy Filippov, 2006-2016
+ * Version: V3 (LALR), 2016-10-31
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
