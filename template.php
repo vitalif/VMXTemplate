@@ -49,6 +49,9 @@ if (!defined('TS_UNIX'))
 
 class VMXTemplate
 {
+    // Loaded template class names
+    public static $loadedClasses = [];
+
     static $Mon, $mon, $Wday;
     static $cache_type  = NULL;
     static $cache       = array();
@@ -352,11 +355,11 @@ class VMXTemplate
     /**
      * Translate template file line number from stack frame $frame (taken from debug_backtrace())
      */
-    public static function translateLine(&$frame)
+    public function translateLine(&$frame)
     {
-        if (!empty($frame['class']) && substr($frame['class'], 0, 9) == 'Template_')
+        if (isset(VMXTemplate::$loadedClasses[$frame['file']]))
         {
-            $class = $frame['class'];
+            $class = VMXTemplate::$loadedClasses[$frame['file']];
             if (isset($class::$smap))
             {
                 $l = $frame['line'];
@@ -369,13 +372,17 @@ class VMXTemplate
                     else
                         $s = ($e+$s)>>1;
                 }
-                $frame['class'] = '';
-                $frame['type'] = '';
-                if (substr($frame['function'], 0, 3) == 'fn_')
-                    $frame['function'] = substr($frame['function'], 3);
                 $frame['file'] = $class::$template_filename;
-                $frame['line'] = $s;
+                $frame['line'] = $class::$smap[$s][1];
             }
+        }
+        if (!empty($frame['class']) && substr($frame['class'], 0, 9) == 'Template_')
+        {
+            $class = $frame['class'];
+            $frame['class'] = $class::$template_filename;
+            $frame['type'] = '->';
+            if (substr($frame['function'], 0, 3) == 'fn_')
+                $frame['function'] = substr($frame['function'], 3);
         }
     }
 
@@ -463,6 +470,7 @@ class VMXTemplate
             $this->compiler = new VMXTemplateCompiler($this->options);
         }
         $compiled = $this->compiler->parse_all($code, $fn, $func_ns);
+        $compiled .= "VMXTemplate::\$loadedClasses['".addcslashes(realpath(dirname($file)).'/'.basename($file), '\\\'')."'] = 'Template_$func_ns';\n";
         if (!file_put_contents($file, $compiled))
         {
             throw new VMXTemplateException("Failed writing $file");
@@ -830,12 +838,12 @@ class VMXTemplateOptions
             $this->end_subst = false;
             $this->no_code_subst = false;
         }
-        $this->cache_dir = preg_replace('!/*$!s', '/', $this->cache_dir);
+        $this->cache_dir = preg_replace('!([^/])/*$!s', '\1/', $this->cache_dir);
         if (!is_writable($this->cache_dir))
         {
             throw new VMXTemplateException('VMXTemplate: cache_dir='.$this->cache_dir.' is not writable');
         }
-        $this->root = preg_replace('!/*$!s', '/', $this->root);
+        $this->root = preg_replace('!([^/])/*$!s', '\1/', $this->root);
     }
 
     function __destruct()

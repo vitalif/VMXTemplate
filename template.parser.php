@@ -822,12 +822,12 @@ class VMXTemplateLexer
                 {
                     // We didn't yet reach the code beginning
                     $str = substr($this->code, $this->pos, $code_pos-$this->pos);
+                    $this->lineno += substr_count($str, "\n");
                     if ($this->options->eat_code_line)
                     {
                         $str = preg_replace('/\n[ \t]*$/s', $was_code ? '' : "\n", $str);
                     }
                     $r = array('literal', "'".addcslashes($str, "'\\")."'");
-                    $this->lineno += substr_count($r[1], "\n");
                     $this->pos = $code_pos;
                 }
                 elseif ($code_pos !== false)
