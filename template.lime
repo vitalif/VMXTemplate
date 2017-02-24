@@ -89,7 +89,7 @@ chunks = {
     $$ = '';
   }
 | chunks chunk {
-    $$ = $1 . $2;
+    $$ = $1 . "# line ".$this->template->lexer->lineno."\n" . $2;
   }
 .
 chunk = literal {

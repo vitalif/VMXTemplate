@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2016
- * Version: V3 (LALR), 2016-10-31
+ * Version: V3 (LALR), 2017-02-24
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -190,26 +190,38 @@ class VMXTemplateCompiler
 
         // Generate code for functions
         $code = '';
-        $functions = array();
+        $functions = [];
+        $smap = [];
+        $l = 9;
         foreach ($this->st->functions as $n => $f)
         {
+            $ms = [];
+            preg_match_all('/(?:^|\n)# line (\d+)|\n/', $f['body'], $ms, PREG_SET_ORDER);
+            foreach ($ms as $m)
+            {
+                $l++;
+                if (!empty($m[1]))
+                    $smap[] = [ $l, $m[1] ];
+            }
             $code .= $f['body'];
             $functions[$n] = $f['args'];
         }
 
         // Assemble the class code
         $functions = var_export($functions, true);
+        $smap = var_export($smap, true);
         $rfn = addcslashes($this->options->input_filename, '\\\'');
         $code = "<?php // {$this->options->input_filename}
 class Template_$func_ns extends VMXTemplate {
 static \$template_filename = '$rfn';
 static \$version = ".VMXTemplate::CODE_VERSION.";
-static \$functions = $functions;
 function __construct(\$t) {
 \$this->tpldata = &\$t->tpldata;
 \$this->parent = &\$t;
 }
 $code
+static \$functions = $functions;
+static \$smap = $smap;
 }
 ";
 
@@ -3466,7 +3478,7 @@ class VMXTemplateParser extends lime_parser {
     // (2) chunks :=  chunks  chunk
     $result = reset($tokens);
 
-    $result = $tokens[0] . $tokens[1];
+    $result = $tokens[0] . "# line ".$this->template->lexer->lineno."\n" . $tokens[1];
   }
 
   function reduce_3_chunk_1($tokens, &$result) {

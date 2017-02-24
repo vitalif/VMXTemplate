@@ -8,7 +8,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2016
- * Version: V3 (LALR), 2016-10-31
+ * Version: V3 (LALR), 2017-02-24
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
@@ -347,6 +347,36 @@ class VMXTemplate
             }
         }
         return $t;
+    }
+
+    /**
+     * Translate template file line number from stack frame $frame (taken from debug_backtrace())
+     */
+    public static function translateLine(&$frame)
+    {
+        if (!empty($frame['class']) && substr($frame['class'], 0, 9) == 'Template_')
+        {
+            $class = $frame['class'];
+            if (isset($class::$smap))
+            {
+                $l = $frame['line'];
+                $s = 0;
+                $e = count($class::$smap);
+                while ($e > $s+1)
+                {
+                    if ($l < $class::$smap[($e+$s)>>1][0])
+                        $e = ($e+$s)>>1;
+                    else
+                        $s = ($e+$s)>>1;
+                }
+                $frame['class'] = '';
+                $frame['type'] = '';
+                if (substr($frame['function'], 0, 3) == 'fn_')
+                    $frame['function'] = substr($frame['function'], 3);
+                $frame['file'] = $class::$template_filename;
+                $frame['line'] = $s;
+            }
+        }
     }
 
     /**
