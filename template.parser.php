@@ -3,8 +3,8 @@
 /**
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
- * Author: Vitaliy Filippov, 2006-2016
- * Version: V3 (LALR), 2017-02-24
+ * Author: Vitaliy Filippov, 2006-2018
+ * Version: V3 (LALR), 2018-01-08
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -259,15 +259,21 @@ static \$smap = $smap;
         {
             $argv[] = $a[0];
         }
-        if (method_exists($this, "function_$fn"))
+        // Check if function is not disabled
+        if (!empty($this->options->compiletime_functions[$fn]) ||
+            !isset($this->options->compiletime_functions[$fn]) &&
+            method_exists($this, "function_$fn"))
         {
-            // Builtin function call using name
-            $r = call_user_func_array(array($this, "function_$fn"), $argv);
-        }
-        elseif (isset($this->options->compiletime_functions[$fn]))
-        {
-            // Custom compile-time function call
-            $r = call_user_func($this->options->compiletime_functions[$fn], $this, $argv);
+            if (!empty($this->options->compiletime_functions[$fn]))
+            {
+                // Custom compile-time function call
+                $r = call_user_func($this->options->compiletime_functions[$fn], $this, $argv);
+            }
+            else
+            {
+                // Builtin function call using name
+                $r = call_user_func_array(array($this, "function_$fn"), $argv);
+            }
         }
         else
         {
