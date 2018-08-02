@@ -4,7 +4,7 @@
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
  * Author: Vitaliy Filippov, 2006-2018
- * Version: V3 (LALR), 2018-01-08
+ * Version: V3 (LALR), 2018-08-03
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -3634,7 +3634,7 @@ class VMXTemplateParser extends lime_parser {
     $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
-      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
+      'body' => 'function fn_'.$name." () {\nreturn ".$exp[0].";\n}\n",
       //'line' => $line, Ой, я чо - аргументы не юзаю?
       //'pos' => $pos,
     );
@@ -4852,5 +4852,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 4,2855579853058 seconds
-// Memory: 11192016 bytes
+// Time: 0.22696185112 seconds
+// Memory: 8865560 bytes

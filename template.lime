@@ -140,7 +140,7 @@ c_fn = fn name/name "(" arglist/args ")" "=" exp/exp {
     $this->template->st->functions[$name] = array(
       'name' => $name,
       'args' => $args,
-      'body' => 'function fn_'.$name." () {\nreturn ".$exp.";\n}\n",
+      'body' => 'function fn_'.$name." () {\nreturn ".$exp[0].";\n}\n",
       //'line' => $line, Ой, я чо - аргументы не юзаю?
       //'pos' => $pos,
     );

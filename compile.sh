@@ -1,7 +1,7 @@
 #!/bin/sh
 
 if [ "$LIME_DIR" = "" ]; then
-    LIME_DIR=~/gits/lime/
+    LIME_DIR=./lime/
 fi
 
 php -d xdebug.max_nesting_level=200 $LIME_DIR/lime.php template.lime | tail -n +2 > template.class
