@@ -12,7 +12,7 @@
  *
  * The template engine is split into two parts:
  * (1) This file - always used when running templates
- * (2) template.parser.php - used only when compiling new templates
+ * (2) VMXTemplateCompiler.php - used only when compiling new templates
  */
 
 /**
@@ -466,7 +466,7 @@ class VMXTemplate
             self::filter_strip_space($code);
         if (!$this->compiler)
         {
-            require_once(dirname(__FILE__).'/template.parser.php');
+            require_once(dirname(__FILE__).'/VMXTemplateCompiler.php');
             $this->compiler = new VMXTemplateCompiler($this->options);
         }
         $compiled = $this->compiler->parse_all($code, $fn, $func_ns);
