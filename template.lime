@@ -50,6 +50,8 @@
 %token ">"      "greater than operator '>'"
 %token "<="     "less or equal operator '<='"
 %token ">="     "greater or equal operator '>='"
+%token "?"      "ternary operator '? :'"
+%token ":"      "ternary operator '? :'"
 %token "+"      "plus operator '+'"
 %token "-"      "minus operator '-'"
 %token "*"      "multiply operator '*'"
@@ -73,7 +75,7 @@
 %left ".."
 %left "||" "OR" "XOR"
 %left "&&" "AND"
-%nonassoc "==" "!=" "<" ">" "<=" ">="
+%nonassoc "==" "!=" "<" ">" "<=" ">=" "?"
 %left "+" "-"
 %left "&"
 %left "*" "/" "%"
@@ -195,6 +197,9 @@ exp: exp/a ".." exp/b {
   }
 | exp/a "AND" exp/b {
     $$ = [ '(' . $a[0] . ' && ' . $b[0] . ')', true ];
+  }
+| exp/a "?" exp/b ":" exp/c {
+    $$ = [ '(' . $a[0] . ' ? ' . $b[0] . ' : ' . $c[0] . ')', $b[1] && $c[1] ];
   }
 | exp/a "==" exp/b {
     $$ = [ '(' . $a[0] . ' == ' . $b[0] . ')', true ];
