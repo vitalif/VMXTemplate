@@ -73,9 +73,10 @@
 %token "}}"     "substitution end"
 
 %left ".."
+%nonassoc "?" ":"
 %left "||" "OR" "XOR"
 %left "&&" "AND"
-%nonassoc "==" "!=" "<" ">" "<=" ">=" "?"
+%nonassoc "==" "!=" "<" ">" "<=" ">="
 %left "+" "-"
 %left "&"
 %left "*" "/" "%"

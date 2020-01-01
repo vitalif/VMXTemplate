@@ -3,8 +3,8 @@
 /**
  * Homepage: http://yourcmc.ru/wiki/VMX::Template
  * License: GNU GPLv3 or later
- * Author: Vitaliy Filippov, 2006-2019
- * Version: V3 (LALR), 2019-12-28
+ * Author: Vitaliy Filippov, 2006-2020
+ * Version: V3 (LALR), 2020-01-01
  *
  * This file contains the implementation of VMX::Template compiler.
  * It is only used when a template is compiled in runtime.
@@ -1523,7 +1523,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 32',
       '&&' => 's 20',
       'AND' => 's 22',
-      '?' => 's 24',
+      '?' => 'r 32',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1566,7 +1566,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 33',
       '&&' => 's 20',
       'AND' => 's 22',
-      '?' => 's 24',
+      '?' => 'r 33',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1609,7 +1609,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 34',
       '&&' => 's 20',
       'AND' => 's 22',
-      '?' => 's 24',
+      '?' => 'r 34',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1652,7 +1652,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 35',
       '&&' => 'r 35',
       'AND' => 'r 35',
-      '?' => 's 24',
+      '?' => 'r 35',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1695,7 +1695,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 36',
       '&&' => 'r 36',
       'AND' => 'r 36',
-      '?' => 's 24',
+      '?' => 'r 36',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1768,13 +1768,12 @@ class VMXTemplateParser extends lime_parser {
       'name' => 's 80'
     ),
     array(
-      '..' => 's 12',
+      '..' => 'r 37',
       '||' => 's 14',
       'OR' => 's 16',
       'XOR' => 's 18',
       '&&' => 's 20',
       'AND' => 's 22',
-      '?' => 's 24',
       '==' => 's 28',
       '!=' => 's 30',
       '<' => 's 32',
@@ -1817,7 +1816,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 38',
       '&&' => 'r 38',
       'AND' => 'r 38',
-      '?' => 's 24',
+      '?' => 'r 38',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -1854,7 +1853,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 39',
       '&&' => 'r 39',
       'AND' => 'r 39',
-      '?' => 's 24',
+      '?' => 'r 39',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -1891,7 +1890,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 40',
       '&&' => 'r 40',
       'AND' => 'r 40',
-      '?' => 's 24',
+      '?' => 'r 40',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -1928,7 +1927,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 41',
       '&&' => 'r 41',
       'AND' => 'r 41',
-      '?' => 's 24',
+      '?' => 'r 41',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -1965,7 +1964,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 42',
       '&&' => 'r 42',
       'AND' => 'r 42',
-      '?' => 's 24',
+      '?' => 'r 42',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -2002,7 +2001,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 43',
       '&&' => 'r 43',
       'AND' => 'r 43',
-      '?' => 's 24',
+      '?' => 'r 43',
       '+' => 's 40',
       '-' => 's 42',
       '&' => 's 44',
@@ -2039,7 +2038,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 44',
       '&&' => 'r 44',
       'AND' => 'r 44',
-      '?' => 's 24',
+      '?' => 'r 44',
       '==' => 'r 44',
       '!=' => 'r 44',
       '<' => 'r 44',
@@ -2082,7 +2081,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 45',
       '&&' => 'r 45',
       'AND' => 'r 45',
-      '?' => 's 24',
+      '?' => 'r 45',
       '==' => 'r 45',
       '!=' => 'r 45',
       '<' => 'r 45',
@@ -2125,7 +2124,7 @@ class VMXTemplateParser extends lime_parser {
       'XOR' => 'r 46',
       '&&' => 'r 46',
       'AND' => 'r 46',
-      '?' => 's 24',
+      '?' => 'r 46',
       '==' => 'r 46',
       '!=' => 'r 46',
       '<' => 'r 46',
@@ -2162,33 +2161,7 @@ class VMXTemplateParser extends lime_parser {
       'name' => 's 80'
     ),
     array(
-      '..' => 'r 47',
-      '||' => 'r 47',
-      'OR' => 'r 47',
-      'XOR' => 'r 47',
-      '&&' => 'r 47',
-      'AND' => 'r 47',
-      '?' => 's 24',
-      '==' => 'r 47',
-      '!=' => 'r 47',
-      '<' => 'r 47',
-      '>' => 'r 47',
-      '<=' => 'r 47',
-      '>=' => 'r 47',
-      '+' => 'r 47',
-      '-' => 'r 47',
-      '&' => 'r 47',
-      '*' => 'r 47',
-      '/' => 'r 47',
-      '%' => 'r 47',
-      '-->' => 'r 47',
-      ':' => 'r 47',
-      ')' => 'r 47',
-      ',' => 'r 47',
-      '=>' => 'r 47',
-      ']' => 'r 47',
-      '}}' => 'r 47',
-      '}' => 'r 47'
+      '' => 'r 47'
     ),
     array(
       'exp' => 's 49',
@@ -2205,33 +2178,7 @@ class VMXTemplateParser extends lime_parser {
       'name' => 's 80'
     ),
     array(
-      '..' => 'r 48',
-      '||' => 'r 48',
-      'OR' => 'r 48',
-      'XOR' => 'r 48',
-      '&&' => 'r 48',
-      'AND' => 'r 48',
-      '?' => 's 24',
-      '==' => 'r 48',
-      '!=' => 'r 48',
-      '<' => 'r 48',
-      '>' => 'r 48',
-      '<=' => 'r 48',
-      '>=' => 'r 48',
-      '+' => 'r 48',
-      '-' => 'r 48',
-      '&' => 'r 48',
-      '*' => 'r 48',
-      '/' => 'r 48',
-      '%' => 'r 48',
-      '-->' => 'r 48',
-      ':' => 'r 48',
-      ')' => 'r 48',
-      ',' => 'r 48',
-      '=>' => 'r 48',
-      ']' => 'r 48',
-      '}}' => 'r 48',
-      '}' => 'r 48'
+      '' => 'r 48'
     ),
     array(
       'exp' => 's 51',
@@ -2248,33 +2195,7 @@ class VMXTemplateParser extends lime_parser {
       'name' => 's 80'
     ),
     array(
-      '..' => 'r 49',
-      '||' => 'r 49',
-      'OR' => 'r 49',
-      'XOR' => 'r 49',
-      '&&' => 'r 49',
-      'AND' => 'r 49',
-      '?' => 's 24',
-      '==' => 'r 49',
-      '!=' => 'r 49',
-      '<' => 'r 49',
-      '>' => 'r 49',
-      '<=' => 'r 49',
-      '>=' => 'r 49',
-      '+' => 'r 49',
-      '-' => 'r 49',
-      '&' => 'r 49',
-      '*' => 'r 49',
-      '/' => 'r 49',
-      '%' => 'r 49',
-      '-->' => 'r 49',
-      ':' => 'r 49',
-      ')' => 'r 49',
-      ',' => 'r 49',
-      '=>' => 'r 49',
-      ']' => 'r 49',
-      '}}' => 'r 49',
-      '}' => 'r 49'
+      '' => 'r 49'
     ),
     array(
       '' => 'r 50'
@@ -5083,5 +5004,5 @@ class VMXTemplateParser extends lime_parser {
   );
 }
 
-// Time: 0.24801301956177 seconds
-// Memory: 9131704 bytes
+// Time: 0.23838210105896 seconds
+// Memory: 9123800 bytes
